@@ -1,0 +1,17 @@
+# Credentials and secrets
+*.token*
+*.credentials*
+auth.json
+.credentials.json
+
+# Agent runtime state
+session-state/
+cache/
+*.jsonl
+stats-cache.json
+mcp-needs-auth-cache.json
+version.json
+models_cache.json
+
+# Local/machine-specific settings
+settings.local.json
