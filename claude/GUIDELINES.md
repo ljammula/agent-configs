@@ -1,17 +1,6 @@
----
-name: karpathy-guidelines
-description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
-user-invocable: false
-license: MIT
----
-
-# Karpathy Guidelines
+# Karpathy Coding Guidelines
 
 Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
-
-When this skill fires, acknowledge it in one sentence and proceed with the guidelines in effect:
-
-> "Applying Karpathy guidelines: surgical changes only, minimum code, surface assumptions before coding."
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
@@ -74,3 +63,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+Source: [Andrej Karpathy Skills](https://github.com/forrestchang/andrej-karpathy-skills)
