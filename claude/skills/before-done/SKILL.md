@@ -83,11 +83,12 @@ Screenshots land in `test-results/preview-*.png` — read them to verify the UI 
 Run these after any git or GitHub operation.
 
 ### 5. Commits and worktree
+
+Deterministic — run the bundled script (checks last commits, dirty worktree, push reached remote):
 ```bash
-rtk git log --oneline -3              # commit exists with correct message
-rtk git status                        # no dirty or untracked files left behind
-rtk git log --remotes --oneline -3   # push actually reached remote
+~/.claude/skills/before-done/scripts/verify-git.sh
 ```
+Non-zero exit = not done; the output says which check failed.
 
 ### 6. PR creation
 ```bash
@@ -97,58 +98,31 @@ Return the URL explicitly. Do not report "PR created" without showing it.
 
 ### 7. CI status
 
-**Get the run ID first**, then poll it directly — `gh pr checks` often shows "no checks" even when a run is in flight:
+Deterministic — the bundled script finds the latest run, watches it to completion, and prints the conclusion per job (do not use `gh pr checks` — it often shows "no checks" while a run is in flight):
 ```bash
-gh run list --repo ljammula/personal-assistant --limit 5
-gh run view <run-id> --repo ljammula/personal-assistant --json status,conclusion,jobs
+~/.claude/skills/before-done/scripts/check-ci.sh ljammula/personal-assistant [branch]
 ```
-
-Poll until `"status":"completed"`, then check `"conclusion"`. Do not describe what CI *should* show — fetch what it *does* show. If `conclusion` is `success` and all jobs are `success`/`skipped`, CI passes.
-
-If `gh pr checks` returns "no checks reported", check `gh run list` for a run on the branch/commit — it may just be queued or in progress.
+Exit 0 = CI passes. Do not describe what CI *should* show — report what the script printed.
 
 ### 8. Review threads — check AND resolve
 
-> **⚠️ REQUIRES EXPLICIT USER APPROVAL** — resolving threads switches GitHub auth accounts (`narsimha-j`). Do not execute the mutation below unless the user has asked you to resolve threads in this session.
-
-Check for unresolved threads:
+Deterministic — the bundled script lists unresolved threads (read-only):
 ```bash
-gh api graphql -f query='
-{
-  repository(owner: "OWNER", name: "REPO") {
-    pullRequest(number: NUMBER) {
-      reviewThreads(first: 20) {
-        nodes { id isResolved comments(first:1) { nodes { body path } } }
-      }
-    }
-  }
-}'
+~/.claude/skills/before-done/scripts/check-threads.sh OWNER REPO NUMBER
 ```
 
-**After fixing issues from a review thread, resolve it** — do not just comment. Use `narsimha-j` to resolve (same account used for reviews):
+**After fixing issues from a review thread, resolve it** — do not just comment. Use `narsimha-j` to resolve (same account used for reviews), then switch back:
 ```bash
 gh auth switch --user narsimha-j
 gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"THREAD_ID\"}) { thread { isResolved } } }"
 gh auth switch --user ljammula
 ```
 
-Zero unresolved = done. Any unresolved = not done.
+Only resolve threads whose issues you actually fixed in this session. Re-run the check script after — zero unresolved = done. Any unresolved = not done.
 
 ### 9. Rebase conflicts — branch already partially merged
 
-> **⚠️ REQUIRES EXPLICIT USER APPROVAL** — this section ends with `git push origin HEAD --force`. Do not execute it autonomously. Describe the situation to the user and wait for confirmation before running any `--force` command.
-
-When a feature branch has commits that were squash-merged to main (common after PR #N merges while you're still working), `git rebase origin/main` will hit conflicts on the already-merged commits. The correct fix:
-```bash
-git rebase --abort
-git checkout -b <branch>-rebased origin/main
-git cherry-pick <only-new-commit-sha> [<only-new-commit-sha-2>]
-git checkout <original-branch>
-git reset --hard <branch>-rebased
-git branch -D <branch>-rebased
-git push origin HEAD --force
-```
-Only cherry-pick commits that are genuinely new (not already in main). Check with `git log origin/main..HEAD` before deciding which commits to carry.
+If `git rebase origin/main` hits conflicts on commits that were already squash-merged, do not attempt recovery here — it ends in a force push. Report the situation and point the user to `/pr-remediate` (Runbook 2).
 
 ---
 
@@ -180,8 +154,9 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |
 | `Bash` + `flutter test --concurrency=2` | Phase 1 full test suite (RPi safe) |
 | `Bash` + `flutter test --update-goldens` | Phase 1 golden image refresh |
-| `Bash` + `rtk git log / rtk git status` | Phase 2 commit and push confirmation |
-| `Bash` + `gh run list / gh run view` | Phase 2 CI status (prefer over `gh pr checks`) |
+| `Bash` + `scripts/verify-git.sh` | Phase 2 commit and push confirmation |
+| `Bash` + `scripts/check-ci.sh` | Phase 2 CI status (prefer over `gh pr checks`) |
+| `Bash` + `scripts/check-threads.sh` | Phase 2 unresolved-thread check |
 | `Bash` + `gh api graphql resolveReviewThread` | Phase 2 thread resolution via narsimha-j |
 | `WebFetch` | Fallback when `gh` CLI lacks access or user pastes a raw URL |
 | `Bash` + `make serve-local` + `playwright test` | Phase 1 local preview check for Flutter UI changes |

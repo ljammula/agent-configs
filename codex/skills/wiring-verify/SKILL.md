@@ -99,12 +99,7 @@ Match indentation, naming convention, and comment style from existing entries.
 
 ## Step 6 — Compile/analyze check
 
-```bash
-make lint 2>&1 | tail -20
-# or: go build ./..., dart analyze, tsc --noEmit
-```
-
-If it fails, fix before reporting done.
+Run the `before-done` skill's Phase 1 lint check — the lint logic lives there, not here. If it fails, fix before reporting done.
 
 ---
 

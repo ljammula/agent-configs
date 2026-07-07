@@ -125,16 +125,7 @@ Use the existing entries in that file as a template for the stub — match inden
 
 ## Step 6 — Compile/analyze check
 
-After reporting (and optionally after stubs are applied):
-
-```bash
-# Run whatever the project uses to verify correctness
-# Check CLAUDE.md "Commands" section for the right command
-make lint 2>&1 | tail -20
-# or: go build ./..., dart analyze, tsc --noEmit, etc.
-```
-
-If it fails, fix before reporting done.
+After reporting (and optionally after stubs are applied), run the `before-done` skill's Phase 1 lint check — the lint logic lives there, not here. If it fails, fix before reporting done.
 
 ---
 

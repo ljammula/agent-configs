@@ -13,8 +13,10 @@ agent-configs/
 │   ├── hooks/
 │   │   └── rtk-rewrite.sh    # PreToolUse hook: rewrites Bash commands via rtk
 │   └── skills/
-│       ├── before-done/       # Completion gate: lint, spec, CI, review threads
+│       ├── before-done/       # Completion gate: lint, spec, CI, review threads (+ scripts/)
+│       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
+│       ├── pr-remediate/      # Force-push rebase recovery (user-triggered only)
 │       └── wiring-verify/    # N-step feature wiring completeness checker
 │
 ├── codex/                     # OpenAI Codex CLI — ~/.codex/
@@ -22,7 +24,9 @@ agent-configs/
 │   ├── RTK.md                 # RTK token-killer reference for Codex
 │   └── skills/
 │       ├── before-done/
+│       ├── docs-verify/
 │       ├── karpathy-guidelines/
+│       ├── pr-remediate/
 │       └── wiring-verify/
 │
 └── copilot/                   # GitHub Copilot CLI — ~/.copilot/ + ~/.github/
@@ -50,10 +54,16 @@ agent-configs/
 ## Skills
 
 ### before-done
-Completion gate that runs before reporting any task done. Checks lint, spec docs, duplicate UI, test suite, CI status, and review threads.
+Completion gate that runs before reporting any task done. Checks lint, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
+
+### docs-verify
+Generate-and-verify for documentation changes: apply the edit, then prove it landed — `check-links.sh` verifies every URL responds, `check-stale-terms.sh` verifies terminology renames swept clean, plus a semantic consistency pass.
 
 ### karpathy-guidelines
 Coding discipline rules: think before coding, simplicity first, surgical changes, goal-driven execution with verifiable success criteria.
+
+### pr-remediate
+Recovery runbook for a branch partially squash-merged to main; ends in a force push, so it is user-triggered only (`disable-model-invocation: true` in the Claude variant).
 
 ### wiring-verify
 Verifies that every step in a documented N-step feature wiring pattern exists in code. Generates stubs for missing steps.

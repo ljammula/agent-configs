@@ -73,11 +73,11 @@ Do not say "open http://localhost:3000" until Playwright confirms it passes.
 ## Phase 2 — External State (after GitHub/git actions)
 
 ### 5. Commits and worktree
+Deterministic — bundled script checks last commits, dirty worktree, push reached remote:
 ```bash
-rtk git log --oneline -3
-rtk git status
-rtk git log --remotes --oneline -3
+~/.codex/skills/before-done/scripts/verify-git.sh
 ```
+Non-zero exit = not done; the output says which check failed.
 
 ### 6. PR creation
 ```bash
@@ -86,30 +86,20 @@ gh pr view <number> --repo <owner>/<repo>
 Return the URL explicitly. Do not report "PR created" without showing it.
 
 ### 7. CI status
+Deterministic — bundled script finds the latest run, watches it to completion, prints per-job conclusions:
 ```bash
-gh run list --repo ljammula/personal-assistant --limit 5
-gh run view <run-id> --repo ljammula/personal-assistant --json status,conclusion,jobs
+~/.codex/skills/before-done/scripts/check-ci.sh ljammula/personal-assistant [branch]
 ```
-Poll until `"status":"completed"`. Do not describe what CI *should* show — fetch what it *does* show.
+Exit 0 = CI passes. Do not describe what CI *should* show — report what the script printed.
 
 ### 8. Review threads — check AND resolve
 
-> **⚠️ REQUIRES EXPLICIT USER APPROVAL** — resolving threads switches GitHub auth accounts (`narsimha-j`). Do not execute the mutation below unless the user has asked you to resolve threads in this session.
-
+Deterministic check — bundled script lists unresolved threads:
 ```bash
-gh api graphql -f query='
-{
-  repository(owner: "OWNER", name: "REPO") {
-    pullRequest(number: NUMBER) {
-      reviewThreads(first: 20) {
-        nodes { id isResolved comments(first:1) { nodes { body path } } }
-      }
-    }
-  }
-}'
+~/.codex/skills/before-done/scripts/check-threads.sh OWNER REPO NUMBER
 ```
 
-To resolve:
+After fixing issues from a review thread, resolve it — do not just comment. Only resolve threads whose issues were actually fixed this session. Use `narsimha-j`, then switch back:
 ```bash
 gh auth switch --user narsimha-j
 gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"THREAD_ID\"}) { thread { isResolved } } }"
@@ -118,17 +108,7 @@ gh auth switch --user ljammula
 
 ### 9. Rebase conflicts — branch already partially merged
 
-> **⚠️ REQUIRES EXPLICIT USER APPROVAL** — this section ends with `git push origin HEAD --force`. Do not execute it autonomously. Describe the situation to the user and wait for confirmation before running any `--force` command.
-
-```bash
-git rebase --abort
-git checkout -b <branch>-rebased origin/main
-git cherry-pick <only-new-commit-sha>
-git checkout <original-branch>
-git reset --hard <branch>-rebased
-git branch -D <branch>-rebased
-git push origin HEAD --force
-```
+If `git rebase origin/main` hits conflicts on commits that were already squash-merged, do not attempt recovery here — it ends in a force push. Report the situation and point the user to the `pr-remediate` skill (user-triggered only).
 
 ---
 
