@@ -76,10 +76,12 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 
 **After any code change:**
 1. Run lint: `make lint` (or `dart analyze` / `golangci-lint run` scoped)
-2. Check for a spec doc: `ls docs/specs/ && cat docs/specs/<feature>.md` — run the bash step, don't recall from memory
-3. For UI changes: scan for duplicate buttons/FABs/actions on the same screen
-4. Run adjacent tests: `cd frontend && flutter test --concurrency=4`
-5. For Flutter UI changes: `make serve-local` + Playwright smoke before sharing a URL
+2. Format check: `make fmt && git diff --stat` — must show no changes (lint doesn't catch format drift)
+3. L10n (Flutter changes): every new user-facing string keyed in all 6 `.arb` files (en/hi/kn/ml/ta/te) — no hardcoded `Text('...')`, snackbars, or error strings
+4. Check for a spec doc: `ls docs/specs/ && cat docs/specs/<feature>.md` — run the bash step, don't recall from memory
+5. For UI changes: scan for duplicate buttons/FABs/actions on the same screen
+6. Run adjacent tests: `cd frontend && flutter test --concurrency=4`
+7. For Flutter UI changes: `make serve-local` + Playwright smoke before sharing a URL
 
 **After any git/GitHub action:**
 - Verify the commit exists: `git log --oneline -3` + `git status`
@@ -93,7 +95,8 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 
 **Output format:**
 ```
-✓ Lint passes
+✓ Lint passes, make fmt produced no diff
+✓ L10n: new strings keyed in all 6 .arb files
 ✓ Spec verified / no spec found
 ✓ No redundant UI
 ✓ Tests pass (N/N, --concurrency=4)
@@ -105,6 +108,33 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 If any item is `✗`, do not say "done." Fix it or surface it explicitly.
 
 ---
+
+## Feature Dev — spec to ship
+
+For any multi-file feature work:
+1. Spec first: `ls docs/specs/ docs/*roadmap*` — read it before coding; propose a short spec if none exists for a non-trivial feature
+2. Branch: `feat/<slug>` from a fresh `main` (multi-file changes always go through a PR)
+3. Implement surgically; run the wiring checklist for gated features
+4. Localization sweep before committing: new keys in all 6 `.arb` files, no hardcoded strings
+5. `make verify` (fmt + lint + all tests), then PR → Before Done Gate → Self-Review
+6. After merge: mark the roadmap item shipped (`docs:` commit) — a feature is done when the roadmap reflects it
+
+## Frontend Dev — Flutter
+
+- **Red/green TDD**: write the failing bloc/widget test first, watch it fail, then implement. Tests written after get bent to match the code.
+- **State management**: BLoC for checklists/reminders/chat; ChangeNotifier for notes/routines/habits/mood/household. Extend the existing pattern, never introduce a new one.
+- **List interactions**: test which item was affected (by id, not index) and the list order afterward; interactive tiles need `ValueKey(item.id)`.
+- **Goldens**: `flutter test --update-goldens test/features/<feature>/` after widget changes, then full suite clean.
+- **Verify visually**: read the Playwright screenshots in `test-results/preview-*.png` — a passing suite is not visual confirmation.
+
+## Backend Dev — Go
+
+- **Red/green TDD**: failing table-driven test first (`go test ./internal/<pkg>/... -run TestName -v`), then implement; test error paths, not just happy paths.
+- **Layering**: repositories return sentinel errors (`ErrNotFound`); handlers map them to status codes; services are stateless, DI in `cmd/server/main.go`.
+- **Fallback chain**: item lookups check private → household → user-share collections in order; new item-scoped endpoints must do the same.
+- **API contract**: changing a response shape? Grep `frontend/lib/` for the endpoint and field names; update Dart models in the same branch.
+- **Fail closed**: internal endpoints reject when their secret is unset; SSRF guards on user-supplied URLs; explicit CORS allowlist; new route groups verified with a token-less curl (expect 401).
+- **Race**: `go test -race` on anything touching goroutines.
 
 ## Wiring Verify
 

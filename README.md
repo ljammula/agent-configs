@@ -14,8 +14,11 @@ agent-configs/
 │   │   ├── rtk-rewrite.sh    # PreToolUse hook: rewrites Bash commands via rtk
 │   │   └── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
 │   └── skills/
-│       ├── before-done/       # Completion gate: lint, spec, CI, review threads (+ scripts/)
+│       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
+│       ├── before-done/       # Completion gate: lint, fmt, l10n, spec, CI, review threads (+ scripts/)
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
+│       ├── feature-dev/       # Spec-to-ship feature workflow: spec, branch, l10n, PR, roadmap
+│       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
 │       ├── pr-remediate/      # Force-push rebase recovery (user-triggered only)
 │       ├── release/           # Tag-driven deploy: verify, semver tag, watch CI, smoke prod
@@ -26,8 +29,11 @@ agent-configs/
 │   ├── AGENTS.md              # Global instructions for Codex
 │   ├── RTK.md                 # RTK token-killer reference for Codex
 │   └── skills/
+│       ├── backend-dev/
 │       ├── before-done/
 │       ├── docs-verify/
+│       ├── feature-dev/
+│       ├── frontend-dev/
 │       ├── karpathy-guidelines/
 │       ├── pr-remediate/
 │       ├── release/
@@ -59,11 +65,20 @@ agent-configs/
 
 ## Skills
 
+### backend-dev
+Go backend discipline: red/green table-driven TDD, handler→service→repository layering with sentinel errors, the private→household→share fallback chain, API-contract sync with Flutter models, and fail-closed security defaults (secrets, SSRF, CORS, auth).
+
 ### before-done
-Completion gate that runs before reporting any task done. Checks lint, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
+Completion gate that runs before reporting any task done. Checks lint, format cleanliness (`make fmt`), l10n key parity across all `.arb` files, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
 
 ### docs-verify
 Generate-and-verify for documentation changes: apply the edit, then prove it landed — `check-links.sh` verifies every URL responds, `check-stale-terms.sh` verifies terminology renames swept clean, plus a semantic consistency pass.
+
+### feature-dev
+Spec-to-ship feature workflow codified from project history: read the spec/roadmap before coding, branch, implement surgically, localization sweep, `make verify`, PR, self-review, and mark the roadmap item shipped after merge.
+
+### frontend-dev
+Flutter discipline: red/green TDD with bloc and widget tests, correct state-management choice (BLoC vs ChangeNotifier), list-ordering and item-identity tests, golden refresh, l10n completeness, and visual verification via local-preview screenshots.
 
 ### karpathy-guidelines
 Coding discipline rules: think before coding, simplicity first, surgical changes, goal-driven execution with verifiable success criteria.

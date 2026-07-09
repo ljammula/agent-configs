@@ -29,6 +29,24 @@ cd backend && golangci-lint run   # backend only
 ```
 Do not skip because "it's a small change." Lint failures are the most common user follow-up.
 
+**Format too** — lint does not catch format drift:
+```bash
+make fmt && git diff --stat   # must show no changes from fmt
+```
+
+### 1b. Localization — any new user-facing string (Flutter changes)
+
+New strings must use l10n keys present in **all** `.arb` files:
+```bash
+cd frontend/lib/l10n
+for key in $(git diff main -- app_en.arb | grep '^+ *"' | grep -v '^+ *"@' | cut -d'"' -f2); do
+  for f in app_hi.arb app_kn.arb app_ml.arb app_ta.arb app_te.arb; do
+    grep -q "\"$key\"" "$f" || echo "MISSING: $key in $f"
+  done
+done
+```
+Zero `MISSING` lines = pass. Also grep the diff for hardcoded `Text('...')` in changed widgets.
+
 ### 2. Spec doc — lookup is deterministic, gap detection is AI judgment
 
 ```bash
@@ -115,7 +133,8 @@ If `git rebase origin/main` hits conflicts on commits that were already squash-m
 ## Output Format
 
 ```
-✓ Lint passes
+✓ Lint passes, make fmt produced no diff
+✓ L10n: new strings keyed in all 6 .arb files  ← Flutter changes only
 ✓ No spec doc found / Spec verified — implementation matches
 ✓ No redundant UI introduced
 ✓ Adjacent features unaffected (N/N tests, --concurrency=4)
