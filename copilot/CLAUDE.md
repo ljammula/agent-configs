@@ -117,3 +117,27 @@ After adding any feature with a documented N-step pattern (feature flags, routes
 5. Run `make lint` after applying stubs
 
 Trigger when: "check the wiring for X", "did I wire everything for X", or after adding a feature that has a multi-step checklist in the project docs.
+
+---
+
+## Release
+
+Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run. Any ✗ = release not done.
+
+1. Preflight: `git switch main && git pull`; worktree clean; `make verify` passes
+2. Version: patch by default, minor if any `feat:` since last tag, major only on explicit request — state the reasoning
+3. Tag as ljammula: `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. Watch: `gh run watch <run-id> --exit-status` on the deploy workflow. On failure: do NOT delete/re-push the tag — report and stop
+5. Smoke: `make test-e2e` against production
+
+---
+
+## Self-Review
+
+Two-account flow: `ljammula` authors, `narsimha-j` reviews. Invariant: session ends with `ljammula` active — every exit path restores it.
+
+1. `gh auth switch --user narsimha-j`
+2. Review `gh pr diff <N>`: correctness bugs → surgical scope → simplicity → project conventions
+3. Post findings as inline comments; submit as `COMMENT` while findings are open
+4. When clean or all findings fixed: `gh pr review <N> --approve` (always APPROVE, never bare COMMENT)
+5. Unconditional: `gh auth switch --user ljammula` and confirm with `gh auth status` — even after errors
