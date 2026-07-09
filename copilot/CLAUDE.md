@@ -78,7 +78,7 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 1. Run lint: `make lint` (or `dart analyze` / `golangci-lint run` scoped)
 2. Check for a spec doc: `ls docs/specs/ && cat docs/specs/<feature>.md` — run the bash step, don't recall from memory
 3. For UI changes: scan for duplicate buttons/FABs/actions on the same screen
-4. Run adjacent tests: `cd frontend && flutter test --concurrency=2`
+4. Run adjacent tests: `cd frontend && flutter test --concurrency=4`
 5. For Flutter UI changes: `make serve-local` + Playwright smoke before sharing a URL
 
 **After any git/GitHub action:**
@@ -96,7 +96,7 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 ✓ Lint passes
 ✓ Spec verified / no spec found
 ✓ No redundant UI
-✓ Tests pass (N/N, --concurrency=2)
+✓ Tests pass (N/N, --concurrency=4)
 ✓ Commit abc1234 — worktree clean
 ✓ PR #N — https://github.com/.../pull/N
 ✓ CI: all jobs success

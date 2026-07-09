@@ -48,15 +48,15 @@ After adding a button, FAB, action, or link — scan the same screen/widget for 
 ### 4. Adjacent features
 After any feature change, explicitly ask: could this have broken a nearby flow? Run the Flutter test suite or spot-check the affected widget/handler.
 
-**Flutter tests — always use `--concurrency=2`** on this machine (4-core RPi, 8 GB RAM).
+**Flutter tests — use `--concurrency=4`** (matches `make test-frontend`).
 ```bash
-cd frontend && flutter test --concurrency=2
+cd frontend && flutter test --concurrency=4
 ```
 
 **Golden test failures** land in `test/**/failures/` directories. After any widget change:
 ```bash
 cd frontend && flutter test --update-goldens test/features/<changed_feature>/
-cd frontend && flutter test --concurrency=2
+cd frontend && flutter test --concurrency=4
 ```
 
 ### 5. Local preview — Flutter UI changes only
@@ -118,7 +118,7 @@ If `git rebase origin/main` hits conflicts on commits that were already squash-m
 ✓ Lint passes
 ✓ No spec doc found / Spec verified — implementation matches
 ✓ No redundant UI introduced
-✓ Adjacent features unaffected (N/N tests, --concurrency=2)
+✓ Adjacent features unaffected (N/N tests, --concurrency=4)
 ✓ Local preview: 5/5 Playwright pass  ← Flutter UI changes only
 ✓ Commit abc1234 — "fix: correct message", worktree clean
 ✓ PR #N open — https://github.com/.../pull/N

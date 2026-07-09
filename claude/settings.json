@@ -3,6 +3,7 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -10,7 +11,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/kanna/.claude/hooks/rtk-rewrite.sh"
+            "command": "/Users/kanna/.claude/hooks/rtk-rewrite.sh"
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | { read -r cmd; cmd=\"${cmd#rtk }\"; echo \"$cmd\" | grep -qE '^git (commit|add)' && git_dir=$(git rev-parse --git-dir 2>/dev/null) && [ -n \"$git_dir\" ] && [ -f \"$git_dir/index.lock\" ] && rm -f \"$git_dir/index.lock\"; } 2>/dev/null || true"
           }
         ]
       }
@@ -21,17 +26,22 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/kanna/.claude/hooks/format-on-edit.sh 2>/dev/null || true",
+            "command": "/Users/kanna/.claude/hooks/format-on-edit.sh 2>/dev/null || true",
             "statusMessage": "Formatting edited file"
           }
         ]
       }
     ]
   },
+  "worktree": {
+    "bgIsolation": "worktree"
+  },
+  "enableWorkflows": true,
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "andrej-karpathy-skills@multica-ai": true
   },
   "effortLevel": "medium",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "auto"
 }

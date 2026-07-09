@@ -48,15 +48,15 @@ After adding a button, FAB, action, or link — scan the same screen/widget for 
 ### 4. Adjacent features
 After any feature change, explicitly ask: could this have broken a nearby flow? Run the Flutter test suite or spot-check the affected widget/handler. The user has asked "did you double check other features?" as a correction multiple times.
 
-**Flutter tests — always use `--concurrency=2`** on this machine (4-core RPi, 8 GB RAM). `--concurrency=4` risks OOM; the default is also too high.
+**Flutter tests — use `--concurrency=4`** (matches `make test-frontend`).
 ```bash
-cd frontend && flutter test --concurrency=2
+cd frontend && flutter test --concurrency=4
 ```
 
 **Golden test failures** land in `test/**/failures/` directories (gitignored). After any widget change, run `--update-goldens` on affected test dirs, then re-run the full suite to confirm clean:
 ```bash
 cd frontend && flutter test --update-goldens test/features/<changed_feature>/
-cd frontend && flutter test --concurrency=2
+cd frontend && flutter test --concurrency=4
 ```
 
 **Time-dependent tests**: any test that schedules events at fixed clock times (e.g. `DateTime(now.year, now.month, now.day, 9)`) will fail once that time passes. Use relative times (`DateTime.now().add(Duration(...))`) instead.
@@ -65,7 +65,7 @@ cd frontend && flutter test --concurrency=2
 After any change to `frontend/lib/` (widgets, screens, navigation), rebuild the local preview and run the Playwright smoke suite before sharing the URL with the user.
 
 ```bash
-# Rebuild Flutter web with current code (takes ~2 min on Pi)
+# Rebuild Flutter web with current code (takes ~2 min)
 make serve-local   # backend + build + SW + serve at http://localhost:3000
 
 # Verify — must be 5/5 pass, zero auth errors
@@ -134,7 +134,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 ✓ Lint passes
 ✓ No spec doc found / Spec verified — implementation matches
 ✓ No redundant UI introduced
-✓ Adjacent features unaffected (959/959 tests, --concurrency=2)
+✓ Adjacent features unaffected (959/959 tests, --concurrency=4)
 ✓ Local preview: 5/5 Playwright pass, screenshots verified  ← Flutter UI changes only
 ✓ Commit abc1234 — "fix: correct message", worktree clean
 ✓ PR #92 open — https://github.com/.../pull/92
@@ -152,7 +152,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 |---|---|
 | `Bash` + `make lint` / `dart analyze` | Phase 1 lint check |
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |
-| `Bash` + `flutter test --concurrency=2` | Phase 1 full test suite (RPi safe) |
+| `Bash` + `flutter test --concurrency=4` | Phase 1 full test suite |
 | `Bash` + `flutter test --update-goldens` | Phase 1 golden image refresh |
 | `Bash` + `scripts/verify-git.sh` | Phase 2 commit and push confirmation |
 | `Bash` + `scripts/check-ci.sh` | Phase 2 CI status (prefer over `gh pr checks`) |
