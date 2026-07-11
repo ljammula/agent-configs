@@ -16,6 +16,7 @@ agent-configs/
 │   └── skills/
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
 │       ├── before-done/       # Completion gate: lint, fmt, l10n, spec, CI, review threads (+ scripts/)
+│       ├── dispatch-local/    # Delegate mechanical coding tasks to a local model, machine-conditional
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
 │       ├── feature-dev/       # Spec-to-ship feature workflow: spec, branch, l10n, PR, roadmap
 │       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
@@ -70,6 +71,9 @@ Go backend discipline: red/green table-driven TDD, handler→service→repositor
 
 ### before-done
 Completion gate that runs before reporting any task done. Checks lint, format cleanliness (`make fmt`), l10n key parity across all `.arb` files, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
+
+### dispatch-local
+Delegate mechanical, well-specified coding tasks to a locally-served model via Aider, then review the diff. Machine-conditional — only applies where a local model-serving stack (e.g. `ai-stack`) and its `dispatch_local.sh` script are present; checks for that before running.
 
 ### docs-verify
 Generate-and-verify for documentation changes: apply the edit, then prove it landed — `check-links.sh` verifies every URL responds, `check-stale-terms.sh` verifies terminology renames swept clean, plus a semantic consistency pass.
