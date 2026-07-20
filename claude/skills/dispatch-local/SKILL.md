@@ -10,7 +10,13 @@ description: >
   model do this", or when a task is boilerplate/pattern-following enough
   that a smaller/local model can execute it under supervision (scaffolding,
   repetitive edits, test-writing from a clear spec) rather than needing your
-  own judgment throughout.
+  own judgment throughout. Also trigger for high-volume, low-judgment
+  generation where the pattern is obvious and Claude reviewing N instances
+  is faster than Claude writing them: test fixtures, mock data, repetitive
+  table-driven test cases, i18n string stubs. This is the same
+  planner/executor split, just applied to volume instead of edits -- write
+  one exemplar plus a tight spec, dispatch, then spot-check the output the
+  same way you'd review a diff.
 ---
 
 # Dispatch Local

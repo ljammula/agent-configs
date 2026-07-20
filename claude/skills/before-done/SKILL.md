@@ -16,6 +16,16 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 
 ---
 
+## Phase 0 — Local second opinion (optional, machine-conditional)
+
+On machines running the ai-stack local model (check: `curl -sf --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null`), pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
+
+```bash
+git diff | ~/.claude/skills/before-done/scripts/local-review.sh
+```
+
+This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." Skip silently if the port isn't reachable; this step never blocks completion.
+
 ## Phase 1 — Code Correctness (after any code change)
 
 Run these before touching GitHub or reporting completion. These are the checks Claude most commonly skips.
@@ -169,6 +179,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 
 | Tool | Used for |
 |---|---|
+| `Bash` + `scripts/local-review.sh` | Phase 0 local second opinion (optional, machine-conditional) |
 | `Bash` + `make lint` / `dart analyze` | Phase 1 lint check |
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |
 | `Bash` + `flutter test --concurrency=4` | Phase 1 full test suite |

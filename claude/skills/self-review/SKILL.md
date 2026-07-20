@@ -29,6 +29,14 @@ gh pr view <N> --repo ljammula/<repo>
 gh pr diff <N> --repo ljammula/<repo>
 ```
 
+**Optional local second opinion first** — on machines running the ai-stack local model (check: `curl -sf --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null`):
+
+```bash
+gh pr diff <N> --repo ljammula/<repo> | ~/.claude/skills/before-done/scripts/local-review.sh
+```
+
+Treat its output as candidates to check, not confirmed findings — verify each against the actual diff yourself before posting. It's a differently-trained pass that costs no cloud tokens, not a substitute for your own review. Skip silently if the port isn't reachable.
+
 Apply the karpathy-guidelines criteria, in priority order:
 1. Correctness bugs (logic, error handling, concurrency, edge cases)
 2. Surgical scope — changed lines that don't trace to the PR's stated purpose

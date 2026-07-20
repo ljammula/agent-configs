@@ -15,15 +15,17 @@ agent-configs/
 │   │   └── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
 │   └── skills/
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
-│       ├── before-done/       # Completion gate: lint, fmt, l10n, spec, CI, review threads (+ scripts/)
-│       ├── dispatch-local/    # Delegate mechanical coding tasks to a local model, machine-conditional
+│       ├── before-done/       # Completion gate: local review, lint, fmt, l10n, spec, CI, review threads (+ scripts/)
+│       ├── dispatch-local/    # Delegate mechanical/bulk-generation tasks to a local model, machine-conditional
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
 │       ├── feature-dev/       # Spec-to-ship feature workflow: spec, branch, l10n, PR, roadmap
 │       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
+│       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud WebSearch, machine-conditional
+│       ├── local-summarize/   # Triage large logs via local model before reading into context, machine-conditional
 │       ├── pr-remediate/      # Force-push rebase recovery (user-triggered only)
 │       ├── release/           # Tag-driven deploy: verify, semver tag, watch CI, smoke prod
-│       ├── self-review/       # Two-account PR review via narsimha-j, guaranteed switch-back
+│       ├── self-review/       # Two-account PR review via narsimha-j + optional local second opinion, guaranteed switch-back
 │       └── wiring-verify/    # N-step feature wiring completeness checker
 │
 ├── codex/                     # OpenAI Codex CLI — ~/.codex/
@@ -70,10 +72,16 @@ agent-configs/
 Go backend discipline: red/green table-driven TDD, handler→service→repository layering with sentinel errors, the private→household→share fallback chain, API-contract sync with Flutter models, and fail-closed security defaults (secrets, SSRF, CORS, auth).
 
 ### before-done
-Completion gate that runs before reporting any task done. Checks lint, format cleanliness (`make fmt`), l10n key parity across all `.arb` files, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
+Completion gate that runs before reporting any task done. Optionally opens with a local-model second opinion on the diff (`local-review.sh`, machine-conditional, evidence to triage not trust), then checks lint, format cleanliness (`make fmt`), l10n key parity across all `.arb` files, spec docs, duplicate UI, test suite, CI status, and review threads. Deterministic checks are bundled scripts (`verify-git.sh`, `check-ci.sh`, `check-threads.sh`); resolves fixed review threads via `narsimha-j`.
 
 ### dispatch-local
-Delegate mechanical, well-specified coding tasks to a locally-served model via Aider, then review the diff. Machine-conditional — only applies where a local model-serving stack (e.g. `ai-stack`) and its `dispatch_local.sh` script are present; checks for that before running.
+Delegate mechanical, well-specified coding tasks — or high-volume, low-judgment generation (fixtures, mock data, repetitive test cases) — to a locally-served model via Aider, then review the diff. Machine-conditional — only applies where a local model-serving stack (e.g. `ai-stack`) and its `dispatch_local.sh` script are present; checks for that before running.
+
+### local-search
+Route trivial, low-stakes lookups (API signatures, error messages, version/changelog checks) to a local SearXNG instance instead of cloud WebSearch. No local model in the loop — Claude reads and judges raw search results directly, so there's no logic-bug risk to weigh. Machine-conditional on the SearXNG port being reachable.
+
+### local-summarize
+Triage a large log/output/JSONL file through the local general-slot model before reading it into Claude's own context — flags line ranges worth a direct read rather than producing a trusted digest, since a hallucinated summary of a stack trace is worse than useless. Machine-conditional on the local model port being reachable.
 
 ### docs-verify
 Generate-and-verify for documentation changes: apply the edit, then prove it landed — `check-links.sh` verifies every URL responds, `check-stale-terms.sh` verifies terminology renames swept clean, plus a semantic consistency pass.
@@ -94,7 +102,7 @@ Recovery runbook for a branch partially squash-merged to main; ends in a force p
 End-to-end tag-driven deploy: preflight on a clean `main`, `make verify`, semver bump reasoned from commits since the last tag, push the tag, watch the deploy workflow, smoke-test production with `make test-e2e`. Deploy failures stop the flow without touching the tag.
 
 ### self-review
-Two-account PR review flow: switch to `narsimha-j`, review the diff (correctness → surgical scope → simplicity → conventions), post inline findings as `COMMENT`, approve only when clean, and unconditionally switch back to `ljammula` on every exit path.
+Two-account PR review flow: switch to `narsimha-j`, optionally get a local-model second opinion on the diff first (machine-conditional, candidates to verify not confirmed findings), review the diff (correctness → surgical scope → simplicity → conventions), post inline findings as `COMMENT`, approve only when clean, and unconditionally switch back to `ljammula` on every exit path.
 
 ### wiring-verify
 Verifies that every step in a documented N-step feature wiring pattern exists in code. Generates stubs for missing steps.
