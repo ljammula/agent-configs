@@ -2,6 +2,20 @@
 
 Agent instructions and skills used on this machine, organized by agent.
 
+## Install
+
+```bash
+./install.sh            # symlink everything into ~/.claude, ~/.codex, ~/.copilot
+./install.sh --force     # also replace any existing file/dir at the target that isn't already linked here
+```
+
+Idempotent and safe to rerun anytime (e.g. after pulling new skills). Skill
+directories are symlinked whole — not just `SKILL.md` — so a skill's
+`scripts/` subdir and any future files in it are picked up automatically,
+with no separate sync step. Without `--force`, an existing real file/dir at
+a target path is left alone and reported as skipped, so it won't silently
+clobber machine-specific customizations.
+
 ## Structure
 
 ```
@@ -51,17 +65,19 @@ agent-configs/
 
 ## Install locations
 
-| File in repo | Symlink/copy target |
+`install.sh` is the source of truth for these; the table is a reference.
+
+| File/dir in repo | Symlink target |
 |---|---|
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
 | `claude/RTK.md` | `~/.claude/RTK.md` |
 | `claude/settings.json` | `~/.claude/settings.json` |
 | `claude/hooks/rtk-rewrite.sh` | `~/.claude/hooks/rtk-rewrite.sh` |
 | `claude/hooks/format-on-edit.sh` | `~/.claude/hooks/format-on-edit.sh` |
-| `claude/skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` |
+| `claude/skills/<name>/` (whole dir) | `~/.claude/skills/<name>` |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` |
 | `codex/RTK.md` | `~/.codex/RTK.md` |
-| `codex/skills/*/SKILL.md` | `~/.codex/skills/*/SKILL.md` |
+| `codex/skills/<name>/` (whole dir) | `~/.codex/skills/<name>` |
 | `copilot/CLAUDE.md` | `~/.copilot/CLAUDE.md` |
 | `copilot/copilot-instructions.md` | `~/.copilot-instructions.md` |
 | `copilot/github-copilot-instructions.md` | `~/.github/copilot-instructions.md` |
