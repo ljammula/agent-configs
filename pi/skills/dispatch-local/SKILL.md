@@ -2,21 +2,13 @@
 name: dispatch-local
 description: >
   Delegate a mechanical, well-specified coding task to a locally-served model
-  (via Aider) instead of doing the edit yourself, then review the diff it
-  produces. Only relevant on machines running a local model-serving stack
-  (e.g. ai-stack) with `scripts/dispatch_local.sh` present — check it exists
-  before using this skill. Trigger when the user says "use the local model
-  for this", "dispatch this to the local harness", "have Aider/the local
-  model do this", or when a task is boilerplate/pattern-following enough
-  that a smaller/local model can execute it under supervision (scaffolding,
-  repetitive edits, test-writing from a clear spec) rather than needing your
-  own judgment throughout. Also trigger for high-volume, low-judgment
-  generation where the pattern is obvious and Claude reviewing N instances
-  is faster than Claude writing them: test fixtures, mock data, repetitive
-  table-driven test cases, i18n string stubs. This is the same
-  planner/executor split, just applied to volume instead of edits -- write
-  one exemplar plus a tight spec, dispatch, then spot-check the output the
-  same way you'd review a diff.
+  (via Aider) instead of doing the edit yourself, then review the diff.
+  Only relevant on machines running a local model-serving stack (e.g.
+  ai-stack) with `scripts/dispatch_local.sh` present. Trigger when the user
+  says "use the local model for this" or "dispatch this to the local
+  harness", or for boilerplate/pattern-following or high-volume low-judgment
+  work (scaffolding, repetitive edits, test fixtures, i18n stubs) where
+  spot-checking output beats writing it yourself.
 ---
 
 # Dispatch Local
