@@ -48,6 +48,19 @@ for d in "$REPO_ROOT"/codex/skills/*/; do
   link "$REPO_ROOT/codex/skills/$name" "$HOME/.codex/skills/$name"
 done
 
+# Pi (skills auto-discover from ~/.pi/agent/skills/<name>/SKILL.md; extensions
+# from ~/.pi/agent/extensions/<name>.ts load unconditionally at startup, no
+# project trust required -- see pi/extensions/ai-stack-local.ts and
+# pi/extensions/karpathy-guardrail.ts)
+for d in "$REPO_ROOT"/pi/skills/*/; do
+  name="$(basename "$d")"
+  link "$REPO_ROOT/pi/skills/$name" "$HOME/.pi/agent/skills/$name"
+done
+for f in "$REPO_ROOT"/pi/extensions/*.ts; do
+  name="$(basename "$f")"
+  link "$REPO_ROOT/pi/extensions/$name" "$HOME/.pi/agent/extensions/$name"
+done
+
 # Copilot
 link "$REPO_ROOT/copilot/CLAUDE.md" "$HOME/.copilot/CLAUDE.md"
 link "$REPO_ROOT/copilot/copilot-instructions.md" "$HOME/.copilot-instructions.md"
