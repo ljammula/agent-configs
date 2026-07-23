@@ -55,7 +55,7 @@ Name variant generation is deterministic — use the bundled script:
 
 ```bash
 # Emits all 6 variants (snake, camel, Pascal, SCREAMING, getter, Feature constant)
-~/.codex/skills/wiring-verify/name-variants.sh <feature_name>
+~/.codex/skills/wiring-verify/scripts/name-variants.sh <feature_name>
 ```
 
 Then grep for each variant:

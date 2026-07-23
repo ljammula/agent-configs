@@ -46,16 +46,13 @@ make fmt && git diff --stat   # must show no changes from fmt
 
 ### 1b. Localization — any new user-facing string (Flutter changes)
 
-New strings must use l10n keys present in **all** `.arb` files. Hardcoded snackbar/error strings are a repeat fix-commit source:
+New strings must use l10n keys present in **all** `.arb` files. Hardcoded snackbar/error strings are a repeat fix-commit source.
+
+Deterministic — the bundled script checks both halves (every new `app_en.arb` key exists in every sibling locale, and no hardcoded user-facing string literals in the changed Dart):
 ```bash
-cd frontend/lib/l10n
-for key in $(git diff main -- app_en.arb | grep '^+ *"' | grep -v '^+ *"@' | cut -d'"' -f2); do
-  for f in app_hi.arb app_kn.arb app_ml.arb app_ta.arb app_te.arb; do
-    grep -q "\"$key\"" "$f" || echo "MISSING: $key in $f"
-  done
-done
+~/.claude/skills/before-done/scripts/check-l10n.sh [base_ref]
 ```
-Zero `MISSING` lines = pass. Also grep the diff for hardcoded `Text('...')` in changed widgets.
+Exit 0 = pass. Any `MISSING` or `HARDCODED` line = not done.
 
 ### 2. Spec doc — lookup is deterministic, gap detection is AI judgment
 
@@ -181,6 +178,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 |---|---|
 | `Bash` + `scripts/local-review.sh` | Phase 0 local second opinion (optional, machine-conditional) |
 | `Bash` + `make lint` / `dart analyze` | Phase 1 lint check |
+| `Bash` + `scripts/check-l10n.sh` | Phase 1 l10n key coverage + hardcoded-string scan |
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |
 | `Bash` + `flutter test --concurrency=4` | Phase 1 full test suite |
 | `Bash` + `flutter test --update-goldens` | Phase 1 golden image refresh |

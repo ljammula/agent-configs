@@ -4,9 +4,15 @@ description: >
   Review one of ljammula's PRs using the narsimha-j reviewer account, then guarantee
   the switch back to ljammula. Trigger on: "self review", "review the PR", "review PR #N",
   "approve the PR", or any review action that needs the narsimha-j account.
+  User-triggered only — invoke via /self-review.
+disable-model-invocation: true
 ---
 
 # Self-Review
+
+This skill **posts public review comments and approvals** and switches the machine-wide
+`gh` account. Never fire it as a side effect of another task — the user invokes it
+explicitly (`feature-dev` step 6 tells the user to run it; it does not auto-run).
 
 Two-account flow: `ljammula` authors, `narsimha-j` reviews. The invariant that must
 never break: **the session ends with `ljammula` active**, even if the review fails

@@ -21,7 +21,7 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 On machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
 
 ```bash
-git diff | ~/.claude/skills/before-done/scripts/local-review.sh
+git diff | ~/.pi/agent/skills/before-done/scripts/local-review.sh
 ```
 
 This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." If the port isn't reachable, say so in one line (e.g. `local ai-stack review model unreachable at ${AI_STACK_HOST:-127.0.0.1}:8080 - skipping local review`) and move on; it never blocks completion.
@@ -46,16 +46,13 @@ make fmt && git diff --stat   # must show no changes from fmt
 
 ### 1b. Localization — any new user-facing string (Flutter changes)
 
-New strings must use l10n keys present in **all** `.arb` files. Hardcoded snackbar/error strings are a repeat fix-commit source:
+New strings must use l10n keys present in **all** `.arb` files. Hardcoded snackbar/error strings are a repeat fix-commit source.
+
+Deterministic — the bundled script checks both halves (every new `app_en.arb` key exists in every sibling locale, and no hardcoded user-facing string literals in the changed Dart):
 ```bash
-cd frontend/lib/l10n
-for key in $(git diff main -- app_en.arb | grep '^+ *"' | grep -v '^+ *"@' | cut -d'"' -f2); do
-  for f in app_hi.arb app_kn.arb app_ml.arb app_ta.arb app_te.arb; do
-    grep -q "\"$key\"" "$f" || echo "MISSING: $key in $f"
-  done
-done
+~/.pi/agent/skills/before-done/scripts/check-l10n.sh [base_ref]
 ```
-Zero `MISSING` lines = pass. Also grep the diff for hardcoded `Text('...')` in changed widgets.
+Exit 0 = pass. Any `MISSING` or `HARDCODED` line = not done.
 
 ### 2. Spec doc — lookup is deterministic, gap detection is AI judgment
 
@@ -114,7 +111,7 @@ Run these after any git or GitHub operation.
 
 Deterministic — run the bundled script (checks last commits, dirty worktree, push reached remote):
 ```bash
-~/.claude/skills/before-done/scripts/verify-git.sh
+~/.pi/agent/skills/before-done/scripts/verify-git.sh
 ```
 Non-zero exit = not done; the output says which check failed.
 
@@ -128,7 +125,7 @@ Return the URL explicitly. Do not report "PR created" without showing it.
 
 Deterministic — the bundled script finds the latest run, watches it to completion, and prints the conclusion per job (do not use `gh pr checks` — it often shows "no checks" while a run is in flight):
 ```bash
-~/.claude/skills/before-done/scripts/check-ci.sh ljammula/personal-assistant [branch]
+~/.pi/agent/skills/before-done/scripts/check-ci.sh ljammula/personal-assistant [branch]
 ```
 Exit 0 = CI passes. Do not describe what CI *should* show — report what the script printed.
 
@@ -136,7 +133,7 @@ Exit 0 = CI passes. Do not describe what CI *should* show — report what the sc
 
 Deterministic — the bundled script lists unresolved threads (read-only):
 ```bash
-~/.claude/skills/before-done/scripts/check-threads.sh OWNER REPO NUMBER
+~/.pi/agent/skills/before-done/scripts/check-threads.sh OWNER REPO NUMBER
 ```
 
 **After fixing issues from a review thread, resolve it** — do not just comment. Use `narsimha-j` to resolve (same account used for reviews), then switch back:
@@ -181,6 +178,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 |---|---|
 | `Bash` + `scripts/local-review.sh` | Phase 0 local second opinion (optional, machine-conditional) |
 | `Bash` + `make lint` / `dart analyze` | Phase 1 lint check |
+| `Bash` + `scripts/check-l10n.sh` | Phase 1 l10n key coverage + hardcoded-string scan |
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |
 | `Bash` + `flutter test --concurrency=4` | Phase 1 full test suite |
 | `Bash` + `flutter test --update-goldens` | Phase 1 golden image refresh |

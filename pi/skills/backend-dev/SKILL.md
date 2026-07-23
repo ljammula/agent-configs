@@ -6,6 +6,7 @@ description: >
   fallback chain, feature-grant middleware, API-contract sync with Flutter models, and
   fail-closed security defaults. Trigger when writing or changing anything under
   backend/ — handlers, services, repositories, middleware, routes.
+user-invocable: false
 ---
 
 # Backend Dev — Go

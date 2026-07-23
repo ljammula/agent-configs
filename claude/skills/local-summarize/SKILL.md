@@ -19,33 +19,25 @@ than useless — the failure mode here isn't "wastes tokens," it's "sends
 Claude confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
-## Step 1 — check the general-slot model is reachable
-
-```bash
-curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8081/v1/models" >/dev/null && echo present
-```
-
-(`AI_STACK_HOST` points at a LAN-served stack when the instance isn't local,
-e.g. `192.168.1.233`; unset it defaults to localhost.)
-
-If absent (stack not running, or the general-slot model isn't the resident
-one right now — only one model pair can be resident at a time), this skill
-doesn't apply — tell the user in one line (e.g. `local ai-stack triage model
-unreachable at ${AI_STACK_HOST:-127.0.0.1}:8081 - reading the file directly`)
-and Read the file directly instead.
-
-## Step 2 — triage
+## Step 1 — triage
 
 ```bash
 ~/.claude/skills/local-summarize/scripts/triage.sh <file>
 ```
 
-Prints a line-number-referenced list of sections worth reading in full
+The script does its own reachability check -- do not pre-flight it with a
+separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
+instance isn't local, e.g. `192.168.1.233`; unset it defaults to localhost.)
+If it exits `not reachable` — the stack is down, or the general-slot model
+isn't the resident one right now (only one model pair can be resident at a
+time) — relay that one line and Read the file directly instead.
+
+Otherwise it prints a line-number-referenced list of sections worth reading in full
 (`lines N-M: why it matters`), or `no notable sections` if nothing stood
 out. Files over ~60k chars are truncated before triage — for anything
 larger, triage in chunks rather than trusting a single pass covered it.
 
-## Step 3 — read the flagged sections yourself
+## Step 2 — read the flagged sections yourself
 
 ```bash
 Read <file> offset=<N> limit=<M-N+1>

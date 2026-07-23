@@ -7,6 +7,7 @@ description: >
   verification via local preview before claiming a UI change works. Trigger when
   writing or changing anything under frontend/lib/ — widgets, screens, blocs,
   notifiers, navigation.
+user-invocable: false
 ---
 
 # Frontend Dev — Flutter
@@ -48,9 +49,13 @@ tapping one habit checking another). For any list mutation:
 
 ## 4. Localization — no hardcoded user-facing strings
 
-Every string a user sees goes through l10n and into **all six** `.arb` files
-(`en`, `hi`, `kn`, `ml`, `ta`, `te`) — including snackbars, error messages, and
-empty states, the three repeat offenders.
+Every string a user sees goes through l10n and into **every** `.arb` file — including
+snackbars, error messages, and empty states, the three repeat offenders. Verify with
+the shared script rather than by eye:
+
+```bash
+~/.pi/agent/skills/before-done/scripts/check-l10n.sh
+```
 
 ## 5. Feature gating
 

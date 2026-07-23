@@ -22,33 +22,23 @@ and Claude reads and judges them exactly as it would WebSearch output.
 There's no logic-bug risk to reason about here, unlike other ai-stack
 skills.
 
-## Step 1 — check SearXNG is reachable
+## Step 1 — run the query
 
 ```bash
-curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8888/" >/dev/null && echo present
+~/.pi/agent/skills/local-search/scripts/search.sh "<query>"
 ```
 
-(`AI_STACK_HOST` points at a LAN-served stack when the instance isn't local,
-e.g. `192.168.1.233`; unset it defaults to localhost.)
-
-If absent, this skill doesn't apply on this machine (or the stack isn't
-running right now) -- tell the user in one line (e.g. `local SearXNG
-unreachable at ${AI_STACK_HOST:-127.0.0.1}:8888 - using WebSearch`) and fall
-back to WebSearch.
-
-## Step 2 — run the query
-
-```bash
-~/.claude/skills/local-search/scripts/search.sh "<query>"
-```
+The script does its own reachability check -- do not pre-flight it with a
+separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
+instance isn't local, e.g. `192.168.1.233`; unset it defaults to localhost.)
 
 Prints up to 8 results as `- title (url): snippet` lines, same shape as a
 WebSearch summary. Exits non-zero with a stderr message if SearXNG is
-unreachable or returns zero results. If it's unreachable, surface the
-one-line notice above and fall back to WebSearch; on zero results, fall back
-quietly (the stack was up, it just had no hits).
+unreachable or returns zero results. On `not reachable`, relay that one line
+to the user and fall back to WebSearch; on zero results, fall back quietly
+(the stack was up, it just had no hits).
 
-## Step 3 — judge the results yourself
+## Step 2 — judge the results yourself
 
 Treat the output like any other search result list: read titles/URLs,
 follow up with WebFetch on a specific page if you need the full content,

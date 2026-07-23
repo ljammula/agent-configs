@@ -74,7 +74,7 @@ Name variant generation is deterministic — use the bundled script instead of d
 
 ```bash
 # Emits all 6 variants (snake, camel, Pascal, SCREAMING, getter, Feature constant)
-~/.claude/skills/wiring-verify/name-variants.sh <feature_name>
+~/.pi/agent/skills/wiring-verify/scripts/name-variants.sh <feature_name>
 ```
 
 Then grep for each variant:

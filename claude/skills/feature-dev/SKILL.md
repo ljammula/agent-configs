@@ -51,20 +51,14 @@ Every user-facing string goes through l10n keys and must exist in **all** `.arb`
 (`en`, `hi`, `kn`, `ml`, `ta`, `te`). Hardcoded snackbar/error strings are a repeat
 review finding.
 
-```bash
-# Hardcoded strings in changed widgets (should be l10n lookups instead)
-git diff main -- 'frontend/lib/**/*.dart' | grep -nE "^\+.*(Text|content:|label:|title:|hintText:)\s*[:(]?\s*'" || echo "no hardcoded strings"
+Deterministic — the same script the `before-done` gate uses; the check lives there,
+not duplicated here:
 
-# Every new key in app_en.arb must exist in the other five .arb files
-cd frontend/lib/l10n
-for key in $(git diff main -- app_en.arb | grep '^+ *"' | grep -v '^+ *"@' | cut -d'"' -f2); do
-  for f in app_hi.arb app_kn.arb app_ml.arb app_ta.arb app_te.arb; do
-    grep -q "\"$key\"" "$f" || echo "MISSING: $key in $f"
-  done
-done
+```bash
+~/.claude/skills/before-done/scripts/check-l10n.sh
 ```
 
-Zero `MISSING` lines required.
+Exit 0 required before committing.
 
 ## 5. Verify
 

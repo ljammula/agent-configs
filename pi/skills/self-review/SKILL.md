@@ -4,9 +4,15 @@ description: >
   Review one of ljammula's PRs using the narsimha-j reviewer account, then guarantee
   the switch back to ljammula. Trigger on: "self review", "review the PR", "review PR #N",
   "approve the PR", or any review action that needs the narsimha-j account.
+  User-triggered only — invoke via /self-review.
+disable-model-invocation: true
 ---
 
 # Self-Review
+
+This skill **posts public review comments and approvals** and switches the machine-wide
+`gh` account. Never fire it as a side effect of another task — the user invokes it
+explicitly (`feature-dev` step 6 tells the user to run it; it does not auto-run).
 
 Two-account flow: `ljammula` authors, `narsimha-j` reviews. The invariant that must
 never break: **the session ends with `ljammula` active**, even if the review fails
@@ -32,7 +38,7 @@ gh pr diff <N> --repo ljammula/<repo>
 **Optional local second opinion first** — on machines that can reach the ai-stack local model, localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`):
 
 ```bash
-gh pr diff <N> --repo ljammula/<repo> | ~/.claude/skills/before-done/scripts/local-review.sh
+gh pr diff <N> --repo ljammula/<repo> | ~/.pi/agent/skills/before-done/scripts/local-review.sh
 ```
 
 Treat its output as candidates to check, not confirmed findings — verify each against the actual diff yourself before posting. It's a differently-trained pass that costs no cloud tokens, not a substitute for your own review. If the port isn't reachable, note it in one line (e.g. `local ai-stack model unreachable - skipping local second opinion`) and proceed with your own review.

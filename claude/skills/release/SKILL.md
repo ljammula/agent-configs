@@ -4,9 +4,14 @@ description: >
   Cut and deploy a DayTrix release end to end: preflight on main, make verify,
   semver tag, push, watch the deploy workflow, smoke-test production.
   Trigger on: "release", "cut a release", "ship it", "deploy to prod", "tag vX.Y.Z".
+  User-triggered only — invoke via /release.
+disable-model-invocation: true
 ---
 
 # Release
+
+This skill **pushes a tag and deploys to production**. Never fire it as a side effect
+of another task — the user invokes it explicitly.
 
 Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run `us-central1`.
 Every step must pass before the next; any ✗ means the release is not done.
@@ -23,14 +28,21 @@ Do not release from a feature branch or with uncommitted changes.
 
 ## 2. Pick the version
 
+Deterministic — the bundled script reads the last tag and the commits since it, and
+prints `<next-tag> <bump-kind> <reason>`:
+
 ```bash
-git tag --sort=-v:refname | head -5
-git log $(git tag --sort=-v:refname | head -1)..HEAD --oneline
+~/.claude/skills/release/scripts/next-version.sh
 ```
 
-- If the user named a version, use it.
-- Otherwise: **patch** bump by default; **minor** if any `feat:` commit landed since the last tag; **major** only when the user explicitly asks.
+- If the user named a version, use theirs and ignore the script's suggestion.
+- **major** is never automatic — only when the user explicitly asks.
 - State the chosen version and the reasoning before tagging.
+
+To review what is shipping:
+```bash
+git log $(git tag --sort=-v:refname | head -1)..HEAD --oneline
+```
 
 ## 3. Tag and push (as ljammula)
 

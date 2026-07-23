@@ -25,7 +25,7 @@ Make the requested doc change. For a terminology rename, first find the full bla
 radius **before** editing — don't edit files one at a time as they're noticed:
 
 ```bash
-~/.claude/skills/docs-verify/scripts/check-stale-terms.sh <old_term> <project_dir>
+~/.pi/agent/skills/docs-verify/scripts/check-stale-terms.sh <old_term> <project_dir>
 ```
 
 Every file it lists is in scope. Edit all of them (skip false positives like
@@ -36,7 +36,7 @@ changelogs or historical notes — use judgment, and say which you skipped and w
 For every doc file touched (or any doc where the user questioned a URL):
 
 ```bash
-~/.claude/skills/docs-verify/scripts/check-links.sh <file> [file...]
+~/.pi/agent/skills/docs-verify/scripts/check-links.sh <file> [file...]
 ```
 
 - `OK` = URL responds 2xx/3xx.
@@ -48,7 +48,7 @@ For every doc file touched (or any doc where the user questioned a URL):
 Re-run the stale-term check after editing:
 
 ```bash
-~/.claude/skills/docs-verify/scripts/check-stale-terms.sh <old_term> <project_dir>
+~/.pi/agent/skills/docs-verify/scripts/check-stale-terms.sh <old_term> <project_dir>
 ```
 
 `0 occurrences` = clean. Any remaining hit is either a deliberate exception
