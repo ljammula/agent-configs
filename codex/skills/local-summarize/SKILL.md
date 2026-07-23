@@ -30,7 +30,9 @@ e.g. `192.168.1.233`; unset it defaults to localhost.)
 
 If absent (stack not running, or the general-slot model isn't the resident
 one right now — only one model pair can be resident at a time), this skill
-doesn't apply — read the file directly instead.
+doesn't apply — tell the user in one line (e.g. `local ai-stack triage model
+unreachable at ${AI_STACK_HOST:-127.0.0.1}:8081 - reading the file directly`)
+and read the file directly instead.
 
 ## Step 2 — triage
 

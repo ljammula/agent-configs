@@ -24,7 +24,7 @@ On machines that can reach the ai-stack local model — localhost or a LAN host 
 git diff | ~/.codex/skills/before-done/scripts/local-review.sh
 ```
 
-This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." Skip silently if the port isn't reachable; this step never blocks completion.
+This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." If the port isn't reachable, say so in one line (e.g. `local ai-stack review model unreachable at ${AI_STACK_HOST:-127.0.0.1}:8080 - skipping local review`) and move on; it never blocks completion.
 
 ## Phase 1 — Code Correctness (after any code change)
 

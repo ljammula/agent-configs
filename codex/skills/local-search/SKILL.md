@@ -32,7 +32,9 @@ curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8888/" >/dev/null && e
 e.g. `192.168.1.233`; unset it defaults to localhost.)
 
 If absent, this skill doesn't apply on this machine (or the stack isn't
-running right now) -- fall back to cloud search.
+running right now) -- tell the user in one line (e.g. `local SearXNG
+unreachable at ${AI_STACK_HOST:-127.0.0.1}:8888 - using cloud search`) and
+fall back to cloud search.
 
 ## Step 2 — run the query
 
@@ -41,9 +43,10 @@ running right now) -- fall back to cloud search.
 ```
 
 Prints up to 8 results as `- title (url): snippet` lines. Exits non-zero
-with a stderr message if SearXNG is unreachable or returns zero results --
-in either case, fall back to cloud search rather than reporting failure to
-the user.
+with a stderr message if SearXNG is unreachable or returns zero results. If
+it's unreachable, surface the one-line notice above and fall back to cloud
+search; on zero results, fall back quietly (the stack was up, it just had no
+hits).
 
 ## Step 3 — judge the results yourself
 

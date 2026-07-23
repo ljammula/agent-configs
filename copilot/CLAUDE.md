@@ -74,7 +74,7 @@ Source: [Andrej Karpathy Skills](https://github.com/forrestchang/andrej-karpathy
 
 Do not say "done", "complete", "all good", or "looks good" until every applicable check passes.
 
-**Optional local second opinion (machine-conditional):** on machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read as a cheap adversarial pass that costs no cloud tokens. Treat its output as things to double-check, not confirmed findings — the local model self-corrects mechanical mistakes but not logic bugs. Skip silently if the port isn't reachable; it never blocks completion.
+**Optional local second opinion (machine-conditional):** on machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read as a cheap adversarial pass that costs no cloud tokens. Treat its output as things to double-check, not confirmed findings — the local model self-corrects mechanical mistakes but not logic bugs. If the port isn't reachable, say so in one line (e.g. `local ai-stack model unreachable - skipping local review`) and move on; it never blocks completion.
 
 **After any code change:**
 1. Run lint: `make lint` (or `dart analyze` / `golangci-lint run` scoped)
