@@ -6,7 +6,7 @@ description: >
   Trigger after: creating a PR, pushing, resolving review comments, claiming CI passed or failed.
   Trigger when user asks: "did it work?", "does it pass?", "created a PR?", "pushed?",
   "was it resolved?", "is CI passing?", or pastes a GitHub Actions or PR URL.
-  The pattern this prevents: Claude says "done" → user checks manually → user comes back
+  The pattern this prevents: the agent says "done" → user checks manually → user comes back
   with what was missed (lint failure, duplicate UI, spec gap, PR not created, thread still open).
 ---
 
@@ -28,7 +28,7 @@ This is evidence to weigh, not a finding list to trust — the local model self-
 
 ## Phase 1 — Code Correctness (after any code change)
 
-Run these before touching GitHub or reporting completion. These are the checks Claude most commonly skips.
+Run these before touching GitHub or reporting completion. These are the checks the agent most commonly skips.
 
 ### 1. Lint
 ```bash

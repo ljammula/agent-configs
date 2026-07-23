@@ -12,7 +12,7 @@ description: >
 
 # Docs Verify
 
-The pattern this prevents (from real session history): Claude updates docs → user
+The pattern this prevents (from real session history): the agent updates docs → user
 manually checks → user comes back with *"is this a valid URL?"* or *"I still see
 household -> group changes"*. This skill makes the generation step incomplete
 until verification passes.

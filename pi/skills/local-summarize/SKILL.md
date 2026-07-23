@@ -2,7 +2,7 @@
 name: local-summarize
 description: >
   Triage a large log file, test-output dump, or JSONL file through the
-  local ai-stack general model (port 8081) before reading it into Claude's
+  local ai-stack general model (port 8081) before reading it into the agent's
   own context, to find which sections actually matter. Only relevant on
   machines running ai-stack -- check the model port is reachable before
   using this skill. Trigger when you're about to Read a large log/output
@@ -13,10 +13,10 @@ description: >
 # Local Summarize
 
 **This is triage, not summarization.** The local model flags which line
-ranges are worth Claude's direct read; it does not produce a digest Claude
+ranges are worth the agent's direct read; it does not produce a digest the agent
 trusts as ground truth. A hallucinated summary of a stack trace is worse
 than useless — the failure mode here isn't "wastes tokens," it's "sends
-Claude confidently down the wrong path." Scope every use of this skill
+the agent confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
 ## Step 1 — triage
@@ -51,7 +51,7 @@ file directly rather than trusting a negative result.
 
 ## When not to use this
 
-- Small-to-medium files Claude can just Read directly — this skill exists
+- Small-to-medium files the agent can just Read directly — this skill exists
   to avoid burning context on files large enough that a full read is
   genuinely costly.
 - Anything where you need the actual content, not a pointer to it (e.g.

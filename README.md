@@ -58,10 +58,26 @@ agent-configs/
 │       ├── self-review/       # + optional local second opinion
 │       └── wiring-verify/
 │
-└── copilot/                   # GitHub Copilot CLI — ~/.copilot/ + ~/.github/
-    ├── CLAUDE.md              # Karpathy + before-done + release + self-review guidelines (+ machine-conditional local second-opinion notes)
-    ├── copilot-instructions.md         # ~/.copilot-instructions.md (global)
-    └── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
+├── copilot/                   # GitHub Copilot CLI — ~/.copilot/ + ~/.github/
+│   ├── CLAUDE.md              # Karpathy + before-done + release + self-review guidelines (+ machine-conditional local second-opinion notes)
+│   ├── copilot-instructions.md         # ~/.copilot-instructions.md (global)
+│   └── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
+│
+└── pi/                        # pi coding agent — ~/.pi/agent/  (see pi/README.md)
+    ├── AGENTS.md              # Global instructions, tuned for local models (85K window)
+    ├── extensions/            # pi ships no MCP/plan-mode/todos/web-search; these add them
+    │   ├── ai-stack-local.ts       # Both ai-stack slots as providers (:8080 code, :8081 general)
+    │   ├── karpathy-guardrail.ts   # Appends karpathy rules to every system prompt
+    │   ├── rtk-rewrite.ts          # Port of claude/hooks/rtk-rewrite.sh to tool_call
+    │   ├── format-on-edit.ts       # Port of claude/hooks/format-on-edit.sh to tool_result
+    │   ├── searxng-search.ts       # web_search tool via local SearXNG (no cloud API key)
+    │   ├── protected-paths.ts      # Vendored + cwd confinement (local models write outside cwd)
+    │   ├── plan-mode/              # Vendored: /plan read-only exploration
+    │   ├── todo.ts                 # Vendored: task list with persistent state
+    │   ├── git-checkpoint.ts       # Vendored: stash checkpoints for /fork restore
+    │   └── notify.ts               # Vendored + hasUI gate: terminal notification on finish
+    ├── prompts/               # /review, /before-done, /wire, /l10n slash commands
+    └── skills/                # Same skills as claude/codex, pi-flavored
 ```
 
 ## Install locations
@@ -82,6 +98,13 @@ agent-configs/
 | `copilot/CLAUDE.md` | `~/.copilot/CLAUDE.md` |
 | `copilot/copilot-instructions.md` | `~/.copilot-instructions.md` |
 | `copilot/github-copilot-instructions.md` | `~/.github/copilot-instructions.md` |
+| `pi/AGENTS.md` | `~/.pi/agent/AGENTS.md` |
+| `pi/extensions/<name>.ts`, `pi/extensions/<name>/` | `~/.pi/agent/extensions/<name>` |
+| `pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
+| `pi/skills/<name>/` (whole dir) | `~/.pi/agent/skills/<name>` |
+
+`~/.pi/agent/settings.json` is deliberately not linked — pi rewrites it itself.
+See [pi/README.md](pi/README.md) for the settings this machine expects.
 
 ## Skills
 

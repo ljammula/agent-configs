@@ -6,14 +6,14 @@ description: >
   Use after adding any feature that has a documented N-step checklist (feature flags, routes,
   middleware, controllers, widgets, constants, migrations, etc.). Also generates stubs for any
   missing steps. Trigger when: "check the wiring for X", "did I wire everything for X",
-  "verify the feature plumbing", or after Claude adds something that has a multi-step pattern.
+  "verify the feature plumbing", or after the agent adds something that has a multi-step pattern.
 tools: Read, Bash, Grep
 ---
 
 # Wiring Verify
 
 Many projects have documented N-step wiring patterns: "to add feature X, do steps 1, 2, 3, 4."
-Claude often completes some steps and misses others. This skill:
+The agent often completes some steps and misses others. This skill:
 1. Reads the project docs to discover the pattern
 2. Greps for each step's presence in code
 3. Reports a `[✓]/[✗]` checklist with file:line evidence
@@ -28,8 +28,8 @@ Read the project's documentation to find multi-step patterns. Look in this order
 ```bash
 # Find docs that describe multi-step wiring
 cat CLAUDE.md 2>/dev/null
+cat AGENTS.md 2>/dev/null
 cat ARCHITECTURE.md 2>/dev/null
-cat .claude/CLAUDE.md 2>/dev/null
 cat README.md 2>/dev/null | head -100
 ```
 

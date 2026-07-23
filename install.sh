@@ -49,9 +49,16 @@ for d in "$REPO_ROOT"/codex/skills/*/; do
 done
 
 # Pi (skills auto-discover from ~/.pi/agent/skills/<name>/SKILL.md; extensions
-# from ~/.pi/agent/extensions/<name>.ts load unconditionally at startup, no
-# project trust required -- see pi/extensions/ai-stack-local.ts and
-# pi/extensions/karpathy-guardrail.ts)
+# from ~/.pi/agent/extensions/<name>.ts or <name>/index.ts load unconditionally
+# at startup, no project trust required; global instructions from
+# ~/.pi/agent/AGENTS.md; prompt templates from ~/.pi/agent/prompts/<name>.md
+# become /<name> slash commands)
+#
+# ~/.pi/agent/settings.json is deliberately NOT linked: pi rewrites it itself
+# (/settings, package installs, lastChangelogVersion), so a symlink into this
+# repo would mean pi editing tracked files behind your back. See pi/README.md
+# for the settings this machine expects.
+link "$REPO_ROOT/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 for d in "$REPO_ROOT"/pi/skills/*/; do
   name="$(basename "$d")"
   link "$REPO_ROOT/pi/skills/$name" "$HOME/.pi/agent/skills/$name"
@@ -59,6 +66,14 @@ done
 for f in "$REPO_ROOT"/pi/extensions/*.ts; do
   name="$(basename "$f")"
   link "$REPO_ROOT/pi/extensions/$name" "$HOME/.pi/agent/extensions/$name"
+done
+for d in "$REPO_ROOT"/pi/extensions/*/; do
+  name="$(basename "$d")"
+  link "$REPO_ROOT/pi/extensions/$name" "$HOME/.pi/agent/extensions/$name"
+done
+for f in "$REPO_ROOT"/pi/prompts/*.md; do
+  name="$(basename "$f")"
+  link "$REPO_ROOT/pi/prompts/$name" "$HOME/.pi/agent/prompts/$name"
 done
 
 # Copilot
