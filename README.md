@@ -108,6 +108,53 @@ See [pi/README.md](pi/README.md) for the settings this machine expects.
 
 ## Skills
 
+### Scope and portability
+
+Skills are intentionally not all generic. This repository is a personal
+machine configuration, so it combines reusable engineering practices with
+personal-assistant repository-specific operating procedures for the DayTrix app.
+Keep that boundary explicit when
+adding or changing a skill:
+
+- **Portable skills:** `karpathy-guidelines`, `local-search`, and
+  `local-summarize` are useful across projects. `docs-verify` is also broadly
+  applicable, though its helper-script path is installation-specific.
+- **Portable workflow cores with project overlays:** `before-done` and
+  `wiring-verify` express useful general workflows, but their current checks
+  include personal-assistant conventions. A future shared version should retain the
+  generic gate (diff review, formatting, linting, tests, worktree/CI checks)
+  and let each project supply its own commands and wiring patterns.
+- **personal-assistant-specific skills:** `backend-dev`, `frontend-dev`, `feature-dev`,
+  `pr-remediate`, `release`, and `self-review` deliberately encode the DayTrix app's
+  architecture and operations—Go/Flutter layout, Firebase conventions,
+  localization files, deployment, and GitHub accounts. Do not install these
+  unchanged in another project.
+
+The target organization, when project-scoped configuration is supported, is:
+
+```
+global skills/
+  karpathy-guidelines
+  local-search
+  local-summarize
+  docs-verify
+  before-done-core
+
+projects/personal-assistant/skills/
+  backend-dev
+  frontend-dev
+  feature-dev
+  before-done-personal-assistant
+  wiring-verify
+  pr-remediate
+  release
+  self-review
+```
+
+Until then, the skill descriptions and trigger rules are the scope boundary:
+project-specific details should be named as such rather than presented as
+universal defaults.
+
 ### backend-dev
 Background discipline, not a runnable command (`user-invocable: false`). Go backend discipline: red/green table-driven TDD, handler→service→repository layering with sentinel errors, the private→household→share fallback chain, API-contract sync with Flutter models, and fail-closed security defaults (secrets, SSRF, CORS, auth).
 
