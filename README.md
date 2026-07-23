@@ -110,50 +110,56 @@ See [pi/README.md](pi/README.md) for the settings this machine expects.
 
 ### Scope and portability
 
-Skills are intentionally not all generic. This repository is a personal
-machine configuration, so it combines reusable engineering practices with
-personal-assistant repository-specific operating procedures for the DayTrix app.
-Keep that boundary explicit when
-adding or changing a skill:
+Skills are intentionally not all generic. Their location should follow their
+scope:
 
 - **Portable skills:** `karpathy-guidelines`, `local-search`, and
   `local-summarize` are useful across projects. `docs-verify` is also broadly
-  applicable, though its helper-script path is installation-specific.
+  applicable, though its helper-script path is installation-specific. Keep
+  these in this machine-config repository and install them globally.
 - **Portable workflow cores with project overlays:** `before-done` and
-  `wiring-verify` express useful general workflows, but their current checks
-  include personal-assistant conventions. A future shared version should retain the
-  generic gate (diff review, formatting, linting, tests, worktree/CI checks)
-  and let each project supply its own commands and wiring patterns.
+  `wiring-verify` express useful general workflows. A shared core should keep
+  generic checks (diff review, formatting, linting, tests, worktree/CI checks),
+  while each project supplies its own commands and wiring patterns.
 - **personal-assistant-specific skills:** `backend-dev`, `frontend-dev`, `feature-dev`,
   `pr-remediate`, `release`, and `self-review` deliberately encode the DayTrix app's
   architecture and operations—Go/Flutter layout, Firebase conventions,
-  localization files, deployment, and GitHub accounts. Do not install these
-  unchanged in another project.
+  localization files, deployment, and GitHub accounts. These belong in the
+  `personal-assistant` repository, not in a global skill installation.
 
-The target organization, when project-scoped configuration is supported, is:
+The intended ownership is:
 
 ```
-global skills/
-  karpathy-guidelines
-  local-search
-  local-summarize
-  docs-verify
-  before-done-core
+~/code/agent-configs/
+  <agent>/skills/                 # globally installed, portable skills
+    karpathy-guidelines/
+    local-search/
+    local-summarize/
+    docs-verify/
 
-projects/personal-assistant/skills/
-  backend-dev
-  frontend-dev
-  feature-dev
-  before-done-personal-assistant
-  wiring-verify
-  pr-remediate
-  release
-  self-review
+~/code/personal-assistant/
+  <project agent configuration>/  # versioned with the application
+    skills/
+      backend-dev/
+      frontend-dev/
+      feature-dev/
+      before-done/
+      wiring-verify/
+      pr-remediate/
+      release/
+      self-review/
 ```
 
-Until then, the skill descriptions and trigger rules are the scope boundary:
-project-specific details should be named as such rather than presented as
-universal defaults.
+The current agent directories still contain both groups while the
+project-local installation path is migrated and tested for each supported
+agent. Do not add further personal-assistant-specific skills here; add them
+to `~/code/personal-assistant` instead. Do not nest category folders inside
+an agent's runtime `skills/` directory: `install.sh` discovers only direct
+children, and each direct child must be one skill containing `SKILL.md`.
+
+The deciding question is: “Would this skill remain correct in an unrelated
+repository?” If yes, it is global; if it depends on this app's architecture,
+commands, deployment, or accounts, it belongs with `personal-assistant`.
 
 ### backend-dev
 Background discipline, not a runnable command (`user-invocable: false`). Go backend discipline: red/green table-driven TDD, handler→service→repository layering with sentinel errors, the private→household→share fallback chain, API-contract sync with Flutter models, and fail-closed security defaults (secrets, SSRF, CORS, auth).
