@@ -74,6 +74,8 @@ Source: [Andrej Karpathy Skills](https://github.com/forrestchang/andrej-karpathy
 
 Do not say "done", "complete", "all good", or "looks good" until every applicable check passes.
 
+**Optional local second opinion (machine-conditional):** on machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read as a cheap adversarial pass that costs no cloud tokens. Treat its output as things to double-check, not confirmed findings — the local model self-corrects mechanical mistakes but not logic bugs. Skip silently if the port isn't reachable; it never blocks completion.
+
 **After any code change:**
 1. Run lint: `make lint` (or `dart analyze` / `golangci-lint run` scoped)
 2. Format check: `make fmt && git diff --stat` — must show no changes (lint doesn't catch format drift)
@@ -167,7 +169,7 @@ Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run. Any ✗
 Two-account flow: `ljammula` authors, `narsimha-j` reviews. Invariant: session ends with `ljammula` active — every exit path restores it.
 
 1. `gh auth switch --user narsimha-j`
-2. Review `gh pr diff <N>`: correctness bugs → surgical scope → simplicity → project conventions
+2. Review `gh pr diff <N>`: correctness bugs → surgical scope → simplicity → project conventions. On machines that can reach the ai-stack local model (port 8080 on `${AI_STACK_HOST:-127.0.0.1}` — localhost or a LAN host), optionally pipe the diff through it first for a cheap second opinion — candidates to verify against the diff yourself, not confirmed findings.
 3. Post findings as inline comments; submit as `COMMENT` while findings are open
 4. When clean or all findings fixed: `gh pr review <N> --approve` (always APPROVE, never bare COMMENT)
 5. Unconditional: `gh auth switch --user ljammula` and confirm with `gh auth status` — even after errors

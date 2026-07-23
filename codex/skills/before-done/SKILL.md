@@ -16,6 +16,16 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 
 ---
 
+## Phase 0 — Local second opinion (optional, machine-conditional)
+
+On machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
+
+```bash
+git diff | ~/.codex/skills/before-done/scripts/local-review.sh
+```
+
+This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." Skip silently if the port isn't reachable; this step never blocks completion.
+
 ## Phase 1 — Code Correctness (after any code change)
 
 Run these before touching GitHub or reporting completion.

@@ -43,22 +43,25 @@ agent-configs/
 │       └── wiring-verify/    # N-step feature wiring completeness checker
 │
 ├── codex/                     # OpenAI Codex CLI — ~/.codex/
-│   ├── AGENTS.md              # Global instructions for Codex
+│   ├── AGENTS.md              # Global instructions for Codex (+ local execution harness note)
 │   ├── RTK.md                 # RTK token-killer reference for Codex
 │   └── skills/
 │       ├── backend-dev/
-│       ├── before-done/
+│       ├── before-done/       # + local review (Phase 0) + scripts/
+│       ├── dispatch-local/    # Delegate mechanical/bulk-generation tasks to a local model, machine-conditional
 │       ├── docs-verify/
 │       ├── feature-dev/
 │       ├── frontend-dev/
 │       ├── karpathy-guidelines/
+│       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud search, machine-conditional
+│       ├── local-summarize/   # Triage large logs via local model before reading into context, machine-conditional
 │       ├── pr-remediate/
 │       ├── release/
-│       ├── self-review/
+│       ├── self-review/       # + optional local second opinion
 │       └── wiring-verify/
 │
 └── copilot/                   # GitHub Copilot CLI — ~/.copilot/ + ~/.github/
-    ├── CLAUDE.md              # Karpathy + before-done + release + self-review guidelines
+    ├── CLAUDE.md              # Karpathy + before-done + release + self-review guidelines (+ machine-conditional local second-opinion notes)
     ├── copilot-instructions.md         # ~/.copilot-instructions.md (global)
     └── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
 ```

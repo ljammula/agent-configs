@@ -2,10 +2,10 @@
 name: local-summarize
 description: >
   Triage a large log file, test-output dump, or JSONL file through the
-  local ai-stack general model (port 8081) before reading it into Claude's
-  own context, to find which sections actually matter. Only relevant on
+  local ai-stack general model (port 8081) before reading it into your own
+  context, to find which sections actually matter. Only relevant on
   machines running ai-stack -- check the model port is reachable before
-  using this skill. Trigger when you're about to Read a large log/output
+  using this skill. Trigger when you're about to read a large log/output
   file (would burn significant context) purely to find the interesting
   part -- a failure, an anomaly, an error buried in noise.
 ---
@@ -13,10 +13,10 @@ description: >
 # Local Summarize
 
 **This is triage, not summarization.** The local model flags which line
-ranges are worth Claude's direct read; it does not produce a digest Claude
-trusts as ground truth. A hallucinated summary of a stack trace is worse
-than useless — the failure mode here isn't "wastes tokens," it's "sends
-Claude confidently down the wrong path." Scope every use of this skill
+ranges are worth your direct read; it does not produce a digest you trust
+as ground truth. A hallucinated summary of a stack trace is worse than
+useless — the failure mode here isn't "wastes tokens," it's "sends you
+confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
 ## Step 1 — check the general-slot model is reachable
@@ -30,12 +30,12 @@ e.g. `192.168.1.233`; unset it defaults to localhost.)
 
 If absent (stack not running, or the general-slot model isn't the resident
 one right now — only one model pair can be resident at a time), this skill
-doesn't apply — Read the file directly instead.
+doesn't apply — read the file directly instead.
 
 ## Step 2 — triage
 
 ```bash
-~/.claude/skills/local-summarize/scripts/triage.sh <file>
+~/.codex/skills/local-summarize/scripts/triage.sh <file>
 ```
 
 Prints a line-number-referenced list of sections worth reading in full
@@ -45,9 +45,7 @@ larger, triage in chunks rather than trusting a single pass covered it.
 
 ## Step 3 — read the flagged sections yourself
 
-```bash
-Read <file> offset=<N> limit=<M-N+1>
-```
+Open the file at the flagged offsets and read those ranges in full.
 
 Do not report findings, quote content, or make decisions based on the
 triage output alone — it's a pointer into the file, not the content. If
@@ -57,7 +55,7 @@ file directly rather than trusting a negative result.
 
 ## When not to use this
 
-- Small-to-medium files Claude can just Read directly — this skill exists
+- Small-to-medium files you can just read directly — this skill exists
   to avoid burning context on files large enough that a full read is
   genuinely costly.
 - Anything where you need the actual content, not a pointer to it (e.g.

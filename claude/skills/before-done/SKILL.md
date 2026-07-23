@@ -18,7 +18,7 @@ Do not say "done", "complete", "all good", or "looks good" until every applicabl
 
 ## Phase 0 — Local second opinion (optional, machine-conditional)
 
-On machines running the ai-stack local model (check: `curl -sf --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null`), pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
+On machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
 
 ```bash
 git diff | ~/.claude/skills/before-done/scripts/local-review.sh

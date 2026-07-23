@@ -41,4 +41,11 @@ dispatch → review). Good for mechanical, well-specified tasks
 syntax/test-loop-catchable mistakes but not logic bugs, so always review the
 diff rather than trusting a green run.
 
+The served HTTP endpoints — code review (:8080), log triage (:8081), and
+SearXNG (:8888), used by `before-done`/`self-review`/`local-summarize`/
+`local-search` — do not have to be on this machine. Set `AI_STACK_HOST` to
+the host serving them (e.g. `192.168.1.233` for a LAN box) and every
+reachability check and script resolves there; unset, it defaults to
+`127.0.0.1`. Set it once in the shell environment so all agents inherit it.
+
 @RTK.md

@@ -29,7 +29,7 @@ gh pr view <N> --repo ljammula/<repo>
 gh pr diff <N> --repo ljammula/<repo>
 ```
 
-**Optional local second opinion first** — on machines running the ai-stack local model (check: `curl -sf --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null`):
+**Optional local second opinion first** — on machines that can reach the ai-stack local model, localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`):
 
 ```bash
 gh pr diff <N> --repo ljammula/<repo> | ~/.claude/skills/before-done/scripts/local-review.sh
