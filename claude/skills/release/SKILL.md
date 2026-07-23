@@ -16,6 +16,9 @@ of another task — the user invokes it explicitly.
 Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run `us-central1`.
 Every step must pass before the next; any ✗ means the release is not done.
 
+This is the **backend** path only. The iOS/TestFlight cut is `t<version>` → Xcode Cloud —
+use the `testflight-cut` skill; do not tag `t*` here.
+
 ## 1. Preflight
 
 ```bash
@@ -41,7 +44,7 @@ prints `<next-tag> <bump-kind> <reason>`:
 
 To review what is shipping:
 ```bash
-git log $(git tag --sort=-v:refname | head -1)..HEAD --oneline
+git log $(git tag -l 'v*' --sort=-v:refname | head -1)..HEAD --oneline
 ```
 
 ## 3. Tag and push (as ljammula)

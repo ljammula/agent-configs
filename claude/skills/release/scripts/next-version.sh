@@ -7,7 +7,7 @@
 # Prints: <next-tag> <bump-kind> <reason>. Exits 1 if there is nothing to release.
 set -euo pipefail
 
-last=$(git tag --sort=-v:refname | head -1)
+last=$(git tag -l 'v*' --sort=-v:refname | head -1)
 if [[ -z "$last" ]]; then
   echo "v0.1.0 minor no prior tag"
   exit 0
