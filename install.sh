@@ -11,17 +11,21 @@ FORCE="${1:-}"
 link() {
   local src="$1" dst="$2"
   mkdir -p "$(dirname "$dst")"
+  if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
+    echo "ok (already linked): $dst"
+    return
+  fi
   if [[ -e "$dst" || -L "$dst" ]]; then
-    if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
-      echo "ok (already linked): $dst"
-      return
-    fi
     if [[ "$FORCE" != "--force" ]]; then
       echo "skip (exists, not linked to this repo -- rerun with --force to replace): $dst" >&2
       return
     fi
+    # Remove whatever is there first. `ln -sfn` cannot replace a non-empty
+    # directory -- it nests the link inside it -- so an explicit rm is the
+    # only way to force-replace a real dir (or a wrong/dangling symlink).
+    rm -rf "$dst"
   fi
-  ln -sfn "$src" "$dst"
+  ln -s "$src" "$dst"
   echo "linked: $dst -> $src"
 }
 
