@@ -69,8 +69,19 @@ Written here:
   suggested-reading list to the system prompt, minus the identifier-matched
   seed files themselves. No-op by construction on fixture-sized repos with no
   history to mine; git subprocess cost capped and `ctx.signal`/timeouts wired
-  through. Not yet validated live against a real personal-assistant feature
-  task (the plan's kill criterion).
+  through. **Verdict (2026-07-24, see `ai-stack/local-quality-next-steps-status.md`):
+  adopted.** Re-ran the plan's retrospective kill criterion for real against
+  `personal-assistant`'s actual mood-streak dispatch (782 commits of real
+  history, checked out at the exact pre-dispatch commit): found and fixed a
+  real seed-selection bug in the process (per-identifier grep counting was
+  missing, so seed selection was effectively "first 5 files in git's listing
+  order" with no relevance weighting). After the fix, the target file
+  (`contract_matrix_phase2_test.go`) surfaces at rank #1 given a spec using
+  the real identifiers from that dispatch's diff — beating the plan's own
+  claimed #2 for the original script. Needs identifier-rich prompts to work
+  (a purely generic paraphrase correctly surfaces nothing, since there's no
+  identifier signal for the method to use) — that's an inherent scoping
+  limit of identifier-grep-based discovery, not a bug.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
