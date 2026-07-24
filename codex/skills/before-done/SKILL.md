@@ -72,6 +72,15 @@ cat docs/specs/<feature>.md
 
 Then identify any gap between spec and implementation. Do not try to recall the spec from memory — always run the bash steps first.
 
+For a feature using the new `docs/specs/_template.md` packet, the final requirement
+evidence is deterministic too. After filling the acceptance matrix with actual results
+and setting `Status: implemented`, run:
+```bash
+~/.codex/skills/feature-dev/scripts/check-spec-handoff.sh --complete docs/specs/<feature>.md
+```
+Any `FAIL` means the feature is not complete. Do not apply this format check to legacy
+specs that do not use `R-*` requirements.
+
 ### 3. Redundant UI (for any UI change)
 After adding a button, FAB, action, or link — scan the same screen/widget for other elements that do the same thing. Duplicate invite paths, copy-link buttons, and FABs on the same page have been caught by the user repeatedly.
 

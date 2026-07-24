@@ -27,6 +27,24 @@ ls docs/specs/ docs/*roadmap* 2>/dev/null
   propose writing a short spec doc first — in this project spec PRs precede feature PRs.
 - State assumptions and scope before implementing (karpathy-guidelines applies).
 
+For a new multi-file, user-visible, contract-changing, migration, authorization,
+feature-grant, external-integration, or release change, start from
+`docs/specs/_template.md`. Fill its requirements, non-goals, decisions, scenarios,
+invariants, technical plan, tasks, and acceptance matrix. Do not silently turn an
+open product decision into code: behavior-changing open questions must be zero and
+the human must set `Status: ready` before implementation.
+
+Run the deterministic gate from the repo root:
+
+```bash
+~/.pi/agent/skills/feature-dev/scripts/check-spec-handoff.sh --ready docs/specs/<feature>.md
+```
+
+For high-risk work (auth, sharing fallback, billing, destructive actions, permissions,
+migrations, data loss, or feature gates), obtain a separate read-only spec-critic pass
+first. It reports only ambiguity, contradiction, missing negative cases, untestable
+requirements, and scope creep; resolve behavior-changing findings before coding.
+
 ## 2. Branch
 
 Multi-file changes require a branch and PR (GUIDELINES.md §5):
@@ -40,6 +58,11 @@ git switch -c feat/<slug>     # or fix/, refactor/
 
 - Surgical changes only; match existing patterns (BLoC vs ChangeNotifier per feature —
   see CLAUDE.md).
+- For significant work, inspect every file needed to understand the interfaces, then
+  implement in dependency order with exactly one file changed per step. After each
+  file, run the narrowest relevant validation and continue autonomously. Do not batch
+  edits or wait for approval between files. Stop only for a real blocker, a failed
+  validation that needs a design decision, or ambiguity in the ready spec.
 - If the feature is gated, follow the 4-step feature-grant wiring and run the
   `wiring-verify` skill after.
 - List UIs with check-off/reorder behavior: write a test for ordering stability — list
@@ -68,6 +91,17 @@ make verify    # fmt + lint + backend + frontend tests
 
 `make verify` (not just `make lint`) — new test files that skip `dart format` have
 broken CI before.
+
+For a template-backed spec, update the acceptance matrix with the actual implementation
+locations and evidence, set `Status: implemented`, then prove every `R-*` row has both
+automated and reproducible manual evidence:
+
+```bash
+~/.pi/agent/skills/feature-dev/scripts/check-spec-handoff.sh --complete docs/specs/<feature>.md
+```
+
+Do not mark a row PASS because a nearby test is green; its cited evidence must prove
+that requirement.
 
 ## 6. PR and review
 
