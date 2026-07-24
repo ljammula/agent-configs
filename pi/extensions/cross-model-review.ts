@@ -7,15 +7,19 @@
  * today has one model review the other's diff before a task is called done.
  *
  * On the first green run of the task's own verification command this
- * session, sends `git diff` plus the original task spec (the first user
- * message) to ai-stack-general with a tight review prompt. Blind by
- * construction: the reviewer sees only the diff and spec, never the first
- * model's own reasoning or self-assessment, so it can't just agree with a
- * stated conclusion. On a flagged issue, feeds it back as a fix-it turn.
+ * session, sends the diff since session start (working tree + any commits
+ * made mid-session) plus the original task spec (the first user message) to
+ * ai-stack-general with a tight review prompt. Blind by construction: the
+ * reviewer sees only the diff and spec, never the first model's own
+ * reasoning or self-assessment, so it can't just agree with a stated
+ * conclusion. On a flagged issue, feeds it back as a fix-it turn.
  *
  * Runs at most once per agent run (one review pass per completed task, not
  * one per test invocation) to bound cost -- this is a real extra model turn,
- * not a free check (see plan's Phase 2 cost note).
+ * not a free check (see plan's Phase 2 cost note). The "reviewed" flag is
+ * only set once a non-empty diff has actually been submitted and answered,
+ * so a green test run before any edit, an empty diff, or a transient
+ * ai-stack outage doesn't burn the one review attempt.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -49,9 +53,15 @@ function messageText(content: string | { type: string; text?: string }[]): strin
 
 export default function (pi: ExtensionAPI) {
 	let reviewedThisRun = false;
+	let baseSha: string | undefined;
 
-	pi.on("agent_start", () => {
+	pi.on("agent_start", async (_event, ctx) => {
 		reviewedThisRun = false;
+		baseSha = undefined;
+		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd }).catch(() => undefined);
+		if (result && result.code === 0) {
+			baseSha = result.stdout.trim();
+		}
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
@@ -62,12 +72,13 @@ export default function (pi: ExtensionAPI) {
 		if (typeof command !== "string") return;
 		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
 
-		reviewedThisRun = true;
-
-		const diffResult = await pi.exec("git", ["diff"], { cwd: ctx.cwd }).catch(() => undefined);
+		// Diff since session start: baseSha..working-tree, so commits made
+		// mid-session are included, not just uncommitted changes.
+		const diffArgs = baseSha ? ["diff", baseSha] : ["diff"];
+		const diffResult = await pi.exec("git", diffArgs, { cwd: ctx.cwd }).catch(() => undefined);
 		if (!diffResult || diffResult.code !== 0) return;
 		const diff = diffResult.stdout.trim();
-		if (!diff) return;
+		if (!diff) return; // nothing to review yet -- don't consume the one attempt
 
 		const leaf = ctx.sessionManager.getLeafEntry();
 		const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
@@ -112,12 +123,16 @@ export default function (pi: ExtensionAPI) {
 					temperature: 0,
 				}),
 			});
-			if (!res.ok) return;
+			if (!res.ok) return; // transient outage -- don't consume the one attempt
 			const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
 			reviewText = data.choices?.[0]?.message?.content?.trim() ?? "";
 		} catch {
-			return;
+			return; // transient outage -- don't consume the one attempt
 		}
+
+		// A real, answered review happened -- consume the one-per-run budget
+		// regardless of verdict, so a second green test run doesn't re-review.
+		reviewedThisRun = true;
 
 		if (!reviewText || reviewText.includes(NO_ISSUE_MARKER)) return;
 
@@ -132,6 +147,7 @@ export default function (pi: ExtensionAPI) {
 				"Investigate. If it's real, fix it. If it's a false positive, say why",
 				"briefly and move on.",
 			].join("\n"),
+			{ deliverAs: "followUp" },
 		);
 	});
 }

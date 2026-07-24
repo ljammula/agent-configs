@@ -77,6 +77,6 @@ export default function (pi: ExtensionAPI) {
 		if (verificationRan) return;
 
 		nudgedThisRun = true;
-		pi.sendUserMessage(NUDGE_MESSAGE);
+		pi.sendUserMessage(NUDGE_MESSAGE, { deliverAs: "followUp" });
 	});
 }
