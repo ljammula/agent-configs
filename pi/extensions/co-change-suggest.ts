@@ -4,9 +4,24 @@
  * Ports the co-change ranking from ai-stack/scripts/suggest_read_files.py
  * (git co-change count^2 / total historical touch count, down-weighting
  * high-churn files) into pi, per ai-stack/local-quality-next-steps-plan.md
- * Phase 3. Retrospective-validated against the mood-streak dispatch: ranked
- * `contract_matrix_phase2_test.go` at #2 -- the exact file that dispatch
- * missed on identifier-grep alone.
+ * Phase 3.
+ *
+ * Retrospective-validated (2026-07-24) against the real mood-streak dispatch
+ * in personal-assistant: seeded with the files the real dispatch actually
+ * touched (main.go + the mood handler/repository files), the co-change
+ * ranking surfaces `contract_matrix_phase2_test.go` at #3 -- close to the
+ * plan's claimed #2, confirming the core algorithm is sound. But the
+ * *seed selection* (which files a bare task-description prompt maps to,
+ * with no upstream `--files` input the way `suggest_read_files.py`
+ * normally gets one from `dispatch_local.sh`) initially failed the same
+ * retrospective case: identifier extraction pulled a generic token
+ * (a lone parameter name) that matched 100+ unrelated files, and the old
+ * one-OR'd-grep seed selection had no way to prefer files matching
+ * multiple specific identifiers over files that only matched the generic
+ * one. Fixed in `grepIdentifiers`/seed selection below -- see their
+ * comments for detail. This is the one thing this port needed beyond a
+ * straight translation of the python script's logic, precisely because pi
+ * has no equivalent upstream target-file-selection step to seed from.
  *
  * Only relevant for real repos with meaningful git history to mine
  * (personal-assistant-style feature dev). Fixture-sized repos with little
@@ -77,15 +92,29 @@ async function grepIdentifiers(
 	identifiers: string[],
 	signal: AbortSignal | undefined,
 ): Promise<Map<string, number>> {
+	// One grep per identifier (not one OR'd grep across all of them) so the
+	// count reflects how many DISTINCT identifiers each file matches, not
+	// just "matched something." A single combined grep gives every matched
+	// file the same count (1), which makes seed selection (below) equivalent
+	// to "first N files in git's listing order" -- no actual relevance
+	// signal. Verified against a real retrospective case
+	// (personal-assistant's mood-streak dispatch, see
+	// ai-stack/local-quality-next-steps-status.md): a generic identifier
+	// like a lone "userID" parameter name matches 100+ files across an
+	// unrelated codebase and drowned out the one truly relevant seed file
+	// under the old one-OR'd-grep behavior; per-identifier counting fixes
+	// this by letting files that match multiple specific identifiers
+	// outrank files that only match one generic one.
 	const hits = new Map<string, number>();
-	if (identifiers.length === 0) return hits;
-	const pattern = identifiers.map((i) => i.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-	const result = await run(pi, "git", ["grep", "-lIE", pattern], { cwd, signal });
-	if (!result || result.code > 1) return hits;
-	for (const line of result.stdout.split("\n")) {
-		const f = line.trim();
-		if (!f) continue;
-		hits.set(f, (hits.get(f) ?? 0) + 1);
+	for (const ident of identifiers) {
+		const pattern = ident.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const result = await run(pi, "git", ["grep", "-lIE", pattern], { cwd, signal });
+		if (!result || result.code > 1) continue;
+		for (const line of result.stdout.split("\n")) {
+			const f = line.trim();
+			if (!f) continue;
+			hits.set(f, (hits.get(f) ?? 0) + 1);
+		}
 	}
 	return hits;
 }
@@ -165,7 +194,7 @@ export default function (pi: ExtensionAPI) {
 		// subprocess cost to at most one mining pass per session.
 		mined = true;
 
-		const seed = [...grepHits.keys()].slice(0, MAX_SEEDS);
+		const seed = [...grepHits.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_SEEDS).map(([f]) => f);
 		const cochangeHits = await cochangeRank(pi, ctx.cwd, seed, ctx.signal);
 		if (cochangeHits.size === 0) return;
 
