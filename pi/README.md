@@ -19,6 +19,7 @@ carry weight the model cannot.
 | `skills/<name>/` | `~/.pi/agent/skills/<name>` | Same skills as Claude/Codex, pi-flavored |
 | `prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` | `/<name>` slash commands |
 | `extensions/*.ts`, `extensions/*/` | `~/.pi/agent/extensions/…` | Loaded unconditionally at startup |
+| `disabled-extensions/*.ts` | *(not linked)* | Built, code-reviewed, kept for reference — not loaded by default; see below |
 
 ### Extensions
 
@@ -51,23 +52,14 @@ Written here:
   `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
   matching turn, with no verification command run yet this session, injects
   one follow-up nudge instead of letting the turn end. Fires at most once per
-  agent run. Two rounds of validation runs turned out to be invalidated
-  before this could even be exercised: a harness bug (wrong test-file layout,
-  fixed), then a real extension bug caught by Codex review — `sendUserMessage`
-  needs `deliverAs: "followUp"` while the agent is streaming, or Pi silently
-  swallows the call and nothing is ever delivered (see commit `04d72d5`).
-  Fixed; empirical validation against the plan's kill criterion in progress —
-  see `ai-stack/local-quality-next-steps-status.md`.
-- **`cross-model-review.ts`** — Phase 2 of the same plan: the
-  previously-scoped-but-never-built blind-reviewer pass. On the first green
-  run of the task's own verification command, diffs against the session's
-  base SHA (so mid-session commits are included) and sends it + the task spec
-  to `ai-stack-general` (:8081) with a review prompt that can't see the first
-  model's own reasoning, feeding back a flagged issue as a fix-it turn once.
-  Had the same `sendUserMessage` delivery bug as above, plus marked itself
-  "reviewed" before confirming there was anything to review — both fixed.
-  Not yet run against the plan's full kill criterion, which needs a
-  seeded-wrong-fixture task battery this machine doesn't have.
+  agent run. **Verdict (2026-07-24, see `ai-stack/local-quality-next-steps-status.md`):
+  not adopted, but kept loaded.** Across ~50 real trials (two task shapes,
+  one deliberately harder) plus the original grounding case, the trigger
+  condition never fired outside deterministic mocked tests — the kill
+  criterion ("adopt only if it measurably reduces plan-then-abandon
+  sessions") can't be resolved either way at this trigger rate. Kept
+  installed because it's a true no-op unless it fires: zero cost, zero
+  behavior change when idle.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first
@@ -90,10 +82,35 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 - **`plan-mode/`** — `/plan` or Ctrl+Alt+P for read-only exploration using
   PI's native inspection tools, with `/plan-todos` for the current plan steps.
 - **`todo.ts`** — task list tool with persistent state.
-- **`git-checkpoint.ts`** — git stash checkpoints so `/fork` can restore code.
+- **`git-checkpoint.ts`** — per-turn checkpoints (base SHA + stash + loose
+  blobs for untracked files, all non-destructive) so `/fork` can restore
+  code to that point, including reverting a clean-start edit and preserving
+  pre-existing uncommitted work — see the file's own header comment for why
+  a plain `git stash create`/`apply` pair silently didn't work for either
+  case.
 - **`notify.ts`** — terminal notification when the agent finishes. Vendored
   change: gated on `hasUI`, since in `-p` mode the raw OSC escape would
   otherwise corrupt captured stdout.
+
+### Disabled extensions (`disabled-extensions/`, not loaded by default)
+
+- **`cross-model-review.ts`** — Phase 2 of
+  `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
+  never-built blind-reviewer pass (diffs against session base SHA, sends
+  diff + spec to `ai-stack-general` for a second opinion, feeds back a
+  flagged issue). Code is correct — two rounds of external review (Codex,
+  then Fable) plus deterministic mocked verification all passed. **Verdict
+  (2026-07-24, see `ai-stack/local-quality-next-steps-status.md`): not
+  adopted, moved out of the default-loaded set.** The plan's kill criterion
+  was "adopt only if it catches something the test suite alone missed in
+  at least one real repeat." The one real test run — feeding the extension's
+  actual code a real diff with a known, spec-violating bug (the hidden test
+  suite catches it) — came back negative: the reviewer returned
+  `NO_ISSUES_FOUND`, reproduced twice. Given the extension's real cost (an
+  extra model turn, real latency) and this concrete miss on exactly the bug
+  class it exists to catch, it's not defensible as an active default on
+  current evidence. Kept in the repo, not deleted, in case a larger battery
+  someday shows real signal — move back to `extensions/` if so.
 
 ### Prompt templates
 
