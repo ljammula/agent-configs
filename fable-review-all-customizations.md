@@ -13,6 +13,58 @@ were reviewed separately and in more depth — see
 `ai-stack/fable-review-pi-quality-harness.md`. The `pi/` section below
 covers everything else in that directory.
 
+## Status update (2026-07-24, after this review)
+
+At the user's direction, only **Part 2 (`pi/`) findings** were addressed in
+this pass — Parts 1 (`claude/`) and 3 (`codex/`/`copilot/`) are still fully
+open. Pushed to `agent-configs` main as `0371366`
+("Fix pi-specific findings from Fable's advisory review"):
+
+- **`git-checkpoint.ts` missing untracked files — fixed**, and a bigger
+  latent bug found while verifying the fix: `git stash create` returns
+  empty on a clean working tree (the common case), so the *original* code
+  silently stored no checkpoint at all whenever a turn started clean —
+  restore did nothing for tracked-file edits too, not just untracked ones.
+  Rewritten to capture `baseSha` (`git rev-parse HEAD`) unconditionally and
+  restore via `checkout baseSha -- .` first, then `stash apply` on top of
+  any pre-existing dirty work, then untracked-file blobs. Verified against
+  4 scenarios on real git repos (not mocks): clean-start revert,
+  dirty-start-preserves-prior-work, untracked-content-restore, and the
+  unchecked-`stash apply`-exit-code bug below.
+- **`git-checkpoint.ts` restore reporting success unconditionally —
+  fixed.** Both `checkout` and `stash apply` results are now checked;
+  failure produces a distinct warning notification instead of a false
+  "restored" message.
+- **`plan-mode/utils.ts` dead code — fixed.** Deleted
+  `DESTRUCTIVE_PATTERNS`/`SAFE_PATTERNS`/`isSafeCommand` (~95 lines, never
+  imported anywhere).
+- **`notify.ts`'s `require()` in an ESM module — fixed.** Replaced with a
+  static `import`.
+- **`web_search` tool vs. `local-search` skill redundancy — fixed** for pi
+  specifically: removed `pi/skills/local-search/` (including the resulting
+  dangling `~/.pi/agent/skills/local-search` symlink, which `install.sh`
+  doesn't auto-prune) and the one remaining `plan-mode` system-prompt
+  reference to it. Claude Code's copy of the skill is untouched — Claude
+  Code has no competing built-in `web_search` tool, so it's still the right
+  mechanism there.
+- **`protected-paths.ts` gaps (bash bypass, no credential-file coverage),
+  `ai-stack-local.ts` hardcoded paths, plan-mode README's tool-surface
+  documentation gap — not addressed.** Documented in the review as known
+  scope limits / low-priority doc drift, not urgent enough to bundle with
+  the fixes above.
+- **Everything in Part 1 (`claude/`) and Part 3 (`codex/`/`copilot/`) —
+  not addressed**, including the two items this review's own "Suggested
+  priority order" ranked #1 and #3: the `copilot/CLAUDE.md`
+  thread-auto-resolve policy contradiction, and `settings.json`'s blind
+  `index.lock` removal. Both are real, both are outside `pi/`, and both
+  are still open.
+
+The `cross-model-review.ts`/`co-change-suggest.ts` findings in Part 2 that
+overlap with the separate, more detailed pi-quality-harness review (blocking
+behavior, missing timeout, `ctx.signal` doc overclaim) are tracked in that
+doc's own status section — see
+`ai-stack/fable-review-pi-quality-harness.md`, not duplicated here.
+
 ---
 
 ## Part 1 — `claude/` (hooks + skills)
