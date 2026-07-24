@@ -18,8 +18,9 @@
  * one per test invocation) to bound cost -- this is a real extra model turn,
  * not a free check (see plan's Phase 2 cost note). The "reviewed" flag is
  * only set once a non-empty diff has actually been submitted and answered,
- * so a green test run before any edit, an empty diff, or a transient
- * ai-stack outage doesn't burn the one review attempt.
+ * so a green test run before any edit, an empty diff, a request that times
+ * out (REVIEW_TIMEOUT_MS, combined with ctx.signal), or a transient ai-stack
+ * outage doesn't burn the one review attempt.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -35,6 +36,7 @@ const VERIFICATION_COMMAND_PATTERNS = [
 ];
 
 const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
+const REVIEW_TIMEOUT_MS = 60_000;
 
 function reviewModel(): { host: string; model: string } {
 	return {
@@ -112,6 +114,7 @@ export default function (pi: ExtensionAPI) {
 			"```",
 		].join("\n");
 
+		const signals = [AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])];
 		let reviewText: string;
 		try {
 			const res = await fetch(`http://${host}:8081/v1/chat/completions`, {
@@ -122,19 +125,20 @@ export default function (pi: ExtensionAPI) {
 					messages: [{ role: "user", content: prompt }],
 					temperature: 0,
 				}),
+				signal: AbortSignal.any(signals),
 			});
 			if (!res.ok) return; // transient outage -- don't consume the one attempt
 			const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
 			reviewText = data.choices?.[0]?.message?.content?.trim() ?? "";
 		} catch {
-			return; // transient outage -- don't consume the one attempt
+			return; // timeout, abort, or transient outage -- don't consume the one attempt
 		}
 
 		// A real, answered review happened -- consume the one-per-run budget
 		// regardless of verdict, so a second green test run doesn't re-review.
 		reviewedThisRun = true;
 
-		if (!reviewText || reviewText.includes(NO_ISSUE_MARKER)) return;
+		if (!reviewText || reviewText === NO_ISSUE_MARKER) return;
 
 		pi.sendUserMessage(
 			[

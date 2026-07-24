@@ -17,8 +17,11 @@
  * identifiers -- a greeting or clarification as the first message doesn't
  * consume the one-shot attempt, so a later real task prompt still gets
  * evaluated. Once the (potentially expensive) co-change mining actually
- * runs, it's capped at once per session regardless of outcome, to bound
- * total git subprocess cost.
+ * runs, it's capped at once per session regardless of outcome, both by
+ * candidate/history-depth limits and by an overall wall-clock deadline
+ * (MINING_DEADLINE_MS) on top of each git subprocess's own timeout, so a
+ * slow repo can't block the first turn for more than a bounded amount of
+ * time even if every individual call stays under its own cap.
  */
 import type { ExecOptions, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -27,7 +30,8 @@ const TOP_N = 8;
 const COCHANGE_LOG_LIMIT = 20;
 const MAX_SEEDS = 5;
 const MAX_RAW_CANDIDATES = 20; // cap totalTouchCount calls to this many raw co-change hits
-const EXEC_TIMEOUT_MS = 5000;
+const EXEC_TIMEOUT_MS = 5000; // per-call cap
+const MINING_DEADLINE_MS = 15_000; // overall cap across the whole cochangeRank pass
 
 const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]{2,}\b/g;
 const STOPWORDS = new Set([
@@ -87,12 +91,22 @@ async function cochangeRank(
 	targetFiles: string[],
 	signal: AbortSignal | undefined,
 ): Promise<Map<string, number>> {
+	// Overall deadline across the whole mining pass, independent of the
+	// per-call EXEC_TIMEOUT_MS: up to ~120 sequential git subprocesses can
+	// otherwise still add minutes in a slow repo even with each call capped.
+	// Combined with ctx.signal so both cancel in-flight calls and stop the
+	// loop from starting new ones once either fires.
+	const deadline = Date.now() + MINING_DEADLINE_MS;
+	const deadlineSignal = AbortSignal.any([AbortSignal.timeout(MINING_DEADLINE_MS), ...(signal ? [signal] : [])]);
+
 	const raw = new Map<string, number>();
-	for (const target of targetFiles) {
-		const log = await run(pi, "git", ["log", "--follow", `-${COCHANGE_LOG_LIMIT}`, "--format=%H", "--", target], { cwd, signal });
+	outer: for (const target of targetFiles) {
+		if (Date.now() >= deadline) break;
+		const log = await run(pi, "git", ["log", "--follow", `-${COCHANGE_LOG_LIMIT}`, "--format=%H", "--", target], { cwd, signal: deadlineSignal });
 		if (!log || log.code !== 0) continue;
 		for (const sha of log.stdout.split("\n").filter(Boolean)) {
-			const show = await run(pi, "git", ["show", "--name-only", "--pretty=format:", sha], { cwd, signal });
+			if (Date.now() >= deadline) break outer;
+			const show = await run(pi, "git", ["show", "--name-only", "--pretty=format:", sha], { cwd, signal: deadlineSignal });
 			if (!show || show.code !== 0) continue;
 			for (const f of show.stdout.split("\n").filter(Boolean)) {
 				if (targetFiles.includes(f)) continue;
@@ -107,7 +121,8 @@ async function cochangeRank(
 
 	const specificity = new Map<string, number>();
 	for (const [f, coCount] of capped) {
-		const total = await totalTouchCount(pi, cwd, f, signal);
+		if (Date.now() >= deadline) break;
+		const total = await totalTouchCount(pi, cwd, f, deadlineSignal);
 		if (total === 0) continue;
 		specificity.set(f, coCount * (coCount / total));
 	}
