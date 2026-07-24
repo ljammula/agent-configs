@@ -41,6 +41,32 @@ Written here:
   cloud search API key this machine has no reason to buy. Registered as a
   *tool* rather than left to the `local-search` skill because a 27B model
   reliably calls a tool in front of it and unreliably remembers a skill.
+- **`continuation-nudge.ts`** — Phase 1 of
+  `ai-stack/local-quality-next-steps-plan.md`: targets the plan-then-abandon
+  failure mode (model announces an edit in prose, no tool call, turn ends with
+  `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
+  matching turn, with no verification command run yet this session, injects
+  one follow-up nudge instead of letting the turn end. Fires at most once per
+  agent run. Empirical validation against the plan's kill criterion (5+
+  repeats of `go/lru-cache` and 2-3 other tasks, with vs. without the
+  extension) in progress — see `ai-stack/local-quality-next-steps-status.md`.
+- **`cross-model-review.ts`** — Phase 2 of the same plan: the
+  previously-scoped-but-never-built blind-reviewer pass. On the first green
+  run of the task's own verification command, sends `git diff` + the task
+  spec to `ai-stack-general` (:8081) with a review prompt that can't see the
+  first model's own reasoning, and feeds back a flagged issue as a fix-it
+  turn. At most one review pass per agent run. Built and smoke-tested (fires
+  end-to-end, produces sane output); not yet run against the plan's full kill
+  criterion, which needs a seeded-wrong-fixture task battery this machine
+  doesn't have.
+- **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
+  `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
+  co-change count² ÷ total historical touch count) into pi. Once per
+  session, on repos with ≥20 commits of history, ranks files that
+  historically co-change with spec-mentioned identifiers and appends a
+  suggested-reading list to the system prompt. No-op by construction on
+  fixture-sized repos with no history to mine. Not yet validated live against
+  a real personal-assistant feature task (the plan's kill criterion).
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
