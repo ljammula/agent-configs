@@ -68,6 +68,23 @@ Full raw output (all citations + per-agent trace): `/private/tmp/claude-501/-Use
 
 ## The gaps, ranked
 
+## Implementation status (2026-07-23)
+
+- **Completed — Gaps 3 and 7:** added `asc_preflight.sh` to the Claude, Codex,
+  and Pi `testflight-cut` skills. It requires `ASC_APP_ID`, reads the proposed
+  numeric Flutter `+build`, queries ASC with `--all-versions`, and fails closed
+  unless the proposed build is strictly greater. It reports the ASC version and
+  build on both pass and failure; missing CLI, credentials, files, and malformed
+  responses are explicit failures. Phase 2 now runs it alongside
+  `check-version-sync.sh`.
+- **Completed — Gap 4:** `before-done` now states and labels the required order:
+  deterministic checks, local ai-stack review, then semantic `self-review`.
+- **Completed — Gap 6:** audited `docs-verify` and `wiring-verify` in all three
+  agent trees; neither has a `SKILL.md → a.md → b.md` reference chain.
+- **Deferred by design — Gaps 1, 2, and 5:** no evidence yet that the completion
+  gate is being skipped; held-out tests need human-authored DayTrix invariants;
+  and the skill-budget audit remains unnecessary until triggers degrade.
+
 **Gap 1 — Verification steps are Claude-invoked, not hook-enforced.**
 Evidence: jonesrussell.github.io/blog/git-hooks-ai-agents (2026-03-16);
 pixelmojo.io/blogs/claude-code-hooks-production-quality-ci-cd-patterns (2026-02).
@@ -180,5 +197,5 @@ Claude improvise a retry. Zero incremental cost if built alongside Gap 3.
 
 ## Next step
 
-Gap 3 (`asc_preflight.sh` for `testflight-cut`) is the one the research flags as
-highest-leverage — not yet built. Everything else in this file is unstarted.
+No immediate implementation work remains. Revisit Gaps 1, 2, and 5 only when
+their stated trigger conditions are observed.

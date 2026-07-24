@@ -14,11 +14,16 @@ description: >
 
 Do not say "done", "complete", "all good", or "looks good" until every applicable check below passes. The bar is **100% confidence**.
 
+Use the sensor sequence in this order: first the deterministic checks in Phase 1,
+then the optional local ai-stack review below, then `self-review`'s semantic PR
+pass when a PR exists. The LLM passes are evidence to investigate, never a reason
+to skip a failing deterministic gate.
+
 ---
 
-## Phase 0 — Local second opinion (optional, machine-conditional)
+## Phase 1.5 — Local second opinion (optional, machine-conditional)
 
-On machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
+After Phase 1 passes, on machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before semantic review, as a cheap adversarial pass that costs no cloud tokens:
 
 ```bash
 git diff | ~/.codex/skills/before-done/scripts/local-review.sh

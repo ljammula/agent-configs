@@ -14,11 +14,16 @@ description: >
 
 Do not say "done", "complete", "all good", or "looks good" until every applicable check below passes. The bar is **100% confidence** — the user's explicit standard from session history.
 
+Use the sensor sequence in this order: first the deterministic checks in Phase 1,
+then the optional local ai-stack review below, then `self-review`'s semantic PR
+pass when a PR exists. The LLM passes are evidence to investigate, never a reason
+to skip a failing deterministic gate.
+
 ---
 
-## Phase 0 — Local second opinion (optional, machine-conditional)
+## Phase 1.5 — Local second opinion (optional, machine-conditional)
 
-On machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before your own read, as a cheap adversarial pass that costs no cloud tokens:
+After Phase 1 passes, on machines that can reach the ai-stack local model — localhost or a LAN host via `AI_STACK_HOST` (check: `curl -sf --max-time 2 "http://${AI_STACK_HOST:-127.0.0.1}:8080/v1/models" >/dev/null`) — pipe the diff through it before semantic review, as a cheap adversarial pass that costs no cloud tokens:
 
 ```bash
 git diff | ~/.pi/agent/skills/before-done/scripts/local-review.sh
@@ -176,7 +181,7 @@ Report checks in this order — Phase 1 first, Phase 2 second:
 
 | Tool | Used for |
 |---|---|
-| `Bash` + `scripts/local-review.sh` | Phase 0 local second opinion (optional, machine-conditional) |
+| `Bash` + `scripts/local-review.sh` | Phase 1.5 local second opinion (optional, machine-conditional) |
 | `Bash` + `make lint` / `dart analyze` | Phase 1 lint check |
 | `Bash` + `scripts/check-l10n.sh` | Phase 1 l10n key coverage + hardcoded-string scan |
 | `Read` + `ls docs/specs/` | Phase 1 spec verification |

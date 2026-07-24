@@ -68,14 +68,24 @@ Connect does, 30 minutes later. Run:
 ~/.claude/skills/testflight-cut/scripts/check-version-sync.sh 0.1.5
 ```
 
-(Resolves the repo root itself — run from any directory.) Four checks, one `PASS`/`FAIL`
-line each (plus a `NOTE` line if origin is unreachable), exit non-zero if any failed:
+Then query App Store Connect itself — local tags cannot prove its actual build state:
+
+```bash
+ASC_APP_ID=<numeric Apple app ID> ~/.claude/skills/testflight-cut/scripts/asc_preflight.sh 0.1.5
+```
+
+(Both scripts resolve the repo root — run from any directory.) The local script prints four
+`PASS`/`FAIL` lines (plus a `NOTE` if origin is unreachable); the ASC script prints one.
+Either exits non-zero on failure:
 
 1. `frontend/pubspec.yaml` `version:` equals the version being tagged
 2. `t<version>` is free (local and origin) — `v<version>` is not checked; it existing
    already is the normal joint-release case
 3. Newer than the last `t` tag, and not a reuse of its train
 4. Worktree clean — the tag must point at verified code
+5. ASC's highest build across **all** App Store versions is lower than the numeric
+   `+build` in `frontend/pubspec.yaml` (requires `ASC_APP_ID`, Codemagic's
+   `app-store-connect` CLI, and its `APP_STORE_CONNECT_*` API credentials)
 
 **Any `FAIL` means do not tag.** Fix the cause (usually: edit `frontend/pubspec.yaml`,
 commit, re-run) and re-run until the script exits 0. Report what the script printed —
@@ -161,7 +171,7 @@ Any `✗` is not a completion report. Surface it and stop.
 
 | Tool | Used for |
 |---|---|
-| `Bash` + `scripts/check-version-sync.sh` | Phase 2 — the whole version gate |
+| `Bash` + `scripts/check-version-sync.sh`, `scripts/asc_preflight.sh` | Phase 2 — local and App Store Connect version gates |
 | `Bash` + `scripts/release-facts.sh` | Phase 3 — commits, surface, feature-gate defaults |
 | `Bash` + `~/.claude/skills/release/scripts/next-version.sh` | Phase 1 — semver suggestion (`v` train) |
 | the `before-done` skill | Phase 2 — lint, fmt, l10n, full Flutter suite before tagging |
