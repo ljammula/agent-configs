@@ -58,6 +58,11 @@ git switch -c feat/<slug>     # or fix/, refactor/
 
 - Surgical changes only; match existing patterns (BLoC vs ChangeNotifier per feature —
   see CLAUDE.md).
+- For significant work, inspect every file needed to understand the interfaces, then
+  implement in dependency order with exactly one file changed per step. After each
+  file, run the narrowest relevant validation and continue autonomously. Do not batch
+  edits or wait for approval between files. Stop only for a real blocker, a failed
+  validation that needs a design decision, or ambiguity in the ready spec.
 - If the feature is gated, follow the 4-step feature-grant wiring and run the
   `wiring-verify` skill after.
 - List UIs with check-off/reorder behavior: write a test for ordering stability — list
