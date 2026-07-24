@@ -65,6 +65,18 @@ behavior, missing timeout, `ctx.signal` doc overclaim) are tracked in that
 doc's own status section — see
 `ai-stack/fable-review-pi-quality-harness.md`, not duplicated here.
 
+**Later same-day update**: real kill-criterion runs (not just code review)
+were completed for both extensions this review's Part 2 covered.
+`cross-model-review.ts` missed a real bug on its one real test and is now
+**disabled by default** (moved to `pi/disabled-extensions/`).
+`co-change-suggest.ts` was validated against the real personal-assistant
+retrospective case, a real seed-selection bug was found and fixed in the
+process, and it's now **adopted** — the target file surfaces at rank #1.
+Details: `ai-stack/local-quality-next-steps-status.md`. The still-open
+Part 1/3 items above (`copilot`'s policy contradiction, `settings.json`'s
+`index.lock` removal, the codex `release` tag-filter regression) remain
+untouched, still worth a follow-up pass.
+
 ---
 
 ## Part 1 — `claude/` (hooks + skills)
