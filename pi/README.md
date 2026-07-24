@@ -47,26 +47,34 @@ Written here:
   `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
   matching turn, with no verification command run yet this session, injects
   one follow-up nudge instead of letting the turn end. Fires at most once per
-  agent run. Empirical validation against the plan's kill criterion (5+
-  repeats of `go/lru-cache` and 2-3 other tasks, with vs. without the
-  extension) in progress — see `ai-stack/local-quality-next-steps-status.md`.
+  agent run. Two rounds of validation runs turned out to be invalidated
+  before this could even be exercised: a harness bug (wrong test-file layout,
+  fixed), then a real extension bug caught by Codex review — `sendUserMessage`
+  needs `deliverAs: "followUp"` while the agent is streaming, or Pi silently
+  swallows the call and nothing is ever delivered (see commit `04d72d5`).
+  Fixed; empirical validation against the plan's kill criterion in progress —
+  see `ai-stack/local-quality-next-steps-status.md`.
 - **`cross-model-review.ts`** — Phase 2 of the same plan: the
   previously-scoped-but-never-built blind-reviewer pass. On the first green
-  run of the task's own verification command, sends `git diff` + the task
-  spec to `ai-stack-general` (:8081) with a review prompt that can't see the
-  first model's own reasoning, and feeds back a flagged issue as a fix-it
-  turn. At most one review pass per agent run. Built and smoke-tested (fires
-  end-to-end, produces sane output); not yet run against the plan's full kill
-  criterion, which needs a seeded-wrong-fixture task battery this machine
-  doesn't have.
+  run of the task's own verification command, diffs against the session's
+  base SHA (so mid-session commits are included) and sends it + the task spec
+  to `ai-stack-general` (:8081) with a review prompt that can't see the first
+  model's own reasoning, feeding back a flagged issue as a fix-it turn once.
+  Had the same `sendUserMessage` delivery bug as above, plus marked itself
+  "reviewed" before confirming there was anything to review — both fixed.
+  Not yet run against the plan's full kill criterion, which needs a
+  seeded-wrong-fixture task battery this machine doesn't have.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
-  co-change count² ÷ total historical touch count) into pi. Once per
-  session, on repos with ≥20 commits of history, ranks files that
-  historically co-change with spec-mentioned identifiers and appends a
-  suggested-reading list to the system prompt. No-op by construction on
-  fixture-sized repos with no history to mine. Not yet validated live against
-  a real personal-assistant feature task (the plan's kill criterion).
+  co-change count² ÷ total historical touch count) into pi. On the first
+  prompt that actually has grep-matchable identifiers (a greeting first
+  doesn't burn the attempt), on repos with ≥20 commits of history, ranks
+  files that historically co-change with those identifiers and appends a
+  suggested-reading list to the system prompt, minus the identifier-matched
+  seed files themselves. No-op by construction on fixture-sized repos with no
+  history to mine; git subprocess cost capped and `ctx.signal`/timeouts wired
+  through. Not yet validated live against a real personal-assistant feature
+  task (the plan's kill criterion).
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
