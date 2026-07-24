@@ -39,8 +39,12 @@ Written here:
 - **`searxng-search.ts`** — a `web_search` tool backed by ai-stack's SearXNG
   (:8888). Chosen over the published `pi-web-access` package, which requires a
   cloud search API key this machine has no reason to buy. Registered as a
-  *tool* rather than left to the `local-search` skill because a 27B model
-  reliably calls a tool in front of it and unreliably remembers a skill.
+  *tool* rather than as a skill (Claude Code's `local-search` skill does the
+  same lookup by shelling out to a script) because a 27B model reliably
+  calls a tool in front of it and unreliably remembers to shell out via a
+  skill -- the pi-side copy of that skill was redundant with this tool and
+  has been removed; the Claude Code copy stays, since Claude Code has no
+  competing built-in tool for this.
 - **`continuation-nudge.ts`** — Phase 1 of
   `ai-stack/local-quality-next-steps-plan.md`: targets the plan-then-abandon
   failure mode (model announces an edit in prose, no tool call, turn ends with

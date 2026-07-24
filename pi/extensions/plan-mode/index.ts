@@ -199,7 +199,7 @@ Restrictions:
 - Bash is disabled because shell syntax cannot be safely constrained by an allowlist
 
 Ask clarifying questions in chat when needed.
-Use the web_search tool or local-search skill for web research when needed.
+Use the web_search tool for web research when needed.
 
 Create a detailed numbered plan under a "Plan:" header:
 

@@ -22,6 +22,17 @@
  * (MINING_DEADLINE_MS) on top of each git subprocess's own timeout, so a
  * slow repo can't block the first turn for more than a bounded amount of
  * time even if every individual call stays under its own cap.
+ *
+ * Note: `ctx.signal` is threaded through every git call below, but at
+ * `before_agent_start` (this extension's only trigger) pi hasn't started the
+ * run yet -- `ctx.signal` is `undefined` for the entire duration of this
+ * handler (verified against pi's source: the agent run that would populate
+ * it starts strictly after `before_agent_start` returns). So right now the
+ * *only* thing actually bounding this pass is `MINING_DEADLINE_MS` combined
+ * with each call's own timeout, not session-abort cancellation. The signal
+ * is still threaded through defensively, in case a future pi version moves
+ * when the run-scoped signal becomes available relative to this event --
+ * but don't rely on Ctrl-C/abort actually cutting this pass short today.
  */
 import type { ExecOptions, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 

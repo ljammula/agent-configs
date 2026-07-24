@@ -8,6 +8,7 @@
  * - Windows toast: Windows Terminal (WSL)
  */
 
+import { execFile } from "child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 function windowsToastScript(title: string, body: string): string {
@@ -34,8 +35,7 @@ function notifyOSC99(title: string, body: string): void {
 }
 
 function notifyWindows(title: string, body: string): void {
-	const { execFile } = require("child_process");
-	execFile("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)]);
+	execFile("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)], () => {});
 }
 
 function notify(title: string, body: string): void {
