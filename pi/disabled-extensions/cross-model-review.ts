@@ -89,6 +89,9 @@ async function runReview(pi: ExtensionAPI, ctx: ExtensionContext, baseSha: strin
 
 	const { host, model } = reviewModel();
 	const prompt = [
+		"Keep your internal reasoning short -- a few sentences at most -- then",
+		"give your verdict immediately.",
+		"",
 		"You are reviewing a code diff against its task spec. You did not write",
 		"this diff and have not seen the author's reasoning -- judge only what's",
 		"in front of you.",
