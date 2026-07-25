@@ -193,7 +193,21 @@ Picking the skill name:
 | `wiring-verify` | After adding something with a documented N-step checklist (feature flags, routes) |
 | `docs-verify` | Doc-only edit (URL, terminology rename) |
 | `pr-remediate` | Addressing review comments on an existing PR |
-| `self-review` | Have it review its own diff before you do |
+| `self-review` | Review a PR under the narsimha-j account (see note below) |
+
+**`self-review` is the one skill naming it in the prompt does not work for.**
+Its frontmatter sets `disable-model-invocation: true`, which per pi's own
+`docs/skills.md` means the skill is hidden from the system prompt entirely
+-- pi will never load it via relevance-matching or by being told to use it
+in prose, regardless of phrasing. This is deliberate, not a gap: the skill
+posts public PR comments/approvals and switches the machine's active `gh`
+account, so it must only run on an explicit, unambiguous trigger, never as
+an inferred side effect of some other task. The only way to invoke it is
+pi's native per-skill slash command: `/skill:self-review` (works in `-p`
+mode too, e.g. `pi -p "/skill:self-review review PR #214"` --
+`enableSkillCommands` defaults to `true` and is unset/default on this
+machine; verified live that `/skill:self-review` loads the real skill
+content, not a hallucinated summary of it).
 
 Constraints worth stating explicitly, given what actually broke in the one
 real dispatch run so far:
