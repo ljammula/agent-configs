@@ -154,6 +154,70 @@ matching skills. They spell out each step and demand pasted command output,
 because a small model that is told "run the gate" will report success without
 running anything.
 
+## Dispatching pi for a code change
+
+Whether a skill actually loads depends on the model's own relevance-matching
+against the prompt (`karpathy-guardrail.ts` exists specifically because pi
+"surfaces skills by relevance-matching rather than unconditionally" — there
+is no deterministic slash-command equivalent for skills). At 27B, don't rely
+on that matching alone: **name the skill explicitly in the prompt.** This is
+the one part of the `personal-assistant` daily-briefing-screen dispatch
+(`pi-real-task-report-daily-briefing-screen.md`) that worked end to end —
+`"Use the feature-dev skill to..."` reliably pulled in the right skill; a
+vaguer description of the task might not have.
+
+Template:
+
+```
+Use the <skill-name> skill to <task>.
+
+Spec: <path, if one exists — feature-dev wants this>
+
+Success condition: run `make verify` and fix any failures until it exits 0.
+Do not stop, report done, or summarize until make verify has actually been
+run and passed — a description of what you would do is not the same as
+doing it.
+
+<any task-specific constraints>
+
+Do not commit or push.
+```
+
+Picking the skill name:
+
+| Skill | When to name it |
+|---|---|
+| `feature-dev` | Net-new, multi-file, user-visible feature that'll need a PR — full spec→branch→implement→l10n→verify flow |
+| `backend-dev` | Go-only change (handler/service/repository/middleware) |
+| `frontend-dev` | Flutter-only change (widget/bloc/notifier/screen) |
+| `wiring-verify` | After adding something with a documented N-step checklist (feature flags, routes) |
+| `docs-verify` | Doc-only edit (URL, terminology rename) |
+| `pr-remediate` | Addressing review comments on an existing PR |
+| `self-review` | Have it review its own diff before you do |
+
+Constraints worth stating explicitly, given what actually broke in the one
+real dispatch run so far:
+
+- **If the branch might already exist**, say so:
+  `"the branch <name> already exists; switch to it, do not create or reset
+  it."` This is what triggered the unprompted `git reset --hard` that
+  `git-safety.ts` now exists to block — the block still costs a wasted turn
+  working out the alternative, so stating it up front avoids the detour.
+- **If reusing an existing l10n key name**:
+  `"grep the .arb files for this key name first -- don't assume it's
+  unused."` `make lint` now catches a resulting duplicate (see
+  `personal-assistant` PR #214), but catching it before pi writes broken
+  translations is cheaper than catching it after.
+- **Always end with the exact verification command and "stop only when it
+  exits 0"** — not "when it passes," which is vaguer and, per the
+  transcript, is exactly the instruction it silently didn't follow once.
+
+One habit that lives outside the prompt: whatever pi reports at the end is a
+claim, not a fact. Re-run the verification command yourself before trusting
+it — that's what caught both the pass-1 silent stop and the l10n bug pass-2
+missed in the daily-briefing-screen dispatch. No prompt phrasing replaces
+that; it's a review step you still own.
+
 ## Settings this machine expects
 
 `~/.pi/agent/settings.json` is **not** symlinked from this repo: pi rewrites it
