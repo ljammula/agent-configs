@@ -50,16 +50,25 @@ Written here:
   `ai-stack/local-quality-next-steps-plan.md`: targets the plan-then-abandon
   failure mode (model announces an edit in prose, no tool call, turn ends with
   `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
-  matching turn, with no verification command run yet this session, injects
-  one follow-up nudge instead of letting the turn end. Fires at most once per
-  agent run. **Verdict (2026-07-24, see `ai-stack/local-quality-next-steps-status.md`):
-  not adopted, but kept loaded.** Across ~50 real trials (two task shapes,
-  one deliberately harder) plus the original grounding case, the trigger
-  condition never fired outside deterministic mocked tests — the kill
-  criterion ("adopt only if it measurably reduces plan-then-abandon
-  sessions") can't be resolved either way at this trigger rate. Kept
-  installed because it's a true no-op unless it fires: zero cost, zero
-  behavior change when idle.
+  matching turn, with no verification command run yet this invocation,
+  injects one follow-up nudge instead of letting the turn end. Fires at most
+  once per agent run. **Verdict as of 2026-07-24 (see
+  `ai-stack/local-quality-next-steps-status.md`): not adopted, but kept
+  loaded** — across ~50 real trials the trigger condition never fired outside
+  deterministic mocked tests. **Updated 2026-07-25**, after a real occurrence
+  in the `personal-assistant` daily-briefing-screen dispatch: the model
+  stopped with `stopReason: "stop"`, no tool call, and *zero text content* —
+  not forward-looking prose. The original trigger required non-empty text
+  matching a forward-looking pattern and so, correctly per its own logic,
+  never fired on this case; the failure mode observed for real was narrower
+  and more silent than the one the extension was built for. Widened to also
+  fire on a stop-with-empty-content turn, and fixed a related bug found in
+  the same review: `verificationRan` scanned the whole persisted
+  `--continue` branch, so once *any* pass in a multi-dispatch session ran a
+  verification command, the nudge was permanently disarmed for every later
+  pass too — now scoped to the current invocation only. See
+  `pi-real-task-report-daily-briefing-screen.md` for the full transcript
+  analysis. Still a true no-op unless it fires.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first
@@ -82,6 +91,21 @@ Written here:
   (a purely generic paraphrase correctly surfaces nothing, since there's no
   identifier signal for the method to use) — that's an inherent scoping
   limit of identifier-grep-based discovery, not a bug.
+- **`git-safety.ts`** — added 2026-07-25. Blocks destructive git commands run
+  via the `bash` tool (`reset --hard`, `push --force` without
+  `--force-with-lease`, `clean -f`, `branch -D`, `checkout`/`restore -- .`),
+  mirroring the confirm-before-destructive-action norm this user's Claude
+  Code setup already follows. Each block names a safe alternative rather
+  than a bare refusal, since the `flutter gen-l10n` rediscovery flail in the
+  daily-briefing-screen dispatch (~8 failed bash commands in a 5-minute
+  span) is direct evidence this model thrashes when blocked with no
+  alternative given. Added after `pi`, in `-p` mode, ran `git reset --hard
+  main` unprompted to resolve a self-inflicted "branch already exists"
+  conflict, discarding a prior commit; `git-checkpoint.ts` could have
+  recovered it but only via `/fork`, which is interactive-UI-only and does
+  nothing in `-p` mode. Verified live: reproduced the exact command against
+  a scratch repo, confirmed it's blocked and the repo's commits are
+  untouched. See `pi-real-task-report-daily-briefing-screen.md`.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
