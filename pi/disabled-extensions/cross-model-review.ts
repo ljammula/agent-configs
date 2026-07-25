@@ -56,7 +56,7 @@ const EXEC_TIMEOUT_MS = 5000;
 function reviewModel(): { host: string; model: string } {
 	return {
 		host: process.env.AI_STACK_HOST || "127.0.0.1",
-		model: "/Users/kanna/code/ai-stack/models/Qwen3.6-35B-A3B-5bit",
+		model: "/Users/kanna/code/ai-stack/models/gemma-4-31B-it-OptiQ-4bit",
 	};
 }
 
