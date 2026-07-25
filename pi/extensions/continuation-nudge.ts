@@ -7,11 +7,19 @@
  * tool call, and stopped (stopReason "stop", agent_settled) instead of making
  * the edit. See ai-stack/local-quality-next-steps-plan.md Phase 1.
  *
- * Heuristic: on a turn that ends with stopReason "stop", pure prose content
- * (no tool call), text matching a forward-looking verb pattern, and no
- * verification command run yet this session -- inject one follow-up nudge
- * instead of letting the turn end. Fires at most once per agent run to avoid
- * looping if the model keeps abandoning.
+ * Widened 2026-07-25 after a real occurrence in the personal-assistant
+ * daily-briefing-screen dispatch: the model stopped with stopReason "stop",
+ * no tool call, and *zero text content* -- not forward-looking prose. The
+ * original forward-looking-prose check (isPureForwardLookingProse) requires
+ * non-empty text and so never fired on this case. See
+ * pi-real-task-report-daily-briefing-screen.md, "Follow-up" section.
+ *
+ * Heuristic: on a turn that ends with stopReason "stop", no tool call, and no
+ * verification command run yet this session, inject one follow-up nudge
+ * instead of letting the turn end -- if either (a) the text matches a
+ * forward-looking verb pattern, or (b) the text is empty/whitespace-only
+ * (silent abandonment, no announcement at all). Fires at most once per agent
+ * run to avoid looping if the model keeps abandoning.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -34,24 +42,40 @@ const VERIFICATION_COMMAND_PATTERNS = [
 	/\bdart (?:test|format)\b/i,
 ];
 
-const NUDGE_MESSAGE = "You described an edit but didn't make it. Make it now.";
+const NUDGE_MESSAGES = {
+	"forward-looking": "You described an edit but didn't make it. Make it now.",
+	silent: "You stopped without making a tool call or finishing your response. Continue the task.",
+} as const;
 
-function isPureForwardLookingProse(content: { type: string; text?: string }[]): boolean {
-	if (content.some((c) => c.type === "toolCall")) return false;
+type AbandonKind = keyof typeof NUDGE_MESSAGES;
+
+/** Returns which abandonment pattern this turn matches, or null if it doesn't look abandoned. */
+function classifyAbandonedTurn(content: { type: string; text?: string }[]): AbandonKind | null {
+	if (content.some((c) => c.type === "toolCall")) return null;
 	const text = content
 		.filter((c) => c.type === "text")
 		.map((c) => c.text ?? "")
 		.join("\n")
 		.trim();
-	if (!text) return false;
-	return FORWARD_LOOKING_PATTERNS.some((re) => re.test(text));
+	if (!text) return "silent";
+	return FORWARD_LOOKING_PATTERNS.some((re) => re.test(text)) ? "forward-looking" : null;
 }
 
 export default function (pi: ExtensionAPI) {
 	let nudgedThisRun = false;
+	// Entry id at the start of *this* pi invocation, so verificationRan only looks
+	// at what this run itself has done -- not at verification from an earlier
+	// `--continue`d pass in the same persisted session. Without this, once any
+	// pass in a multi-dispatch session runs `make verify` once, the nudge is
+	// silently disarmed for every later pass too, even if that later pass
+	// abandons before verifying its own change. See the "Follow-up" section of
+	// pi-real-task-report-daily-briefing-screen.md.
+	let runStartEntryId: string | undefined;
 
-	pi.on("agent_start", () => {
+	pi.on("agent_start", (_event, ctx) => {
 		nudgedThisRun = false;
+		const leaf = ctx.sessionManager.getLeafEntry();
+		runStartEntryId = leaf?.id;
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
@@ -60,11 +84,14 @@ export default function (pi: ExtensionAPI) {
 		if (message.role !== "assistant") return;
 		if (message.stopReason !== "stop") return;
 		if (event.toolResults.length > 0) return;
-		if (!isPureForwardLookingProse(message.content)) return;
+		const kind = classifyAbandonedTurn(message.content);
+		if (!kind) return;
 
 		const leaf = ctx.sessionManager.getLeafEntry();
 		const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
-		const verificationRan = branch.some((entry) => {
+		const startIdx = runStartEntryId ? branch.findIndex((entry) => entry.id === runStartEntryId) : -1;
+		const thisRunBranch = startIdx >= 0 ? branch.slice(startIdx + 1) : branch;
+		const verificationRan = thisRunBranch.some((entry) => {
 			if (entry.type !== "message" || entry.message.role !== "assistant") return false;
 			return entry.message.content.some(
 				(c) =>
@@ -77,6 +104,6 @@ export default function (pi: ExtensionAPI) {
 		if (verificationRan) return;
 
 		nudgedThisRun = true;
-		pi.sendUserMessage(NUDGE_MESSAGE, { deliverAs: "followUp" });
+		pi.sendUserMessage(NUDGE_MESSAGES[kind], { deliverAs: "followUp" });
 	});
 }

@@ -117,3 +117,89 @@ required the same depth of independent verification (reading the transcript,
 re-running `make verify` myself, diffing the l10n files by hand) as
 reviewing a junior contributor's PR — the harness reduced typing, not review
 load.
+
+## Follow-up: is this a ceiling, or fixable? (Claude + Opus second opinion)
+
+After the above was written, we asked whether the four "what didn't work"
+items point at a hard ceiling for a 27B local model, or are addressable
+harness gaps. Claude's initial take was "all four are independently
+fixable." An independent Opus review agreed with the direction but
+corrected two of the four on the specifics, using the actual extension
+source and session JSONL rather than the summary above:
+
+- **Git safety isn't a blank gap.** `git-checkpoint.ts` already snapshots
+  base SHA + stash + untracked blobs every turn, so the `reset --hard` in
+  this run *was* recoverable — but only via `/fork`, which is
+  interactive-UI-only and does nothing in `-p` mode, which is how this task
+  actually ran. The real gap is a `-p`-compatible guard, not "add recovery
+  from scratch."
+- **The `continuation-nudge.ts` diagnosis was wrong in the summary above,
+  and the real cause is sharper than either of our first guesses.**
+  Checked directly against the session JSONL: the pass-1 stop's
+  `stopReason` was `"stop"` (confirming it wasn't a `maxTokens`/`"length"`
+  cutoff, which Opus had flagged as worth ruling out first). But the
+  assistant's final turn had **zero text content** — no forward-looking
+  sentence, nothing pattern-matchable, just an empty stop after a `read`
+  tool call. `continuation-nudge.ts`'s `isPureForwardLookingProse()`
+  (`extensions/continuation-nudge.ts:39-48`) explicitly returns `false` on
+  empty text (line 46: `if (!text) return false;`) — it only fires on
+  "announced but didn't act" prose, which is a narrower and, on this
+  evidence, less common failure mode than "went completely silent with no
+  text and no tool call." The extension's own regex patterns were never
+  the problem; the trigger's premise (abandonment always comes with
+  announcing prose) doesn't hold for this real occurrence.
+- **The cheat-sheet idea (Claude's 4th point) was mostly wrong**, per
+  Opus: it would spend prompt budget on the actual binding constraint (85K
+  context) to save roughly 5 of the 93 minutes, and the one named example
+  (`tester.widgetText`, a hallucinated API) isn't a missing-lookup problem
+  a cheat-sheet fixes.
+- **check-l10n.sh duplicate-key detection was the right call but the wrong
+  layer**, per Opus: a skill script only runs if the model chooses to run
+  it. The fix belongs in DayTrix's own `make verify` (repo-side,
+  model-independent, runs under any agent or CI), with the pi-side script
+  calling the same check.
+
+Opus's sharper read on "is there a real ceiling": the l10n bug is the
+strongest candidate. The model didn't *miss* the collision — it patched
+the English smoke-test assertion for the new value, meaning it saw the
+change was needed — and then failed to propagate the same fix to the other
+five `.arb` files across two context compactions. "Hold one invariant
+consistently across N parallel artifacts over a long horizon" is the kind
+of task that degrades under compaction at this model size, and corroborating
+evidence already existed in this same config: `cross-model-review.ts`
+(disabled, not this run) returned `NO_ISSUES_FOUND` twice on a diff with a
+known, spec-violating bug in its own kill-criterion test. The pattern
+across every extension in this config: the ones that stuck
+(`protected-paths`, `format-on-edit`, `rtk-rewrite`, `co-change-suggest`)
+are fully deterministic; the ones that depend on local-model judgment
+(`cross-model-review`, arguably `continuation-nudge`) have been rejected or
+demonstrably under-fire. Sample size caveat: n=1 real task / 3 dispatches
+supports "every failure here was in the class a deterministic check would
+have caught," not a general claim about a hard reasoning ceiling either way.
+
+**Fixes applied as a result** (see commit history in this repo and in
+`personal-assistant` following this entry):
+
+1. `frontend`'s `make verify`/lint gate in `personal-assistant` gained an
+   `.arb` duplicate-JSON-key check (catches the exact bug shipped here,
+   independent of which agent or human is editing).
+2. `extensions/continuation-nudge.ts` widened to also fire on a
+   stop-with-empty-content turn (not only forward-looking prose), gated the
+   same way (no tool call, `stopReason === "stop"`, no verification run yet
+   this invocation).
+3. A new `extensions/git-safety.ts` intercepts destructive git commands
+   (`reset --hard`, `push --force` without `--force-with-lease`, `clean
+   -f`, `branch -D`, `checkout -- .`) at the bash tool-call layer in `-p`
+   mode, blocking with a named safe alternative rather than a bare refusal
+   — because the `flutter gen-l10n` rediscovery flail in this same run
+   (~8 failed bash commands) is direct evidence that this model thrashes
+   when blocked without being told what to do instead.
+
+**Honest bottom line, unchanged in substance:** these fixes remove three
+specific recurrences. They don't remove the need to read the transcript.
+The bottleneck is a 27B model's judgment and consistency over a long
+horizon in an unfamiliar codebase, and no extension fixes that directly.
+The defensible scope for this local setup is task classes fully covered by
+deterministic gates — mechanical refactors, test-writing against existing
+code, l10n sweeps, rename passes — with net-new, judgment-heavy feature
+work kept on a cloud model.
