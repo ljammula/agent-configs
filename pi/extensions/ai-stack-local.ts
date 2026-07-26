@@ -26,8 +26,8 @@ export default function (pi: ExtensionAPI) {
     api: "openai-completions",
     models: [
       {
-        id: "/Users/kanna/code/ai-stack/models/Qwen3.6-35B-A3B-5bit",
-        name: "Qwen3.6-35B-A3B-5bit",
+        id: "/Users/kanna/code/ai-stack/models/gemma-4-31B-it-OptiQ-4bit",
+        name: "gemma-4-31B-it-OptiQ-4bit",
         reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

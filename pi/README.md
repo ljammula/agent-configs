@@ -27,7 +27,8 @@ Written here:
 
 - **`ai-stack-local.ts`** — registers both ai-stack slots as providers:
   `ai-stack-local` (:8080, Qwen3.6-27B-4bit, "code") and `ai-stack-general`
-  (:8081, Qwen3.6-35B-A3B-5bit, "general"). Both follow `AI_STACK_HOST`.
+  (:8081, gemma-4-31B-it-OptiQ-4bit, "general"). Both follow
+  `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally.
@@ -106,6 +107,31 @@ Written here:
   nothing in `-p` mode. Verified live: reproduced the exact command against
   a scratch repo, confirmed it's blocked and the repo's commits are
   untouched. See `pi-real-task-report-daily-briefing-screen.md`.
+- **`cross-model-review.ts`** — Phase 2 of
+  `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
+  never-built blind-reviewer pass (diffs against session base SHA, sends
+  diff + spec to `ai-stack-general` for a second opinion, feeds back a
+  flagged issue). **Verdict (2026-07-24, reviewer = Qwen3.6-35B-A3B): not
+  adopted** — the one real test run (a known, spec-violating bug the hidden
+  test suite catches) came back negative, reviewer returned
+  `NO_ISSUES_FOUND`. Moved to `disabled-extensions/`. **Re-verdict
+  (2026-07-25, reviewer switched to gemma-4-31B-it-OptiQ-4bit on :8081,
+  replacing 35B-A3B in the resident pair): adopted, moved back to
+  `extensions/`.** A live smoke run against the `lru-cache` task (no seeded
+  bug — the model's own organically-written solution, tests green) had the
+  reviewer catch a real logic bug the test suite missed: the `order` slice
+  grows unbounded on repeated `Put`s to existing keys, unpruned during
+  updates. This is a stronger result than the plan's own kill criterion
+  (an unseeded catch, not a seeded one) but still n=1 — treat as a strong
+  signal, not a settled result, until repeated across a few more runs.
+  Directly timed the review call against this diff (953 prompt tokens) at
+  12.9s, ~20% of `REVIEW_TIMEOUT_MS` (60s) — no need to raise the timeout
+  for tasks this size on the current tuned qwen3.6+gemma4 pair. Separately,
+  this same smoke run got killed by `run_one.sh`'s 180s watchdog
+  (`PI_EXIT=143`) after the review's fix-it turn extended the session — a
+  real instance of the interaction Fable's review flagged (§2), though it's
+  a property of the validation harness's fixed timeout, not of real
+  interactive `pi` usage, which has no such cap.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
@@ -126,26 +152,6 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 - **`notify.ts`** — terminal notification when the agent finishes. Vendored
   change: gated on `hasUI`, since in `-p` mode the raw OSC escape would
   otherwise corrupt captured stdout.
-
-### Disabled extensions (`disabled-extensions/`, not loaded by default)
-
-- **`cross-model-review.ts`** — Phase 2 of
-  `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
-  never-built blind-reviewer pass (diffs against session base SHA, sends
-  diff + spec to `ai-stack-general` for a second opinion, feeds back a
-  flagged issue). Code is correct — two rounds of external review (Codex,
-  then Fable) plus deterministic mocked verification all passed. **Verdict
-  (2026-07-24, see `ai-stack/local-quality-next-steps-status.md`): not
-  adopted, moved out of the default-loaded set.** The plan's kill criterion
-  was "adopt only if it catches something the test suite alone missed in
-  at least one real repeat." The one real test run — feeding the extension's
-  actual code a real diff with a known, spec-violating bug (the hidden test
-  suite catches it) — came back negative: the reviewer returned
-  `NO_ISSUES_FOUND`, reproduced twice. Given the extension's real cost (an
-  extra model turn, real latency) and this concrete miss on exactly the bug
-  class it exists to catch, it's not defensible as an active default on
-  current evidence. Kept in the repo, not deleted, in case a larger battery
-  someday shows real signal — move back to `extensions/` if so.
 
 ### Prompt templates
 

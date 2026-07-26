@@ -3,8 +3,9 @@
  *
  * Phase 2 of ai-stack/local-quality-next-steps-plan.md: the previously-
  * scoped-but-never-built "blind-reviewer pass". Both ai-stack slots are
- * already resident (:8080 27B "code", :8081 35B-A3B "general"); nothing
- * today has one model review the other's diff before a task is called done.
+ * already resident (:8080 27B "code", :8081 Gemma-4-31B-OptiQ "general");
+ * nothing today has one model review the other's diff before a task is
+ * called done.
  *
  * On the first green run of the task's own verification command this
  * session, sends the diff since session start (working tree + any commits
