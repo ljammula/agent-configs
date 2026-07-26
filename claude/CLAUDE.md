@@ -31,7 +31,11 @@ Always apply the `karpathy-guidelines` skill when writing, reviewing, or refacto
 Do not delegate code edits to a local model via Aider — benchmarked in
 `~/code/local-model-bench`, that path (`sonnet-aider-local`) cost *more*
 Anthropic tokens than editing solo and ran 5-10x slower, so the
-`dispatch-local` skill was removed. Write the edit yourself.
+`dispatch-local` skill was removed. (It did win one task solo Sonnet
+missed, but on a task later shown to be run-to-run flaky regardless of
+harness — not enough signal to justify the added cost. See
+`local-model-bench/README.md`'s verdict section for the full data.) Write
+the edit yourself.
 
 The read-only local services are still worth using. The served HTTP
 endpoints — code review (:8080), log triage (:8081), and SearXNG (:8888),

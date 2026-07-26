@@ -43,7 +43,9 @@ trailer for the agent.
 
 Do not delegate code edits to a local model via Aider. Benchmarked in
 `~/code/local-model-bench`, that path cost more cloud tokens than editing
-directly and ran 5-10x slower. Write the edit yourself.
+directly and ran 5-10x slower (it won one task solo Sonnet missed, but on
+one later shown to be flaky independent of harness — see
+`local-model-bench/README.md`). Write the edit yourself.
 
 Read-only local services are still worth using. The served endpoints are:
 
