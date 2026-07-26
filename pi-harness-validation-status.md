@@ -1,16 +1,20 @@
 # pi harness — consolidated validation status
 
-**As of 2026-07-26.** This supersedes nothing by deleting it — it exists
+**As of 2026-07-26 (updated same day with a live validation batch — see
+Todo).** This supersedes nothing by deleting it — it exists
 because the real story is split across ~10 documents in two repos
 (`agent-configs`, `ai-stack`) written at different points in the same
 investigation, and at least one of them was overtaken by events before it
 was ever committed. This file is the single place to check current state;
 the source documents cited throughout remain the evidence trail.
 
-No new testing was done to produce this document — it is a reconciliation
-of existing evidence, checked against what's actually on disk (git logs,
-`scratch-phase-validate/results.tsv`, extension source) as of today, not a
-restatement of any one prior doc's framing.
+This document started as a pure reconciliation of existing evidence (no new
+testing), checked against what's actually on disk (git logs,
+`scratch-phase-validate/results.tsv`, extension source). It has since been
+updated once, same day, with a real new live batch targeting two
+specifically-identified untested branches — see the 2026-07-26 entries in
+Todo and `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live
+validation, round 2" for the full writeup.
 
 ## Summary
 
@@ -102,6 +106,30 @@ battery.
   fixtures — has never been run. Everything adopted so far is real but
   single-digit-n per bug class, on effectively one task family
   (`lru-cache`).
+- **New, 2026-07-26: a verbose-but-correct "clean" reviewer response can be
+  misclassified as `flagged`.** Real, reproduced instance (not
+  hypothetical) — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+  "Live validation, round 2" section. The reviewer reasoned at length and
+  correctly concluded no issue, ending its reply with the exact
+  `NO_ISSUES_FOUND` marker, but the marker-match logic requires the
+  *entire* (edge-trimmed) reply to equal the marker, so the verdict was
+  scored `flagged` instead of `clean`. Not fixed — needs a reviewed plan
+  first, same as prior changes to this extension.
+- **Cap-hit (round 3) and clean-short-circuit are still live-unobserved.**
+  A 2026-07-26 serialized 5-run live batch targeting exactly these two
+  branches hit neither: 2 runs died to the batch harness's watchdog before
+  reaching a second round, and 2 runs had the primary model settle after
+  one fix-it followup without re-triggering verification (the extension's
+  own followup message permits this — "if it's a false positive, say why
+  and move on" — so not a bug, but it does mean live round-progression
+  depends on the primary model's choice, not just the extension). Remain
+  unit-harness-only for these two branches.
+- **The batch harness's watchdog is confirmed too tight for the review arm,
+  even after a fix.** `scratch-phase-validate/run_one.sh`'s watchdog was
+  180s; raised to 420s for the `cross-model-review.ts` arm specifically
+  after a *solo, uncontended* run with an already-correct fix still got
+  killed at 180s. Even at 420s, 2/5 runs in the 2026-07-26 batch still hit
+  the watchdog — partially closed, not solved.
 - **`co-change-suggest.ts`'s live (non-retrospective) validation** — "try
   it live on one new personal-assistant feature task," the second half of
   the plan's own kill criterion, has not been run.
