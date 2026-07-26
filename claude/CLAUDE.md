@@ -34,7 +34,7 @@ Anthropic tokens than editing solo and ran 5-10x slower, so the
 `dispatch-local` skill was removed. (It did win one task solo Sonnet
 missed, but on a task later shown to be run-to-run flaky regardless of
 harness — not enough signal to justify the added cost. See
-`local-model-bench/README.md`'s verdict section for the full data.) Write
+`local-model-bench/STATUS.md` for the full data.) Write
 the edit yourself.
 
 The read-only local services are still worth using. The served HTTP
