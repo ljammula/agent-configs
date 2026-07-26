@@ -11,6 +11,12 @@ piece of that, chosen for one reason: this machine runs pi against **local
 models** with an 85K context window, not a cloud model, so the harness has to
 carry weight the model cannot.
 
+For a single, dated, cross-repo reconciliation of what's actually been
+validated vs. still open (extension-by-extension, with real trial counts),
+see `../pi-harness-validation-status.md`. This file below documents what
+each extension does; that one documents what's actually been proven about
+whether it works.
+
 ## What's installed
 
 | Path | Becomes | What |
