@@ -132,6 +132,86 @@ Written here:
   real instance of the interaction Fable's review flagged (§2), though it's
   a property of the validation harness's fixed timeout, not of real
   interactive `pi` usage, which has no such cap.
+  **Bounded-loop rewrite (2026-07-25, `ai-stack/cross-model-review-bounded-loop-plan.md`):**
+  the prior one-shot boolean (`reviewedThisRun`) is replaced with a
+  `reviewCount`/`lastReviewedDiff`/`done` state machine bounded at
+  `MAX_REVIEW_ROUNDS = 3`, so a flagged issue's *fix* gets re-reviewed
+  instead of the loop ending after one nudge. `runReview` now returns a
+  typed `ReviewResult` (`unchanged | no-diff | no-spec | transient | clean
+  | flagged`) instead of a bare boolean, and the clean-verdict marker match
+  tolerates markdown wrapping (backticks/emphasis stripped from the string
+  *edges* only) instead of requiring byte-exact equality — edge-only, not a
+  global strip, since a blanket strip corrupts `NO_ISSUES_FOUND`'s own
+  underscores (caught by the unit harness below before it ever shipped).
+  Validated:
+  - **Unit-level** (`/tmp/pi-mock-check`-style throwaway mocked-`ExtensionAPI`
+    harness, not committed, same pattern as the 2026-07-25 real-bug check
+    below): 14/14 assertions pass, covering cap enforcement (round 3 stops
+    the loop with explicit "no further automatic review" wording),
+    clean-short-circuit (a clean round 1 or 2 stops immediately, round 3
+    never fires), unchanged-diff skip (an identical diff on a rerun consumes
+    no round and resends nothing), tolerant marker matching across five
+    realistic wrapped forms, and the adversarial case Fable's plan review
+    called out (a genuine finding phrased "No issues found in the core
+    logic, but ..." resolves to `flagged`, not `clean`). This harness caught
+    a real bug in the first implementation: the marker normalizer stripped
+    `` ` * _ `` globally, which corrupted `NO_ISSUES_FOUND`'s own
+    underscores and made every clean verdict register as flagged — fixed to
+    strip only at the string's edges before this shipped.
+  - **Regression check against the original disablement case**: rebuilt the
+    seeded bug that caused the 2026-07-24 disablement (`Get` fixed for
+    recency, `Put` on an *existing* key left un-touched — the exact class
+    the spec calls out and the hidden test suite catches) and ran it
+    through the extension's real, unmodified `runReview` logic against the
+    live `:8081` endpoint. **No regression — an improvement**: the current
+    gemma4 reviewer correctly flags it (`` `Put` is not updated to call
+    `touch`... eviction logic remains broken for insertions and updates
+    ``), unlike the original 35B-A3B reviewer that missed this exact class
+    on 2026-07-24.
+  - **Live smoke tests**, `lru-cache` task, real `pi` + Qwen3.6-27B primary
+    + gemma4 reviewer via `scratch-phase-validate/run_one_long.sh` (a
+    validation-only copy with the watchdog raised to 600s, kept separate
+    from `run_one.sh` so the real 180s number stays measurable — see cost
+    check below). 3 sequential runs (LAN inference is single-request-at-a-
+    time, so all runs — including the cost check — ran strictly one after
+    another, never concurrently): run 1 — round 1 flagged, model rebutted it
+    as a false positive (correctly, on inspection) and made no further edit;
+    a repeat `go build` on the identical diff correctly hit the `unchanged`
+    outcome and did not consume round 2, `PI_EXIT=0` at 156s. Run 2 — round
+    1 flagged a real edge case; the model investigated via an ad-hoc
+    `go run` scratch program instead of rerunning a
+    `VERIFICATION_COMMAND_PATTERNS` match, so round 2 correctly never
+    triggered (trigger condition is unchanged by this plan, as designed),
+    `PI_EXIT=0` at 220s. Run 3 — round 1 flagged a real bug (`moveToBack`
+    silently dropped new keys from the order slice), the model fixed it,
+    round 2 fired on the updated diff and flagged a second issue that the
+    model rebutted as a false positive, session ended naturally with no
+    round 3, `PI_EXIT=0` at 335s, tests green throughout. Net: 3/3 real
+    end-to-end runs exercised round 1 correctly; 1/3 exercised a genuine
+    round-1→round-2 progression on a real fix. The cap-hit (round 3) and
+    clean-short-circuit branches were not observed live in these 3 runs but
+    are deterministically exercised by the unit harness above using the
+    same compiled `runReview` logic, which the plan's own validation
+    section treats as an acceptable substitute for guaranteed live
+    coverage.
+  - **Cost check on a realistic diff size**: the prior 12.9s figure was only
+    ever measured on the 953-token `lru-cache` fixture. Timed the same
+    unmodified `runReview` HTTP call against a real multi-file feature diff
+    from `personal-assistant` (`186282ef`, ~40KB / ~10.5k prompt tokens):
+    **73.5s**, which exceeds the prior `REVIEW_TIMEOUT_MS` (60s) — at that
+    size the old timeout would abort the request and silently skip the
+    review (a `transient` outcome, not a crash, but zero protection
+    delivered on exactly the diffs large enough to most need it). Raised
+    `REVIEW_TIMEOUT_MS` to 120s to leave headroom above the measured 73.5s.
+    Separately, on the small `lru-cache` fixture, `run_one.sh`'s real 180s
+    watchdog still kills a run mid-fix-it-turn after just one flagged round
+    (`PI_EXIT=143`, reproduced again during this validation) — a bounded
+    3-round loop makes that interaction *more* likely to recur in the
+    existing validation batches, not less; `run_one.sh` itself was
+    deliberately left unmodified (only a separate `run_one_long.sh` copy
+    was used for this validation) since raising the production watchdog is
+    a harness-scope decision beyond this plan, not something to change as a
+    side effect of extending the extension.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 

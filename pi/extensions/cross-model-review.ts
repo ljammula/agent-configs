@@ -27,15 +27,18 @@
  * already settled by the time the review finishes (starts a fresh turn) --
  * both paths are handled by pi's own `prompt()`, not by this extension.
  *
- * Runs at most once per agent run (one review pass per completed task, not
- * one per test invocation) to bound cost -- this is a real extra model turn,
- * not a free check (see plan's Phase 2 cost note). The "reviewed" flag is
- * only set once a non-empty diff has actually been submitted and answered,
- * so a green test run before any edit, an empty diff, a request that times
- * out (REVIEW_TIMEOUT_MS, combined with ctx.signal), or a transient ai-stack
- * outage doesn't burn the one review attempt -- a later qualifying bash call
- * can retry. `reviewInFlight` prevents two overlapping attempts from a rapid
- * run of qualifying bash calls before the first attempt resolves.
+ * Bounded at MAX_REVIEW_ROUNDS review rounds per agent run (see
+ * ai-stack/cross-model-review-bounded-loop-plan.md): each round is a real
+ * extra model turn, not a free check, so the loop stops as soon as a round
+ * comes back clean or the cap is hit, whichever comes first. A round is
+ * only consumed once a non-empty diff has actually been submitted and
+ * answered with a real (flagged or clean) verdict -- a green test run
+ * before any edit, an empty diff, an identical diff to the last-reviewed
+ * one, a request that times out (REVIEW_TIMEOUT_MS, combined with
+ * ctx.signal), or a transient ai-stack outage doesn't burn a round -- a
+ * later qualifying bash call can retry. `reviewInFlight` prevents two
+ * overlapping attempts from a rapid run of qualifying bash calls before the
+ * first attempt resolves.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -51,8 +54,15 @@ const VERIFICATION_COMMAND_PATTERNS = [
 ];
 
 const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
-const REVIEW_TIMEOUT_MS = 60_000;
+// 60s (the prior value) measured too short for realistic diffs: a ~10.5k-
+// token multi-file diff (a real personal-assistant feature commit) took
+// 73.5s end-to-end against the live gemma4 endpoint, which would abort
+// under the old timeout and silently skip the review. 120s leaves headroom
+// above that measurement (see ai-stack/cross-model-review-bounded-loop-plan.md
+// validation item 4).
+const REVIEW_TIMEOUT_MS = 120_000;
 const EXEC_TIMEOUT_MS = 5000;
+const MAX_REVIEW_ROUNDS = 3;
 
 function reviewModel(): { host: string; model: string } {
 	return {
@@ -69,15 +79,50 @@ function messageText(content: string | { type: string; text?: string }[]): strin
 		.join("\n");
 }
 
-/** Returns true iff a real review was submitted and answered (flagged or not). */
-async function runReview(pi: ExtensionAPI, ctx: ExtensionContext, baseSha: string | undefined): Promise<boolean> {
+/**
+ * Formatting-only tolerance for the clean-verdict marker: strips backtick /
+ * markdown-emphasis wrapping from the *edges* of the reply and trims
+ * whitespace, then the caller still requires full-string equality against
+ * NO_ISSUE_MARKER. Only the edges, not a global strip -- NO_ISSUE_MARKER
+ * itself contains underscores, so a blanket `_` strip would corrupt the
+ * marker being matched against. Deliberately not a prefix match either -- a
+ * genuine finding phrased as "No issues found in the core logic, but ..."
+ * must stay "flagged", not silently collapse to "clean" (see
+ * ai-stack/cross-model-review-bounded-loop-plan.md's NO_ISSUE_MARKER
+ * section).
+ */
+function normalizeForMarkerMatch(text: string): string {
+	return text
+		.trim()
+		.replace(/^[`*_]+/, "")
+		.replace(/[`*_]+$/, "")
+		.trim();
+}
+
+type ReviewOutcome = "unchanged" | "no-diff" | "no-spec" | "transient" | "clean" | "flagged";
+
+interface ReviewResult {
+	outcome: ReviewOutcome;
+	/** Present on "clean" | "flagged", for the caller's lastReviewedDiff. */
+	diff?: string;
+	/** Present on "flagged" only -- the reviewer's actual finding. */
+	reviewText?: string;
+}
+
+async function runReview(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	baseSha: string | undefined,
+	lastReviewedDiff: string | undefined,
+): Promise<ReviewResult> {
 	// Diff since session start: baseSha..working-tree, so commits made
 	// mid-session are included, not just uncommitted changes.
 	const diffArgs = baseSha ? ["diff", baseSha] : ["diff"];
 	const diffResult = await pi.exec("git", diffArgs, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
-	if (!diffResult || diffResult.code !== 0) return false;
+	if (!diffResult || diffResult.code !== 0) return { outcome: "transient" };
 	const diff = diffResult.stdout.trim();
-	if (!diff) return false; // nothing to review yet -- don't consume the one attempt
+	if (!diff) return { outcome: "no-diff" }; // nothing to review yet -- don't consume a round
+	if (diff === lastReviewedDiff) return { outcome: "unchanged" }; // rerun with no edits -- don't consume a round
 
 	const leaf = ctx.sessionManager.getLeafEntry();
 	const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
@@ -86,7 +131,7 @@ async function runReview(pi: ExtensionAPI, ctx: ExtensionContext, baseSha: strin
 		firstUserEntry && firstUserEntry.type === "message" && firstUserEntry.message.role === "user"
 			? messageText(firstUserEntry.message.content)
 			: "";
-	if (!spec) return false;
+	if (!spec) return { outcome: "no-spec" };
 
 	const { host, model } = reviewModel();
 	const prompt = [
@@ -127,41 +172,32 @@ async function runReview(pi: ExtensionAPI, ctx: ExtensionContext, baseSha: strin
 			}),
 			signal: AbortSignal.any(signals),
 		});
-		if (!res.ok) return false; // transient outage -- don't consume the one attempt
+		if (!res.ok) return { outcome: "transient" };
 		const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
 		reviewText = data.choices?.[0]?.message?.content?.trim() ?? "";
 	} catch {
-		return false; // timeout, abort, or transient outage -- don't consume the one attempt
+		return { outcome: "transient" };
 	}
 
-	if (!reviewText) return false;
+	if (!reviewText) return { outcome: "transient" };
 
-	if (reviewText !== NO_ISSUE_MARKER) {
-		pi.sendUserMessage(
-			[
-				"A blind second-opinion review (ai-stack-general, diff + spec only,",
-				"no access to your reasoning) flagged a possible issue with your",
-				"passing-tests diff:",
-				"",
-				reviewText,
-				"",
-				"Investigate. If it's real, fix it. If it's a false positive, say why",
-				"briefly and move on.",
-			].join("\n"),
-			{ deliverAs: "followUp" },
-		);
+	if (normalizeForMarkerMatch(reviewText) === NO_ISSUE_MARKER) {
+		return { outcome: "clean", diff };
 	}
-
-	return true; // real, answered review -- consume the one-per-run budget
+	return { outcome: "flagged", diff, reviewText };
 }
 
 export default function (pi: ExtensionAPI) {
-	let reviewedThisRun = false;
+	let reviewCount = 0;
+	let lastReviewedDiff: string | undefined;
+	let done = false;
 	let reviewInFlight = false;
 	let baseSha: string | undefined;
 
 	pi.on("agent_start", async (_event, ctx) => {
-		reviewedThisRun = false;
+		reviewCount = 0;
+		lastReviewedDiff = undefined;
+		done = false;
 		reviewInFlight = false;
 		baseSha = undefined;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
@@ -173,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 	// Deliberately synchronous: see file header for why this must not return
 	// (and therefore pi must not await) the review's promise.
 	pi.on("tool_result", (event, ctx) => {
-		if (reviewedThisRun || reviewInFlight) return;
+		if (done || reviewInFlight) return;
 		if (event.toolName !== "bash") return;
 		if (event.isError) return;
 		const command = event.input?.command;
@@ -181,9 +217,44 @@ export default function (pi: ExtensionAPI) {
 		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
 
 		reviewInFlight = true;
-		runReview(pi, ctx, baseSha)
-			.then((reviewed) => {
-				if (reviewed) reviewedThisRun = true;
+		runReview(pi, ctx, baseSha, lastReviewedDiff)
+			.then((result) => {
+				if (result.outcome === "unchanged" || result.outcome === "no-diff" || result.outcome === "no-spec" || result.outcome === "transient") {
+					return;
+				}
+
+				lastReviewedDiff = result.diff;
+
+				if (result.outcome === "clean") {
+					done = true;
+					return;
+				}
+
+				// flagged
+				reviewCount += 1;
+				const capHit = reviewCount >= MAX_REVIEW_ROUNDS;
+				if (capHit) done = true;
+
+				pi.sendUserMessage(
+					[
+						"A blind second-opinion review (ai-stack-general, diff + spec only,",
+						"no access to your reasoning) flagged a possible issue with your",
+						`passing-tests diff (review round ${reviewCount} of ${MAX_REVIEW_ROUNDS}):`,
+						"",
+						result.reviewText ?? "",
+						"",
+						"Investigate. If it's real, fix it. If it's a false positive, say why",
+						"briefly and move on.",
+						...(capHit
+							? [
+									"",
+									`This was round ${MAX_REVIEW_ROUNDS} of ${MAX_REVIEW_ROUNDS} -- no further`,
+									"automatic review will happen this session.",
+								]
+							: []),
+					].join("\n"),
+					{ deliverAs: "followUp" },
+				);
 			})
 			.catch(() => {})
 			.finally(() => {
