@@ -99,6 +99,26 @@ function normalizeForMarkerMatch(text: string): string {
 		.trim();
 }
 
+/**
+ * Scopes the clean-verdict check to the reply's last non-empty line instead
+ * of the whole reply: a reviewer that reasons at length before a terse
+ * verdict (observed live, see
+ * ai-stack/cross-model-review-marker-lastline-fix-plan.md) would otherwise
+ * never full-string-match NO_ISSUE_MARKER and get scored "flagged" for a
+ * genuinely clean diff. Drops trailing code-fence-only lines first, since a
+ * model told to "reply with exactly: X" commonly wraps X in a code block.
+ */
+function extractLastNonEmptyLine(text: string): string {
+	const lines = text
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+	while (lines.length > 0 && /^```\S*$/.test(lines[lines.length - 1])) {
+		lines.pop();
+	}
+	return lines.length > 0 ? lines[lines.length - 1] : "";
+}
+
 type ReviewOutcome = "unchanged" | "no-diff" | "no-spec" | "transient" | "clean" | "flagged";
 
 interface ReviewResult {
@@ -181,7 +201,15 @@ async function runReview(
 
 	if (!reviewText) return { outcome: "transient" };
 
-	if (normalizeForMarkerMatch(reviewText) === NO_ISSUE_MARKER) {
+	if (normalizeForMarkerMatch(extractLastNonEmptyLine(reviewText)) === NO_ISSUE_MARKER) {
+		// Verbose-but-clean replies are the exact failure mode last-line
+		// matching was added to tolerate -- log the full reply so a future
+		// recurrence of "verbose reasoning that isn't actually about a found
+		// issue" is auditable from session logs, not only catchable by
+		// someone happening to read a transcript by hand.
+		if (reviewText.length > 200) {
+			pi.appendEntry("cross-model-review-verbose-clean", { reviewText });
+		}
 		return { outcome: "clean", diff };
 	}
 	return { outcome: "flagged", diff, reviewText };

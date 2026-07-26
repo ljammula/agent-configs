@@ -218,6 +218,30 @@ Written here:
     was used for this validation) since raising the production watchdog is
     a harness-scope decision beyond this plan, not something to change as a
     side effect of extending the extension.
+  **Last-line marker matching (2026-07-26,
+  `ai-stack/cross-model-review-marker-lastline-fix-plan.md`):** a live run
+  showed the clean-verdict check's edge-stripped *whole-reply* equality
+  scoring `flagged` on a reviewer reply that reasoned correctly through a bug
+  hypothesis at length (~1500 characters) before ending with `NO_ISSUES_FOUND`
+  on its own line — a false positive that burns a bounded-loop round on a
+  genuinely clean diff. The check now runs `normalizeForMarkerMatch` against
+  `extractLastNonEmptyLine(reviewText)` (per-line trim, drop trailing
+  code-fence-only lines, take the last non-empty line) instead of the full
+  reply, so a verbose-then-terse reply matches while a single-line near-miss
+  like "No issues found in the core logic, but ..." still doesn't. This is a
+  trade, not a strict improvement: a genuine multi-paragraph finding whose
+  literal last line happens to equal the marker would now also resolve
+  `clean` — an accepted, tracked residual risk (the same instruction-
+  non-compliance failure mode as the bug being fixed, just on the other side
+  of the reply), mitigated by logging the full raw reply via `pi.appendEntry`
+  (session-only, not in LLM context) on every `clean` verdict over 200
+  characters, so a recurrence is auditable from session logs. Validated:
+  8/8 mocked-`ExtensionAPI` assertions, including the idx13 verbose-clean
+  case, the original single-line adversarial regression, a new multi-line
+  adversarial case (finding ending in a bold non-marker line), a fenced terse
+  verdict, and two canaries — formatting variants (`NO_ISSUES_FOUND.`, `-
+  NO_ISSUES_FOUND`) that intentionally still don't match, and the residual
+  risk itself pinned down as a currently-passing test rather than prose-only.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
