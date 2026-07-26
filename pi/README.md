@@ -75,7 +75,19 @@ Written here:
   verification command, the nudge was permanently disarmed for every later
   pass too — now scoped to the current invocation only. See
   `pi-real-task-report-daily-briefing-screen.md` for the full transcript
-  analysis. Still a true no-op unless it fires.
+  analysis. Still a true no-op unless it fires. **Fixed 2026-07-26**, after
+  a real occurrence in `local-model-bench`'s `go/notes-api` run: the model
+  ran `go test` early for its original implementation, `cross-model-review.ts`
+  then flagged a real routing bug, and the model correctly diagnosed the fix
+  in prose and abandoned it without a tool call — but the nudge stayed
+  silent, because `verificationRan` still scanned the *whole current
+  invocation*, and that early, unrelated `go test` pass permanently disarmed
+  it for the rest of the session even though the abandoned fix itself was
+  never verified. Now scoped to since the most recent ask (original task,
+  steering message, or an injected followUp like a review flag) instead of
+  since the invocation start — each new ask gets its own verification
+  requirement. See `local-model-bench/SPEC.md`'s 2026-07-26 report for the
+  full transcript trace.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first

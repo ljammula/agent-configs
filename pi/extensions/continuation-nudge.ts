@@ -14,9 +14,24 @@
  * non-empty text and so never fired on this case. See
  * pi-real-task-report-daily-briefing-screen.md, "Follow-up" section.
  *
+ * Fixed 2026-07-26 after a real occurrence in local-model-bench's
+ * `go/notes-api` run: the model ran `go test` early for its original
+ * implementation, `cross-model-review.ts` then injected a followUp
+ * flagging a real bug, the model correctly diagnosed the fix in prose and
+ * abandoned it without a tool call -- and the nudge stayed silent.
+ * `verificationRan` scanned the *whole current invocation* for any prior
+ * passing verification command, so that early, unrelated `go test` run
+ * permanently disarmed the nudge for the rest of the session, even though
+ * the specific fix the model abandoned was never itself verified. Now
+ * scoped to *since the most recent user-role message* (the original task,
+ * a steering message, or an injected followUp like a review flag) instead
+ * of since the start of the invocation -- each new ask gets its own
+ * verification requirement. See `local-model-bench/SPEC.md`'s 2026-07-26
+ * report for the full transcript trace.
+ *
  * Heuristic: on a turn that ends with stopReason "stop", no tool call, and no
- * verification command run yet this session, inject one follow-up nudge
- * instead of letting the turn end -- if either (a) the text matches a
+ * verification command run since the most recent ask, inject one follow-up
+ * nudge instead of letting the turn end -- if either (a) the text matches a
  * forward-looking verb pattern, or (b) the text is empty/whitespace-only
  * (silent abandonment, no announcement at all). Fires at most once per agent
  * run to avoid looping if the model keeps abandoning.
@@ -91,7 +106,19 @@ export default function (pi: ExtensionAPI) {
 		const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
 		const startIdx = runStartEntryId ? branch.findIndex((entry) => entry.id === runStartEntryId) : -1;
 		const thisRunBranch = startIdx >= 0 ? branch.slice(startIdx + 1) : branch;
-		const verificationRan = thisRunBranch.some((entry) => {
+
+		// Scope to since the most recent ask (the original task, a steering
+		// message, or an injected followUp such as a review flag) rather than
+		// since the start of the whole invocation -- a verification run that
+		// predates the current ask says nothing about whether *this* abandoned
+		// turn's change has been checked. See file header, "Fixed 2026-07-26".
+		let lastAskIdx = -1;
+		thisRunBranch.forEach((entry, i) => {
+			if (entry.type === "message" && entry.message.role === "user") lastAskIdx = i;
+		});
+		const sinceLastAsk = lastAskIdx >= 0 ? thisRunBranch.slice(lastAskIdx + 1) : thisRunBranch;
+
+		const verificationRan = sinceLastAsk.some((entry) => {
 			if (entry.type !== "message" || entry.message.role !== "assistant") return false;
 			return entry.message.content.some(
 				(c) =>
