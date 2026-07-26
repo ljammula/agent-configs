@@ -2,6 +2,9 @@
 
 Agent instructions and skills used on this machine, organized by agent.
 
+**pi harness validation status** (what's adopted vs. not, and why): see
+[pi-harness-validation-status.md](pi-harness-validation-status.md).
+
 ## Install
 
 ```bash
