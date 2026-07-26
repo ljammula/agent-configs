@@ -50,7 +50,7 @@ Read-only local services are still worth using. The served endpoints are:
 | Port | Slot | Use |
 |---|---|---|
 | 8080 | Qwen3.6-27B-4bit ("code") | code review, editing |
-| 8081 | Qwen3.6-35B-A3B-5bit ("general") | log triage, summarization |
+| 8081 | gemma-4-31B-it-OptiQ-4bit ("general") | log triage, summarization, cross-model review |
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host
