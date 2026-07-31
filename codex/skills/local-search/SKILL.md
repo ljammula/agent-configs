@@ -30,7 +30,7 @@ skills.
 
 The script does its own reachability check -- do not pre-flight it with a
 separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
-instance isn't local, e.g. `192.168.1.233`; unset it defaults to localhost.)
+instance isn't local, e.g. `192.168.1.79`; unset it defaults to localhost.)
 
 Prints up to 8 results as `- title (url): snippet` lines. Exits non-zero
 with a stderr message if SearXNG is unreachable or returns zero results. On

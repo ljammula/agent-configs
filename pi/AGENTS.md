@@ -56,7 +56,7 @@ Read-only local services are still worth using. The served endpoints are:
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host
-(`192.168.1.233` for the LAN box); unset, it defaults to `127.0.0.1`. Every
+(`192.168.1.79` for the LAN box); unset, it defaults to `127.0.0.1`. Every
 script and reachability check resolves through it. Check reachability before
 relying on any of them — these instructions load on machines without the stack.
 

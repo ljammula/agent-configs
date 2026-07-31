@@ -17,6 +17,39 @@ see `../pi-harness-validation-status.md`. This file below documents what
 each extension does; that one documents what's actually been proven about
 whether it works.
 
+## Launching pi
+
+From any directory, in a normal terminal:
+
+```
+pi                     # interactive session
+pi -p "<prompt>"        # non-interactive: process one prompt and exit
+pi -p "<prompt>" --mode json   # non-interactive, structured event stream
+```
+
+No flags are required for day-to-day use — `~/.pi/agent/settings.json`
+(see "Settings this machine expects" below) already sets
+`defaultProvider: "ai-stack-local"` and `defaultModel` to the local 27B
+slot, and `~/.pi/agent/extensions/` (symlinked from this repo's
+`extensions/`) is loaded unconditionally on every launch, interactive or
+`-p`. You only need explicit `--provider`/`--model`/`-e`/`--no-extensions`
+flags when deliberately overriding these defaults — e.g. the
+`scratch-phase-validate/` batch-retest scripts do, to pin an exact
+extension set per run.
+
+The one thing this depends on: **`AI_STACK_HOST` must already be exported
+in your shell** (it is, via `~/.zshrc`) before `pi` starts, since both the
+`ai-stack-local`/`ai-stack-general` providers and `cross-model-review.ts`'s
+reviewer call read it once from `process.env` at extension-registration
+time. A shell that doesn't source `~/.zshrc` (cron, launchd, a script's own
+subshell) silently falls back to `127.0.0.1`, where nothing listens on this
+Mac — see the `AI_STACK_HOST` note below for the fix if that happens.
+**Verified live, 2026-07-26**: launching `pi` this way (plain terminal,
+zero extra flags) against a real task showed an actual TCP connection to
+the LAN box's current address and a correct `cross-model-review.ts`
+round-trip against it — see `../pi-harness-validation-status.md`'s
+"terminal launch" verification for the transcript.
+
 ## What's installed
 
 | Path | Becomes | What |
@@ -383,8 +416,13 @@ would mean pi editing tracked files behind your back. Set these by hand:
 - Compaction reserve is lowered to 8192 (= the models' `maxTokens`) to leave
   more of the 85K window for actual work.
 
-`AI_STACK_HOST` must be exported (it is, in `~/.zshrc`) — unset, every provider
-points at `127.0.0.1:8080`, where nothing is listening on this Mac.
+`AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
+`192.168.1.79` — the LAN box's address has changed once already via DHCP
+reassignment, so treat this as "whatever `~/.zshrc` currently says," not a
+fixed IP) — unset, every provider points at `127.0.0.1:8080`, where nothing
+is listening on this Mac. Confirmed live, 2026-07-26: a plain `pi` launch
+from an interactive shell opened a real connection to the box at the
+address `~/.zshrc` exports, with no flags needed.
 
 ## Deliberately not installed
 

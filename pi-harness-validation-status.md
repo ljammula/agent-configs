@@ -1,20 +1,24 @@
 # pi harness — consolidated validation status
 
-**As of 2026-07-26 (updated same day with a live validation batch — see
-Todo).** This supersedes nothing by deleting it — it exists
-because the real story is split across ~10 documents in two repos
-(`agent-configs`, `ai-stack`) written at different points in the same
-investigation, and at least one of them was overtaken by events before it
-was ever committed. This file is the single place to check current state;
-the source documents cited throughout remain the evidence trail.
+**As of 2026-07-26, updated twice same day (see "What worked").**
+This supersedes nothing by deleting it — it exists because the real story
+is split across ~10 documents in two repos (`agent-configs`, `ai-stack`)
+written at different points in the same investigation, and at least one of
+them was overtaken by events before it was ever committed. This file is
+the single place to check current state; the source documents cited
+throughout remain the evidence trail.
 
 This document started as a pure reconciliation of existing evidence (no new
 testing), checked against what's actually on disk (git logs,
-`scratch-phase-validate/results.tsv`, extension source). It has since been
-updated once, same day, with a real new live batch targeting two
-specifically-identified untested branches — see the 2026-07-26 entries in
-Todo and `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live
-validation, round 2" for the full writeup.
+`scratch-phase-validate/results.tsv`, extension source). It was updated a
+first time, same day, with a real new live batch targeting two
+specifically-identified untested branches — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+"Live validation, round 2" for the full writeup — which surfaced a new
+`cross-model-review.ts` false-positive finding. It was updated a second
+time, later the same day, once that finding (and a separately-found
+`continuation-nudge.ts` bug) had fixes landed and retested — see the two
+new entries at the top of "What worked" and `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+"Live retest, round 3" for the full writeup.
 
 ## Summary
 
@@ -36,6 +40,46 @@ battery.
 
 ## What worked
 
+- **2026-07-26: `cross-model-review.ts`'s verbose-but-correct "clean"
+  reviewer response being misclassified as `flagged` — found, fixed, and
+  retested same day.** Real, reproduced instance during the day's live
+  validation batch — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+  "Live validation, round 2" section. The reviewer reasoned at length and
+  correctly concluded no issue, ending its reply with the exact
+  `NO_ISSUES_FOUND` marker, but the marker-match logic required the
+  *entire* (edge-trimmed) reply to equal the marker, so the verdict was
+  scored `flagged` instead of `clean`. Fixed via `cross-model-review-marker-lastline-fix-plan.md`
+  (Fable-reviewed) and landed as this repo's `715f0c7` (match against the
+  reply's last non-empty line, not the whole reply). **Retest, same
+  evening** (see `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live
+  retest, round 3"): live end-to-end review pipeline still correctly flags
+  real bugs post-fix (one fresh live run caught a genuine missing-eviction
+  bug); the specific verbose-clean reviewer behavior could not be forced
+  live on demand within budget, so the fix itself was verified by running
+  the exact shipped `normalizeForMarkerMatch`/`extractLastNonEmptyLine`
+  functions (copied verbatim, not reimplemented) against the original
+  idx13 reproduction text plus three other cases (adversarial near-miss,
+  fence-wrapped terse clean, accepted residual risk) — all four resolve as
+  designed.
+- **2026-07-26: `continuation-nudge.ts`'s `verificationRan` scanning the
+  whole invocation instead of since the latest ask — found, fixed, and
+  retested same day.** Real occurrence in `local-model-bench`'s
+  `go/notes-api` run: an early, unrelated `go test` pass permanently
+  disarmed the nudge for the rest of the session, so a later real
+  abandonment (after a `cross-model-review.ts` followUp flagged a bug)
+  went unnudged. Fixed as this repo's `5778d1b` (scope to since the most
+  recent user-role message). **Retest, same evening**: two live
+  combined-extension runs (`cross-model-review.ts` + `continuation-nudge.ts`
+  together, via a new `ai-stack/scratch-phase-validate/run_combined.sh`)
+  on `notes-api` both ran out the extended watchdog before completing a
+  full dispatch (the task is large enough, and the LAN box contended
+  enough, that 420-600s wasn't sufficient) — no live full-agent
+  reproduction landed. Fell back to a direct deterministic test of the
+  shipped `verificationRan` logic (copied verbatim from the extension)
+  against a synthetic branch reproducing the exact real notes-api entry
+  sequence (early `go test` → injected review followUp → prose-only
+  abandonment): the old whole-invocation scan reproduces the bug (stays
+  silent), the new since-last-ask scan fires the nudge as intended.
 - **`co-change-suggest.ts` — adopted, 2026-07-24.** Real retrospective
   replay against `personal-assistant` (782 commits, real historical
   dispatch). Found and fixed a real seed-selection bug along the way; with
@@ -106,15 +150,6 @@ battery.
   fixtures — has never been run. Everything adopted so far is real but
   single-digit-n per bug class, on effectively one task family
   (`lru-cache`).
-- **New, 2026-07-26: a verbose-but-correct "clean" reviewer response can be
-  misclassified as `flagged`.** Real, reproduced instance (not
-  hypothetical) — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
-  "Live validation, round 2" section. The reviewer reasoned at length and
-  correctly concluded no issue, ending its reply with the exact
-  `NO_ISSUES_FOUND` marker, but the marker-match logic requires the
-  *entire* (edge-trimmed) reply to equal the marker, so the verdict was
-  scored `flagged` instead of `clean`. Not fixed — needs a reviewed plan
-  first, same as prior changes to this extension.
 - **Cap-hit (round 3) and clean-short-circuit are still live-unobserved.**
   A 2026-07-26 serialized 5-run live batch targeting exactly these two
   branches hit neither: 2 runs died to the batch harness's watchdog before
@@ -191,6 +226,13 @@ battery.
    - Cost check: the review call measured 73.5s on a real ~40KB
      multi-file diff from `personal-assistant`, exceeding the
      then-current 60s timeout — raised to 120s as a direct result.
+5. **2026-07-26, marker-lastline fix.** A live batch targeting the
+   still-untested round-2/round-3/clean-short-circuit branches (see item 4)
+   surfaced a new false positive instead: a verbose-but-correct clean
+   verdict scored `flagged`. Fixed same day (`715f0c7`) and retested same
+   evening — see "What worked" above and `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+   "Live validation, round 2" and "Live retest, round 3" for the full
+   writeup. Verdict as of this item: still **adopted**, not flipped again.
 
 ### Full extension-by-extension table
 
@@ -201,8 +243,8 @@ battery.
 | `rtk-rewrite.ts` | Adopted (vendored, on by default) | — | No battery; deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted (vendored, on by default) | — | No battery; deterministic per-turn snapshotting. |
 | `co-change-suggest.ts` | **Adopted**, 2026-07-24 | 1 real retrospective case | Real retrospective replay against `personal-assistant` (782 commits, real historical dispatch). Found and fixed a real seed-selection bug along the way. With the fix and real diff-derived identifiers, target file ranked **#1 of 8**. Correctly no-signal on a generic paraphrase (expected scoping limit, not a bug). **Not done**: the plan's second half of its kill criterion — "try it live on one new personal-assistant feature task" (forward-looking, not retrospective) — has not been run. |
-| `continuation-nudge.ts` | **Not adopted**, kept loaded as a no-cost no-op | 0 firings / ~46 real trials + 2 targeted attempts | Fired zero times outside mocked unit tests across every real trial run to date. Widened 2026-07-25 to also trigger on a silent empty-content stop (the actual failure mode observed once, for real, in the daily-briefing-screen dispatch — narrower than what the original prose-pattern trigger covered). **Not done**: every one of the ~46+2 real trials predates the 2026-07-25 widening and used the old, narrower trigger only. The new empty-content trigger path has zero real-trial exercises to date — it is unit-tested, not field-tested. |
-| `cross-model-review.ts` | **Adopted**, 2026-07-25 (reviewer = gemma-4-31B-it-OptiQ-4bit on :8081; previously disabled 2026-07-24 with Qwen3.6-35B-A3B as reviewer) | see above | Verdict flipped once already based on real evidence — see the full timeline above, not just this row. |
+| `continuation-nudge.ts` | **Not adopted**, kept loaded as a no-cost no-op | 0 firings / ~46 real trials + 2 targeted attempts | Fired zero times outside mocked unit tests across every real trial run to date. Widened 2026-07-25 to also trigger on a silent empty-content stop (the actual failure mode observed once, for real, in the daily-briefing-screen dispatch — narrower than what the original prose-pattern trigger covered). **Not done**: every one of the ~46+2 real trials predates the 2026-07-25 widening and used the old, narrower trigger only. The new empty-content trigger path has zero real-trial exercises to date — it is unit-tested, not field-tested. **Separately, a real `verificationRan` scoping bug found 2026-07-26 (see "What worked") was fixed (`5778d1b`) and retested the same day** via direct logic replay (no live full-agent reproduction landed — see "What worked" for why); this is about correctness of the trigger's *arming* logic, not about the trigger's firing rate above, which remains as measured. |
+| `cross-model-review.ts` | **Adopted**, 2026-07-25 (reviewer = gemma-4-31B-it-OptiQ-4bit on :8081; previously disabled 2026-07-24 with Qwen3.6-35B-A3B as reviewer) | see above | Verdict flipped once already based on real evidence — see the full timeline above (item 5 is the latest entry, 2026-07-26), not just this row. |
 | `git-safety.ts` | Adopted, 2026-07-25 | 1 scratch-repo reproduction | Reproduced the exact `git reset --hard main` command that triggered its creation, against a scratch repo; confirmed blocked, repo untouched. Single reproduction, not a battery — the command class is small and deterministic (`reset --hard`, `push --force` w/o lease, `clean -f`, `branch -D`, `checkout/restore -- .`), which is why one clean repro is treated as sufficient here unlike the model-judgment extensions above. |
 | Phase 4 (Aider-based failing-test retry) | **Deliberately not built** | n/a | Gated by the plan itself on Aider dispatch being back in scope. It isn't: `~/.claude/CLAUDE.md` and `agent-configs/pi/AGENTS.md` both record that `dispatch-local` was benchmarked and removed (cost more Anthropic tokens, ran 5-10x slower than editing directly — see `local-model-bench/STATUS.md`). Correctly out of scope, not a gap. |
 
@@ -227,9 +269,28 @@ battery.
   silently falls back to `127.0.0.1`, where nothing listens on this
   machine, and fails with a bare `Connection error.` with no hint at the
   cause. Confirmed by reproducing the failure and the fix directly.
-  `pi/README.md`'s "Settings this machine expects" section documents the
-  requirement but does not yet carry this specific silent-fallback
-  warning inline — worth adding if this bites again.
+  `pi/README.md`'s "Settings this machine expects" section now carries
+  this silent-fallback warning inline (added 2026-07-26, alongside a new
+  "Launching pi" section — see the terminal-launch verification below).
+- **Terminal launch, verified live, 2026-07-26**: the LAN box's address
+  changed once already (DHCP reassignment, `192.168.1.233` →
+  `192.168.1.79`) — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+  "Live retest, round 3" for the retest this triggered. To confirm the
+  fix actually holds for real day-to-day use (not just the batch harness,
+  which sources its own `scratch-phase-validate/env.sh`), launched `pi`
+  exactly as a user would from a terminal — `zsh -ic 'pi --print ...'`
+  against a real `lru-cache` bug, zero explicit `--provider`/`-e`/
+  `--no-extensions` flags, relying purely on `~/.pi/agent/settings.json`'s
+  `defaultProvider`/`defaultModel` and the extensions symlinked into
+  `~/.pi/agent/extensions/`. Confirmed via `lsof` mid-run: an actual
+  `ESTABLISHED` TCP connection from the `pi` process to
+  `192.168.1.79:8080`. `cross-model-review.ts` fired against
+  `192.168.1.79:8081`, flagged a real eviction bug in round 1 (the
+  reviewer provider resolves the same `AI_STACK_HOST` env var, confirmed
+  reached), the model fixed it, final `go test` passed, zero extension
+  errors. Confirms both the primary-model provider and the reviewer
+  extension resolve the current LAN address correctly on a plain
+  interactive launch, not just inside the batch harness.
 
 ### The one full real-task dispatch (not a benchmark — a case study)
 

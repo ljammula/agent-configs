@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Host defaults to localhost but can point at a LAN-served stack via
-# AI_STACK_HOST (e.g. 192.168.1.233). MODEL_URL still wins if set outright.
+# AI_STACK_HOST (e.g. 192.168.1.79). MODEL_URL still wins if set outright.
 HOST="${AI_STACK_HOST:-127.0.0.1}"
 MODEL_URL="${MODEL_URL:-http://$HOST:8081/v1}"
 FILE="${1:-}"

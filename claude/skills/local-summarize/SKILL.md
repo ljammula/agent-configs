@@ -27,7 +27,7 @@ accordingly: read what it flags yourself before acting on it.
 
 The script does its own reachability check -- do not pre-flight it with a
 separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
-instance isn't local, e.g. `192.168.1.233`; unset it defaults to localhost.)
+instance isn't local, e.g. `192.168.1.79`; unset it defaults to localhost.)
 If it exits `not reachable` — the stack is down, or the general-slot model
 isn't the resident one right now (only one model pair can be resident at a
 time) — relay that one line and Read the file directly instead.

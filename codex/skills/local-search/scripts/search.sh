@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Host defaults to localhost but can point at a LAN-served stack via
-# AI_STACK_HOST (e.g. 192.168.1.233). SEARXNG_URL still wins if set outright.
+# AI_STACK_HOST (e.g. 192.168.1.79). SEARXNG_URL still wins if set outright.
 HOST="${AI_STACK_HOST:-127.0.0.1}"
 SEARXNG_URL="${SEARXNG_URL:-http://$HOST:8888}"
 QUERY="$*"
