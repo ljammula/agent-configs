@@ -58,6 +58,8 @@ const VERIFICATION_COMMAND_PATTERNS = [
 	/\bdart (?:test|format)\b/i,
 ];
 
+const PIPEFAIL_PATTERN = /\b(?:set\s+-[a-z]*o\s+pipefail|setopt\s+pipefail)\b/i;
+
 const NUDGE_MESSAGES = {
 	"forward-looking": "You described an edit but didn't make it. Make it now.",
 	silent: "You stopped without making a tool call or finishing your response. Continue the task.",
@@ -81,6 +83,57 @@ function classifyAbandonedTurn(content: { type: string; text?: string }[]): Aban
 	return FORWARD_LOOKING_PATTERNS.some((re) => re.test(text)) ? "forward-looking" : null;
 }
 
+/** Hide quoted text while preserving indexes used to inspect shell operators. */
+function unquotedShellSyntax(command: string): string {
+	const syntax = [...command];
+	let quote: "'" | '"' | null = null;
+
+	for (let i = 0; i < syntax.length; i += 1) {
+		const char = syntax[i];
+		if (quote) {
+			syntax[i] = " ";
+			if (char === "\\" && quote === '"') {
+				i += 1;
+				if (i < syntax.length) syntax[i] = " ";
+			} else if (char === quote) {
+				quote = null;
+			}
+		} else if (char === "'" || char === '"') {
+			quote = char;
+			syntax[i] = " ";
+		} else if (char === "\\") {
+			syntax[i] = " ";
+			i += 1;
+			if (i < syntax.length) syntax[i] = " ";
+		}
+	}
+
+	return syntax.join("");
+}
+
+/** True when a verification command feeds an actual pipeline without pipefail. */
+export function verificationPipelineCanMaskFailure(command: string): boolean {
+	const syntax = unquotedShellSyntax(command);
+	if (PIPEFAIL_PATTERN.test(syntax)) return false;
+
+	const verificationEnds = VERIFICATION_COMMAND_PATTERNS.flatMap((pattern) =>
+		[...syntax.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))].map(
+			(match) => match.index + match[0].length,
+		),
+	);
+
+	return verificationEnds.some((start) => {
+		for (let i = start; i < syntax.length; i += 1) {
+			const char = syntax[i];
+			const next = syntax[i + 1];
+			if (char === ";" || char === "\n" || (char === "&" && next === "&")) return false;
+			if (char === "|" && next === "|") return false;
+			if (char === "|") return true;
+		}
+		return false;
+	});
+}
+
 export default function (pi: ExtensionAPI) {
 	let nudgeCount = 0;
 	let latestVerificationFailed = false;
@@ -100,12 +153,18 @@ export default function (pi: ExtensionAPI) {
 		runStartEntryId = leaf?.id;
 	});
 
+	// A new original, steering, or extension follow-up ask starts a fresh
+	// verification scope. A failed check from the prior ask must not leak into it.
+	pi.on("input", () => {
+		latestVerificationFailed = false;
+	});
+
 	pi.on("tool_result", (event) => {
 		if (event.toolName !== "bash") return;
 		const command = event.input?.command;
 		if (typeof command !== "string") return;
 		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
-		const pipelineCanMaskFailure = command.includes("|") && !/\bpipefail\b/.test(command);
+		const pipelineCanMaskFailure = verificationPipelineCanMaskFailure(command);
 		latestVerificationFailed = event.isError || pipelineCanMaskFailure;
 	});
 

@@ -127,9 +127,10 @@ Written here:
   runs stopped immediately after `flutter analyze` failed: verification is
   now tracked by outcome, so a failing check triggers a corrective follow-up
   instead of disarming the nudge. Up to three nudges are allowed per run to
-  support a bounded test/debug loop without risking infinite retries. Piped
-  verification commands are treated as inconclusive unless `pipefail` is set,
-  preventing tools such as `head` or `grep` from masking a failing test exit.
+  support a bounded test/debug loop without risking infinite retries. A
+  verification command feeding a shell pipeline is treated as inconclusive
+  unless `pipefail` is set, preventing tools such as `head` or `grep` from
+  masking a failing test exit without misclassifying unrelated pipe characters.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first
