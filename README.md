@@ -5,6 +5,11 @@ Agent instructions and skills used on this machine, organized by agent.
 **pi harness validation status** (what's adopted vs. not, and why): see
 [pi-harness-validation-status.md](pi-harness-validation-status.md).
 
+The local inference routes used by the machine-conditional skills are recorded
+in [local-ai-stack.md](local-ai-stack.md), including current model ids, runtime
+versions, measured throughput, client rules, and the rollback validation
+boundary.
+
 ## Install
 
 ```bash
@@ -23,6 +28,7 @@ clobber machine-specific customizations.
 
 ```
 agent-configs/
+├── local-ai-stack.md         # Current local model routes, performance, and client rules
 ├── claude/                    # Claude Code (CLI) — ~/.claude/
 │   ├── CLAUDE.md              # Global instructions (GitHub accounts, code quality rules)
 │   ├── RTK.md                 # RTK token-killer reference for Claude

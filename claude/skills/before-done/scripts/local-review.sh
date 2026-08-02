@@ -1,8 +1,9 @@
 #!/bin/bash
-# Pipe a diff to the local ai-stack code model (port 8080, Qwen3.6-27B) for
-# an adversarial second opinion before commit/PR. Output is evidence for
-# Claude to triage, never an authoritative finding list -- this model
-# self-corrects mechanical mistakes but not logic bugs, so it can *notice*
+# Pipe a diff to the local ai-stack code model (port 8080, ThinkingCap
+# Qwen3.6-27B 8-bit) for an adversarial second opinion before commit/PR.
+# Output is evidence for Claude to triage, never an authoritative finding
+# list -- this model self-corrects mechanical mistakes but not logic bugs,
+# so it can *notice*
 # things (off-by-ones, missed null checks, an unhandled branch) without
 # being trusted to be right about them. Shared by before-done and
 # self-review; referenced from both by absolute path.
