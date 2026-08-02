@@ -70,6 +70,10 @@ Written here:
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally.
+- **`full-stack-dev.ts`** — activates Pi's complete standard development
+  toolset: `read`, `edit`, `write`, `find`, `grep`, and `bash` (Pi's terminal
+  and command/test runner). It also requires a plan, small implementation
+  chunks, and a test/debug loop after each chunk.
 - **`rtk-rewrite.ts`** — port of `claude/hooks/rtk-rewrite.sh`. Routes bash
   commands through `rtk rewrite` for 60-90% less output. Worth more here than
   under Claude Code: on an 85K window, output reduction is turns.
@@ -89,9 +93,9 @@ Written here:
   `ai-stack/local-quality-next-steps-plan.md`: targets the plan-then-abandon
   failure mode (model announces an edit in prose, no tool call, turn ends with
   `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
-  matching turn, with no verification command run yet this invocation,
-  injects one follow-up nudge instead of letting the turn end. Fires at most
-  once per agent run. **Verdict as of 2026-07-24 (see
+  matching turn, with no passing verification command for the current ask,
+  injects a follow-up nudge instead of letting the turn end. Retries are
+  bounded per agent run. **Verdict as of 2026-07-24 (see
   `ai-stack/local-quality-next-steps-status.md`): not adopted, but kept
   loaded** — across ~50 real trials the trigger condition never fired outside
   deterministic mocked tests. **Updated 2026-07-25**, after a real occurrence
@@ -119,7 +123,13 @@ Written here:
   steering message, or an injected followUp like a review flag) instead of
   since the invocation start — each new ask gets its own verification
   requirement. See `local-model-bench/SPEC.md`'s 2026-07-26 report for the
-  full transcript trace.
+  full transcript trace. **Updated 2026-08-02** after two Pi calendar-app
+  runs stopped immediately after `flutter analyze` failed: verification is
+  now tracked by outcome, so a failing check triggers a corrective follow-up
+  instead of disarming the nudge. Up to three nudges are allowed per run to
+  support a bounded test/debug loop without risking infinite retries. Piped
+  verification commands are treated as inconclusive unless `pipefail` is set,
+  preventing tools such as `head` or `grep` from masking a failing test exit.
 - **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first

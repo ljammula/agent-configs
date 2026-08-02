@@ -29,12 +29,13 @@
  * verification requirement. See `local-model-bench/SPEC.md`'s 2026-07-26
  * report for the full transcript trace.
  *
- * Heuristic: on a turn that ends with stopReason "stop", no tool call, and no
- * verification command run since the most recent ask, inject one follow-up
- * nudge instead of letting the turn end -- if either (a) the text matches a
- * forward-looking verb pattern, or (b) the text is empty/whitespace-only
- * (silent abandonment, no announcement at all). Fires at most once per agent
- * run to avoid looping if the model keeps abandoning.
+ * Heuristic: on a turn that ends with stopReason "stop" and no tool call,
+ * inject a follow-up nudge when the model announces unfinished work, stops
+ * silently, or the most recent verification command failed. A passing check
+ * suppresses abandonment nudges; merely running a failing check does not.
+ * Verification piped without `pipefail` is inconclusive because the final
+ * consumer can hide the test runner's non-zero exit status.
+ * Retries are bounded to avoid an infinite loop when a model cannot recover.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -60,7 +61,11 @@ const VERIFICATION_COMMAND_PATTERNS = [
 const NUDGE_MESSAGES = {
 	"forward-looking": "You described an edit but didn't make it. Make it now.",
 	silent: "You stopped without making a tool call or finishing your response. Continue the task.",
+	"failed-verification":
+		"The latest verification command failed. Inspect its output, make the smallest corrective edit, and rerun the relevant check. Do not stop until it passes.",
 } as const;
+
+const MAX_NUDGES_PER_RUN = 3;
 
 type AbandonKind = keyof typeof NUDGE_MESSAGES;
 
@@ -77,7 +82,8 @@ function classifyAbandonedTurn(content: { type: string; text?: string }[]): Aban
 }
 
 export default function (pi: ExtensionAPI) {
-	let nudgedThisRun = false;
+	let nudgeCount = 0;
+	let latestVerificationFailed = false;
 	// Entry id at the start of *this* pi invocation, so verificationRan only looks
 	// at what this run itself has done -- not at verification from an earlier
 	// `--continue`d pass in the same persisted session. Without this, once any
@@ -88,18 +94,30 @@ export default function (pi: ExtensionAPI) {
 	let runStartEntryId: string | undefined;
 
 	pi.on("agent_start", (_event, ctx) => {
-		nudgedThisRun = false;
+		nudgeCount = 0;
+		latestVerificationFailed = false;
 		const leaf = ctx.sessionManager.getLeafEntry();
 		runStartEntryId = leaf?.id;
 	});
 
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "bash") return;
+		const command = event.input?.command;
+		if (typeof command !== "string") return;
+		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
+		const pipelineCanMaskFailure = command.includes("|") && !/\bpipefail\b/.test(command);
+		latestVerificationFailed = event.isError || pipelineCanMaskFailure;
+	});
+
 	pi.on("turn_end", async (event, ctx) => {
-		if (nudgedThisRun) return;
+		if (nudgeCount >= MAX_NUDGES_PER_RUN) return;
 		const { message } = event;
 		if (message.role !== "assistant") return;
 		if (message.stopReason !== "stop") return;
 		if (event.toolResults.length > 0) return;
-		const kind = classifyAbandonedTurn(message.content);
+		const kind = latestVerificationFailed
+			? "failed-verification"
+			: classifyAbandonedTurn(message.content);
 		if (!kind) return;
 
 		const leaf = ctx.sessionManager.getLeafEntry();
@@ -128,9 +146,9 @@ export default function (pi: ExtensionAPI) {
 					VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(c.arguments.command)),
 			);
 		});
-		if (verificationRan) return;
+		if (verificationRan && !latestVerificationFailed) return;
 
-		nudgedThisRun = true;
+		nudgeCount += 1;
 		pi.sendUserMessage(NUDGE_MESSAGES[kind], { deliverAs: "followUp" });
 	});
 }
