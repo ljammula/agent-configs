@@ -1,6 +1,6 @@
 #!/bin/bash
 # Triage a large log/output file through the local ai-stack general model
-# (port 8081, Qwen3.6-35B-A3B) to flag which sections deserve Claude's
+# (port 8080, ThinkingCap-Qwen3.6-27B-MLX-8bit) to flag which sections deserve Claude's
 # direct read, instead of Claude reading the whole thing into context.
 # Deliberately scoped to triage, not trusted summarization -- a hallucinated
 # summary of a stack trace is worse than useless, so this never replaces
@@ -10,7 +10,7 @@ set -euo pipefail
 # Host defaults to localhost but can point at a LAN-served stack via
 # AI_STACK_HOST (e.g. 192.168.1.79). MODEL_URL still wins if set outright.
 HOST="${AI_STACK_HOST:-127.0.0.1}"
-MODEL_URL="${MODEL_URL:-http://$HOST:8081/v1}"
+MODEL_URL="${MODEL_URL:-http://$HOST:8080/v1}"
 FILE="${1:-}"
 
 if [[ -z "$FILE" || ! -f "$FILE" ]]; then

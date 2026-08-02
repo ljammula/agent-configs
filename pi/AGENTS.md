@@ -51,8 +51,7 @@ Read-only local services are still worth using. The served endpoints are:
 
 | Port | Slot | Use |
 |---|---|---|
-| 8080 | Qwen3.6-27B-4bit ("code") | code review, editing |
-| 8081 | gemma-4-31B-it-OptiQ-4bit ("general") | log triage, summarization, cross-model review |
+| 8080 | ThinkingCap-Qwen3.6-27B-MLX-8bit ("code", resident) | code review, editing, log triage |
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host
@@ -65,7 +64,7 @@ output as evidence to verify, never as a trusted result.
 
 ## Context discipline
 
-The local slots have an 85K context window — roughly a fifth of a cloud model's.
+The local model has a 96K context window — roughly a fifth of a cloud model's.
 Protect it:
 
 - Prefer `rtk <cmd>` over raw `git`/`ls`/`find`/`cargo` etc. It is a

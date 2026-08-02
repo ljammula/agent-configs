@@ -9,30 +9,13 @@ export default function (pi: ExtensionAPI) {
     api: "openai-completions",
     models: [
       {
-        id: "/Users/kanna/code/ai-stack/models/Qwen3.6-27B-4bit",
-        name: "Qwen3.6-27B-4bit",
+        id: "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+        name: "ThinkingCap-Qwen3.6-27B-MLX-8bit",
         reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 85000,
-        maxTokens: 8192,
-      },
-    ],
-  });
-  pi.registerProvider("ai-stack-general", {
-    name: "ai-stack general",
-    baseUrl: `http://${host}:8081/v1`,
-    apiKey: "dummy-key-not-checked",
-    api: "openai-completions",
-    models: [
-      {
-        id: "/Users/kanna/code/ai-stack/models/gemma-4-31B-it-OptiQ-4bit",
-        name: "gemma-4-31B-it-OptiQ-4bit",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 85000,
-        maxTokens: 8192,
+        contextWindow: 96000,
+        maxTokens: 16384,
       },
     ],
   });

@@ -2,7 +2,7 @@
 name: local-summarize
 description: >
   Triage a large log file, test-output dump, or JSONL file through the
-  local ai-stack general model (port 8081) before reading it into Claude's
+  local ai-stack code model (port 8080) before reading it into Claude's
   own context, to find which sections actually matter. Only relevant on
   machines running ai-stack -- check the model port is reachable before
   using this skill. Trigger when you're about to Read a large log/output

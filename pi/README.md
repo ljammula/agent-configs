@@ -8,7 +8,7 @@ pi is deliberately minimal: four default tools (`read`, `write`, `edit`,
 by default, and no built-in MCP, subagents, permission prompts, plan mode,
 todos, or web search (`README.md`, `docs/usage.md`). Everything here re-adds a
 piece of that, chosen for one reason: this machine runs pi against **local
-models** with an 85K context window, not a cloud model, so the harness has to
+models** with 64K–96K context windows, not a cloud model, so the harness has to
 carry weight the model cannot.
 
 For a single, dated, cross-repo reconciliation of what's actually been
@@ -39,8 +39,8 @@ extension set per run.
 
 The one thing this depends on: **`AI_STACK_HOST` must already be exported
 in your shell** (it is, via `~/.zshrc`) before `pi` starts, since both the
-`ai-stack-local`/`ai-stack-general` providers and `cross-model-review.ts`'s
-reviewer call read it once from `process.env` at extension-registration
+`ai-stack-local` and `cross-model-review.ts`'s reviewer call read it once from
+`process.env` at extension-registration
 time. A shell that doesn't source `~/.zshrc` (cron, launchd, a script's own
 subshell) silently falls back to `127.0.0.1`, where nothing listens on this
 Mac — see the `AI_STACK_HOST` note below for the fix if that happens.
@@ -64,10 +64,9 @@ round-trip against it — see `../pi-harness-validation-status.md`'s
 
 Written here:
 
-- **`ai-stack-local.ts`** — registers both ai-stack slots as providers:
-  `ai-stack-local` (:8080, Qwen3.6-27B-4bit, "code") and `ai-stack-general`
-  (:8081, gemma-4-31B-it-OptiQ-4bit, "general"). Both follow
-  `AI_STACK_HOST`.
+- **`ai-stack-local.ts`** — registers ai-stack's resident provider:
+  `ai-stack-local` (:8080, ThinkingCap-Qwen3.6-27B-MLX-8bit, "code"). It
+  follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally.
@@ -161,7 +160,7 @@ Written here:
 - **`cross-model-review.ts`** — Phase 2 of
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
-  diff + spec to `ai-stack-general` for a second opinion, feeds back a
+  diff + spec to `ai-stack-local` for a second opinion, feeds back a
   flagged issue). **Verdict (2026-07-24, reviewer = Qwen3.6-35B-A3B): not
   adopted** — the one real test run (a known, spec-violating bug the hidden
   test suite catches) came back negative, reviewer returned
@@ -402,19 +401,19 @@ would mean pi editing tracked files behind your back. Set these by hand:
 ```json
 {
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.6-27B-4bit",
+  "defaultModel": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
   "defaultThinkingLevel": "off",
-  "enabledModels": ["Qwen3.6-27B-4bit", "Qwen3.6-35B-A3B-5bit"],
-  "compaction": { "enabled": true, "reserveTokens": 8192, "keepRecentTokens": 24000 }
+  "enabledModels": ["ThinkingCap-Qwen3.6-27B-MLX-8bit"],
+  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 }
 }
 ```
 
-- `defaultThinkingLevel: "off"` — both slots report `reasoning: false`.
-- `enabledModels` gives Ctrl+P cycling between the code and general slots.
+- `defaultThinkingLevel: "off"` — the model reports `reasoning: false`.
+- `enabledModels` registers the resident code model for Ctrl+P selection.
   Glob patterns (`*Qwen3.6*`) do **not** match these models; pi matches the
   path-style IDs by substring, so list the basenames exactly as above.
-- Compaction reserve is lowered to 8192 (= the models' `maxTokens`) to leave
-  more of the 85K window for actual work.
+- Compaction reserve is set to 16384 (= the models' `maxTokens`) to leave
+  more of the available context for actual work.
 
 `AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
 `192.168.1.79` — the LAN box's address has changed once already via DHCP

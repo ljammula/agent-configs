@@ -1,9 +1,7 @@
 {
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_MODEL": "claude-sonnet-4-6",
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
-    "ANTHROPIC_AUTH_TOKEN": "local-proxy-dummy-token"
+    "CLAUDE_MODEL": "claude-sonnet-4-6"
   },
   "hooks": {
     "PreToolUse": [
@@ -44,5 +42,6 @@
   },
   "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,
-  "theme": "auto"
+  "theme": "auto",
+  "model": "sonnet"
 }
