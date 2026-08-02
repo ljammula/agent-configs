@@ -38,7 +38,7 @@ harness — not enough signal to justify the added cost. See
 the edit yourself.
 
 The read-only local services are still worth using. The served HTTP
-endpoints — code review (:8080), log triage (:8081), and SearXNG (:8888),
+endpoints — code review and log triage (:8080), and SearXNG (:8888),
 used by `before-done`/`self-review`/`local-summarize`/`local-search` — do
 not have to be on this machine. Set `AI_STACK_HOST` to
 the host serving them (e.g. `192.168.1.79` for a LAN box) and every
@@ -47,9 +47,8 @@ reachability check and script resolves there; unset, it defaults to
 
 Current route details and performance are recorded in
 `~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the ThinkingCap
-Qwen3.6-27B 8-bit code/review slot and `:8081` is the Qwen3.6-35B-A3B 5-bit
-general/triage slot; both use mlx-vlm 0.6.8 with APC. Clients must discover the
-current id from `/v1/models` instead of hardcoding it because the public proxy
-rejects stale or omitted model ids.
+Qwen3.6-27B 8-bit code, review, and triage route, using mlx-vlm 0.6.8 with
+APC. Clients must discover the current id from `/v1/models` instead of
+hardcoding it because the public proxy rejects stale or omitted model ids.
 
 @RTK.md

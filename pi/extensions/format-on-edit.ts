@@ -8,7 +8,7 @@ import { resolve } from "path";
 // cloud model rarely makes is exactly the kind of mechanical error a local
 // model makes often, and `make verify` fails on it. Fixing it at the source
 // costs one subprocess; leaving it costs a full failed-verify turn, which on
-// an 85K context window is expensive.
+// a local context window is expensive.
 export default function (pi: ExtensionAPI) {
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "write" && event.toolName !== "edit") return undefined;

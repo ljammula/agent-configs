@@ -14,25 +14,8 @@ export default function (pi: ExtensionAPI) {
         reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 120000,
-        maxTokens: 8192,
-      },
-    ],
-  });
-  pi.registerProvider("ai-stack-general", {
-    name: "ai-stack general",
-    baseUrl: `http://${host}:8081/v1`,
-    apiKey: "dummy-key-not-checked",
-    api: "openai-completions",
-    models: [
-      {
-        id: "/Users/kanna/code/ai-stack/models/Qwen3.6-35B-A3B-5bit",
-        name: "Qwen3.6-35B-A3B-5bit",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 65536,
-        maxTokens: 8192,
+        contextWindow: 96000,
+        maxTokens: 16384,
       },
     ],
   });

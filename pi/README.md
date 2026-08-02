@@ -8,8 +8,8 @@ pi is deliberately minimal: four default tools (`read`, `write`, `edit`,
 by default, and no built-in MCP, subagents, permission prompts, plan mode,
 todos, or web search (`README.md`, `docs/usage.md`). Everything here re-adds a
 piece of that, chosen for one reason: this machine runs pi against **local
-models** with 120K and 65,536-token route limits, not a cloud model, so the
-harness has to carry weight the model cannot.
+models** with 64K–96K context windows, not a cloud model, so the harness has to
+carry weight the model cannot.
 
 For a single, dated, cross-repo reconciliation of what's actually been
 validated vs. still open (extension-by-extension, with real trial counts),
@@ -39,8 +39,8 @@ extension set per run.
 
 The one thing this depends on: **`AI_STACK_HOST` must already be exported
 in your shell** (it is, via `~/.zshrc`) before `pi` starts, since both the
-`ai-stack-local`/`ai-stack-general` providers and `cross-model-review.ts`'s
-reviewer call read it once from `process.env` at extension-registration
+`ai-stack-local` and `cross-model-review.ts`'s reviewer call read it once from
+`process.env` at extension-registration
 time. A shell that doesn't source `~/.zshrc` (cron, launchd, a script's own
 subshell) silently falls back to `127.0.0.1`, where nothing listens on this
 Mac — see the `AI_STACK_HOST` note below for the fix if that happens.
@@ -64,10 +64,9 @@ round-trip against it — see `../pi-harness-validation-status.md`'s
 
 Written here:
 
-- **`ai-stack-local.ts`** — registers both ai-stack slots as providers:
-  `ai-stack-local` (:8080, ThinkingCap-Qwen3.6-27B-MLX-8bit, "code") and
-  `ai-stack-general` (:8081, Qwen3.6-35B-A3B-5bit, "general"). Both use
-  mlx-vlm 0.6.8 with APC and follow `AI_STACK_HOST`.
+- **`ai-stack-local.ts`** — registers ai-stack's resident provider:
+  `ai-stack-local` (:8080, ThinkingCap-Qwen3.6-27B-MLX-8bit, "code"). It
+  follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally.
@@ -161,13 +160,13 @@ Written here:
 - **`cross-model-review.ts`** — Phase 2 of
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
-  diff + spec to `ai-stack-general` for a second opinion, feeds back a
-  flagged issue). **Verdict (2026-07-24, reviewer = Qwen3.6-35B-A3B): not
-  adopted** — the one real test run (a known, spec-violating bug the hidden
+  diff + spec to `ai-stack-local` for a second opinion, feeds back a
+  flagged issue). **Verdict (2026-07-24, first reviewer): not adopted** — the
+  one real test run (a known, spec-violating bug the hidden
   test suite catches) came back negative, reviewer returned
   `NO_ISSUES_FOUND`. Moved to `disabled-extensions/`. **Re-verdict
-  (2026-07-25, reviewer switched to gemma-4-31B-it-OptiQ-4bit on :8081,
-  replacing 35B-A3B in the resident pair): adopted, moved back to
+  (2026-07-25, reviewer switched to gemma-4-31B-it-OptiQ-4bit on :8081):
+  adopted, moved back to
   `extensions/`.** A live smoke run against the `lru-cache` task (no seeded
   bug — the model's own organically-written solution, tests green) had the
   reviewer catch a real logic bug the test suite missed: the `order` slice
@@ -217,7 +216,7 @@ Written here:
     live `:8081` endpoint. **No regression — an improvement**: the current
     gemma4 reviewer correctly flags it (`` `Put` is not updated to call
     `touch`... eviction logic remains broken for insertions and updates
-    ``), unlike the original 35B-A3B reviewer that missed this exact class
+    ``), unlike the original reviewer that missed this exact class
     on 2026-07-24.
   - **Live smoke tests**, `lru-cache` task, real `pi` + Qwen3.6-27B primary
     + gemma4 reviewer via `scratch-phase-validate/run_one_long.sh` (a
@@ -287,14 +286,6 @@ Written here:
   verdict, and two canaries — formatting variants (`NO_ISSUES_FOUND.`, `-
   NO_ISSUES_FOUND`) that intentionally still don't match, and the residual
   risk itself pinned down as a currently-passing test rather than prose-only.
-
-  **Runtime sync (2026-08-02):** the resident general slot changed from Gemma
-  back to Qwen3.6-35B-A3B when mlx-vlm 0.6.8 became the shared Qwen baseline.
-  `cross-model-review.ts` now sends the exact current 35B model id so the
-  proxy's stale-model guard does not reject it. The historical Gemma adoption
-  evidence above does not transfer to this reviewer; connectivity is
-  live-verified, but reviewer-quality revalidation remains required before
-  treating the old verdict as current.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
@@ -412,17 +403,17 @@ would mean pi editing tracked files behind your back. Set these by hand:
   "defaultProvider": "ai-stack-local",
   "defaultModel": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
   "defaultThinkingLevel": "off",
-  "enabledModels": ["ThinkingCap-Qwen3.6-27B-MLX-8bit", "Qwen3.6-35B-A3B-5bit"],
-  "compaction": { "enabled": true, "reserveTokens": 8192, "keepRecentTokens": 24000 }
+  "enabledModels": ["ThinkingCap-Qwen3.6-27B-MLX-8bit"],
+  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 }
 }
 ```
 
-- `defaultThinkingLevel: "off"` — both slots report `reasoning: false`.
-- `enabledModels` gives Ctrl+P cycling between the code and general slots.
+- `defaultThinkingLevel: "off"` — the model reports `reasoning: false`.
+- `enabledModels` registers the resident code model for Ctrl+P selection.
   Glob patterns (`*Qwen3.6*`) do **not** match these models; pi matches the
   path-style IDs by substring, so list the basenames exactly as above.
-- Compaction reserve is 8192 (= the providers' `maxTokens`) to leave more of
-  the selected route's 120K or 65,536-token window for actual work.
+- Compaction reserve is set to 16384 (= the models' `maxTokens`) to leave
+  more of the available context for actual work.
 
 `AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
 `192.168.1.79` — the LAN box's address has changed once already via DHCP

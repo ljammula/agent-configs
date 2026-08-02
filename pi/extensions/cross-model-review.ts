@@ -3,15 +3,15 @@
  *
  * Phase 2 of ai-stack/local-quality-next-steps-plan.md: the previously-
  * scoped-but-never-built "blind-reviewer pass". Both ai-stack slots are
- * already resident (:8080 ThinkingCap 27B 8-bit "code", :8081 35B-A3B
- * 5-bit "general");
+ * currently exposes ThinkingCap 27B on :8080. The review is an independent
+ * inference call, not a distinct-model review, while that is the only route.
  * nothing today has one model review the other's diff before a task is
  * called done.
  *
  * On the first green run of the task's own verification command this
  * session, sends the diff since session start (working tree + any commits
  * made mid-session) plus the original task spec (the first user message) to
- * ai-stack-general with a tight review prompt. Blind by construction: the
+ * ai-stack-local with a tight review prompt. Blind by construction: the
  * reviewer sees only the diff and spec, never the first model's own
  * reasoning or self-assessment, so it can't just agree with a stated
  * conclusion. On a flagged issue, feeds it back as a fix-it turn.
@@ -68,7 +68,7 @@ const MAX_REVIEW_ROUNDS = 3;
 function reviewModel(): { host: string; model: string } {
 	return {
 		host: process.env.AI_STACK_HOST || "127.0.0.1",
-		model: "/Users/kanna/code/ai-stack/models/Qwen3.6-35B-A3B-5bit",
+		model: "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
 	};
 }
 
@@ -183,7 +183,7 @@ async function runReview(
 	const signals = [AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])];
 	let reviewText: string;
 	try {
-		const res = await fetch(`http://${host}:8081/v1/chat/completions`, {
+		const res = await fetch(`http://${host}:8080/v1/chat/completions`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
@@ -266,7 +266,7 @@ export default function (pi: ExtensionAPI) {
 
 				pi.sendUserMessage(
 					[
-						"A blind second-opinion review (ai-stack-general, diff + spec only,",
+						"A blind second-opinion review (ai-stack-local, diff + spec only,",
 						"no access to your reasoning) flagged a possible issue with your",
 						`passing-tests diff (review round ${reviewCount} of ${MAX_REVIEW_ROUNDS}):`,
 						"",

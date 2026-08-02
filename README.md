@@ -73,9 +73,9 @@ agent-configs/
 │   └── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
 │
 └── pi/                        # pi coding agent — ~/.pi/agent/  (see pi/README.md)
-    ├── AGENTS.md              # Global instructions, tuned for local models (85K window)
+    ├── AGENTS.md              # Global instructions, tuned for the local model (96K window)
     ├── extensions/            # pi ships no MCP/plan-mode/todos/web-search; these add them
-    │   ├── ai-stack-local.ts       # Both ai-stack slots as providers (:8080 code, :8081 general)
+    │   ├── ai-stack-local.ts       # Resident ai-stack provider (:8080 code, review, triage)
     │   ├── karpathy-guardrail.ts   # Appends karpathy rules to every system prompt
     │   ├── rtk-rewrite.ts          # Port of claude/hooks/rtk-rewrite.sh to tool_call
     │   ├── format-on-edit.ts       # Port of claude/hooks/format-on-edit.sh to tool_result

@@ -9,13 +9,11 @@ facts agent configurations need when choosing or calling a local route.
 
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
-| `:8080/v1` | `t-prazak/ThinkingCap-Qwen3.6-27B-MLX-8bit`, coding and local review | mlx-vlm 0.6.8, APC + MTP block 3 | 51.9 tok/s median |
-| `:8081/v1` | `Qwen3.6-35B-A3B-5bit`, general triage and summarization | mlx-vlm 0.6.8, exact-snapshot APC | 71.4 tok/s steady state |
+| `:8080/v1` | `ThinkingCap-Qwen3.6-27B-MLX-8bit`, coding, local review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | 51.9 tok/s median |
 
-The rates came from sequential live requests with the peer resident but idle,
-using 256 generated tokens per sample. The 27B samples were 51.76-51.95 tok/s.
-The 35B stable samples were 71.28-71.49 tok/s; one initial 93.40 tok/s transient
-was excluded. These are workload-specific observations, not throughput SLAs.
+The rate came from sequential live requests using 256 generated tokens per
+sample. The 27B samples were 51.76-51.95 tok/s. This is a workload-specific
+observation, not a throughput SLA.
 
 ## Client rules
 
@@ -26,12 +24,12 @@ was excluded. These are workload-specific observations, not throughput SLAs.
   Pi settings whenever a route changes. The public proxy returns HTTP 400
   `model_mismatch` for an omitted or stale id so mlx-vlm cannot dynamically
   replace the configured checkpoint.
-- Both routes allow one active generation. Use `GET /proxy/health` to inspect
+- The route allows two active generations. Use `GET /proxy/health` to inspect
   activity, completed/rejected requests, queue timeouts, upstream failures, and
   request timeouts.
-- APC is enabled on both routes. Preserve stable prefixes when practical; a
-  repeated live check reused 41 prompt tokens and reduced end-to-end latency
-  from 1.108s to 0.493s on 27B and from 0.788s to 0.308s on 35B.
+- APC is enabled. Preserve stable prefixes when practical; a repeated live
+  check reused 41 prompt tokens and reduced 27B end-to-end latency from
+  1.108s to 0.493s.
 - Treat local-model output as evidence to review, not an authoritative result.
   The 8-bit code checkpoint improves the available signal but does not remove
   the existing judgment and logic-error limitations described by the skills.
@@ -43,7 +41,7 @@ cost and latency benchmark.
 
 ## Runtime and rollback boundary
 
-Both resident Qwen launchers use the exactly locked `mlx-vlm-venv` on 0.6.8.
+The resident Qwen launcher uses the exactly locked `mlx-vlm-venv` on 0.6.8.
 The patched 0.6.3 `venv` remains intact for Qwen rollback and the manual Gemma
 OptiQ route; Gemma currently fails 0.6.8 validation because 356 vision
 parameters are missing from that checkpoint.
