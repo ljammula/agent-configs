@@ -19,6 +19,11 @@ useless — the failure mode here isn't "wastes tokens," it's "sends you
 confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
+The current resident route is ThinkingCap-Qwen3.6-27B-MLX-8bit on mlx-vlm
+0.6.8 with APC; see `~/code/agent-configs/local-ai-stack.md` for its measured
+throughput. The script discovers its exact model id from `/v1/models` so it
+remains compatible with the proxy's stale-model guard.
+
 ## Step 1 — triage
 
 ```bash
@@ -28,9 +33,8 @@ accordingly: read what it flags yourself before acting on it.
 The script does its own reachability check -- do not pre-flight it with a
 separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
 instance isn't local, e.g. `192.168.1.79`; unset it defaults to localhost.)
-If it exits `not reachable` — the stack is down, or the general-slot model
-isn't the resident one right now (only one model pair can be resident at a
-time) — relay that one line and read the file directly instead.
+If it exits `not reachable` — the stack is down or the resident model is not
+available — relay that one line and read the file directly instead.
 
 Otherwise it prints a line-number-referenced list of sections worth reading in full
 (`lines N-M: why it matters`), or `no notable sections` if nothing stood
