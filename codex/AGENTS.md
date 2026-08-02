@@ -16,8 +16,8 @@ case the local model self-corrects mechanical mistakes but not logic bugs,
 so treat its output as evidence to review — never a trusted result.
 
 The served HTTP endpoints (code review and log triage :8080, SearXNG :8888)
-need not be on this machine: set `AI_STACK_HOST` to the serving host (e.g.
-`192.168.1.79` for a LAN box) and the reachability checks and scripts resolve
+need not be on this machine: set `AI_STACK_HOST` to the serving host (currently
+`192.168.1.233` for this LAN box) and the reachability checks and scripts resolve
 there; unset, it defaults to `127.0.0.1`. Set it once in the shell environment
 so all agents inherit it.
 

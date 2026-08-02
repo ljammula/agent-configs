@@ -5,6 +5,15 @@ Agent instructions and skills used on this machine, organized by agent.
 **pi harness validation status** (what's adopted vs. not, and why): see
 [pi-harness-validation-status.md](pi-harness-validation-status.md).
 
+**Current-machine Pi audit (2026-08-02):** Pi 0.83.0 uses one resident
+ThinkingCap Qwen3.6-27B route for both primary coding and the automatic blind
+review call. The successful cross-family reviewer evidence was gathered with a
+now-nonresident Gemma route and does not validate the current same-model setup.
+`protected-paths.ts` guards Pi's `write`/`edit` tools but is not a shell or OS
+sandbox, and DayTrix-specific skills remain globally linked while their
+project-local migration is pending. The proposed remediation and proof gates
+are tracked in [PR #5](https://github.com/ljammula/agent-configs/pull/5).
+
 The local inference routes used by the machine-conditional skills are recorded
 in [local-ai-stack.md](local-ai-stack.md), including current model ids, runtime
 versions, measured throughput, client rules, and the rollback validation
@@ -75,12 +84,17 @@ agent-configs/
 └── pi/                        # pi coding agent — ~/.pi/agent/  (see pi/README.md)
     ├── AGENTS.md              # Global instructions, tuned for the local model (96K window)
     ├── extensions/            # pi ships no MCP/plan-mode/todos/web-search; these add them
-    │   ├── ai-stack-local.ts       # Resident ai-stack provider (:8080 code, review, triage)
+    │   ├── ai-stack-local.ts       # Resident ai-stack provider (:8080 code + triage)
+    │   ├── full-stack-dev.ts       # Generic autonomous plan/chunk/test/debug workflow
     │   ├── karpathy-guardrail.ts   # Appends karpathy rules to every system prompt
     │   ├── rtk-rewrite.ts          # Port of claude/hooks/rtk-rewrite.sh to tool_call
     │   ├── format-on-edit.ts       # Port of claude/hooks/format-on-edit.sh to tool_result
     │   ├── searxng-search.ts       # web_search tool via local SearXNG (no cloud API key)
-    │   ├── protected-paths.ts      # Vendored + cwd confinement (local models write outside cwd)
+    │   ├── protected-paths.ts      # write/edit cwd guard only; not bash/OS confinement
+    │   ├── continuation-nudge.ts   # Bounded recovery from silent stops/failed verification
+    │   ├── cross-model-review.ts   # Historical name; current :8080 same-model blind review
+    │   ├── co-change-suggest.ts    # Git-history co-change reading suggestions
+    │   ├── git-safety.ts           # Blocks selected destructive git commands
     │   ├── plan-mode/              # Vendored: /plan read-only exploration
     │   ├── todo.ts                 # Vendored: task list with persistent state
     │   ├── git-checkpoint.ts       # Vendored: stash checkpoints for /fork restore
@@ -180,7 +194,7 @@ Completion gate that runs before reporting any task done. Optionally opens with 
 Route trivial, low-stakes lookups (API signatures, error messages, version/changelog checks) to a local SearXNG instance instead of cloud WebSearch. No local model in the loop — Claude reads and judges raw search results directly, so there's no logic-bug risk to weigh. Machine-conditional on the SearXNG port being reachable.
 
 ### local-summarize
-Triage a large log/output/JSONL file through the local general-slot model before reading it into Claude's own context — flags line ranges worth a direct read rather than producing a trusted digest, since a hallucinated summary of a stack trace is worse than useless. Machine-conditional on the local model port being reachable.
+Triage a large log/output/JSONL file through the resident local model before reading it into Claude's own context — flags line ranges worth a direct read rather than producing a trusted digest, since a hallucinated summary of a stack trace is worse than useless. Machine-conditional on the local model port being reachable.
 
 ### docs-verify
 Generate-and-verify for documentation changes: apply the edit, then prove it landed — `check-links.sh` verifies every URL responds, `check-stale-terms.sh` verifies terminology renames swept clean, plus a semantic consistency pass.

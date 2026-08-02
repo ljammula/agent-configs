@@ -4,6 +4,12 @@ Source: workflow `wf_896310d0-59a` (task `wbnbwx4in`), 5 research lenses + adver
 verification pass. 63 findings, 33 held + 4 narrowed after refutation, 0 fully killed.
 Full raw output (all citations + per-agent trace): `/private/tmp/claude-501/-Users-kanna-code-agent-configs/6298f324-eb68-43e2-b9a0-2c2c14935621/tasks/wbnbwx4in.output`
 
+> **Current-state correction (2026-08-02):** the deployed Pi reviewer is not
+> architecturally independent today. The primary and review pass both use the
+> resident ThinkingCap Qwen3.6 27B 8-bit model on `:8080`. References below to
+> an independent `:8080` checker describe the intended topology, not proof of
+> the current one; see `pi-harness-validation-status.md`.
+
 ## What the best practitioners are actually doing (ranked by daily-loop impact)
 
 1. **Separate generation from evaluation into distinct agents/processes** — self-grading

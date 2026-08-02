@@ -1,6 +1,7 @@
 # pi harness — consolidated validation status
 
-**As of 2026-07-26, updated twice same day (see "What worked").**
+**Current configuration audited 2026-08-02. Historical validation evidence
+through 2026-07-26 remains below.**
 This supersedes nothing by deleting it — it exists because the real story
 is split across ~10 documents in two repos (`agent-configs`, `ai-stack`)
 written at different points in the same investigation, and at least one of
@@ -22,14 +23,25 @@ new entries at the top of "What worked" and `ai-stack/cross-model-review-bounded
 
 ## Summary
 
-Of the harness's judgment-dependent extensions, one is adopted on solid
-retrospective evidence (`co-change-suggest.ts`), one is adopted but has
-already flipped verdict once and rests on single-digit-n
-(`cross-model-review.ts`), and one is kept installed but inert because it
-has never once fired in a real trial (`continuation-nudge.ts`). The
-deterministic extensions (`protected-paths.ts`, `format-on-edit.ts`,
-`rtk-rewrite.ts`, `git-checkpoint.ts`, `git-safety.ts`) don't need the same
-kind of battery and aren't in question. The validation harness itself
+The current local Pi is 0.83.0 and has one resident inference route:
+`ThinkingCap-Qwen3.6-27B-MLX-8bit` on `:8080`. The enabled
+`cross-model-review.ts` now calls that same model and route as the primary
+agent. Its name is historical: the 2026-07-25 adoption evidence below came
+from Gemma on `:8081` and does **not** validate today's same-model second pass.
+Treat the deployed reviewer as enabled but unvalidated, not as an independent
+cross-model gate.
+
+Of the other judgment-dependent extensions, `co-change-suggest.ts` is adopted
+on useful but single-case retrospective evidence, while
+`continuation-nudge.ts` has deterministic branch tests but still lacks field
+evidence for its widened behavior. `full-stack-dev.ts` is structurally tested
+and applies to backend-only as well as full-stack work, but has no controlled
+outcome comparison. The deterministic extensions reduce risk, but their scope
+still matters: `protected-paths.ts` intercepts Pi `write` and `edit` calls; it
+does not confine `bash`, resolve symlink escapes, or provide an OS sandbox.
+There is no maintained, committed TypeScript extension test project, so much
+of the evidence still comes from temporary mock harnesses and small-n live
+runs. The validation harness itself
 (`scratch-phase-validate/`) took five attempts to produce one clean batch,
 each earlier attempt killed by a different real bug. Separately, one full
 real-world feature dispatch was analyzed in depth and produced three
@@ -86,7 +98,8 @@ battery.
   the fix and real diff-derived identifiers, the target file ranked **#1
   of 8**. Correctly produces no signal on a generic paraphrase (expected
   scoping limit, not a bug).
-- **`cross-model-review.ts` — adopted, 2026-07-25, reviewer =
+- **Historical Gemma configuration: `cross-model-review.ts` — adopted,
+  2026-07-25, reviewer =
   gemma-4-31B-it-OptiQ-4bit.** Caught the exact known bug the original
   Qwen-family reviewer missed (once a bounded-reasoning prompt fix was
   applied), then separately caught a second, unseeded real bug
@@ -111,6 +124,15 @@ battery.
   unprompted refactor judgment call not in the spec.
 
 ## What didn't work
+
+- **The current `cross-model-review.ts` configuration is not the configuration
+  that earned adoption.** Both primary and reviewer now resolve to the same
+  Qwen model on `:8080`; the independently trained Gemma reviewer used by the
+  successful 2026-07-25 experiments is no longer resident.
+- **Extension regression checks are not committed as a maintained test
+  suite.** Important branches have been checked with temporary mocks or copied
+  helper logic, which is useful evidence but makes drift easy and repeatable
+  verification harder.
 
 - **`continuation-nudge.ts` has fired zero times in ~46 real trials plus 2
   targeted attempts** — every trial to date used the trigger's original,
@@ -144,6 +166,20 @@ battery.
   risk this whole consolidation exists to catch.
 
 ## Todo
+
+- **Restore genuine reviewer diversity or rename/disable the current reviewer,
+  then rerun the seeded battery on the exact deployed route.** Do not transfer
+  the historical Gemma verdict to the same-Qwen configuration.
+- **Commit extension contract tests** for event timing, retry bounds, marker
+  parsing, command detection, and Pi-version API compatibility. Run them in CI.
+- **Bind verification to the final tree/diff.** The continuation and review
+  extensions currently recognize command-shaped evidence, but a later edit can
+  make an earlier green check stale. Record the verified tree or diff identity
+  and invalidate it on subsequent mutation.
+- **Move DayTrix-only skills out of the global Pi skill directory** and into
+  that project, leaving generic backend/full-stack guidance global.
+- **Use an OS/container boundary for unattended execution.** The protected-path
+  guard is defense in depth, not filesystem confinement.
 
 - **`cross-model-review.ts`'s full Phase 2 kill criterion** — a 3-task
   real-feature battery with deliberately-seeded wrong-but-plausible
@@ -186,7 +222,7 @@ battery.
 
 ## Historical log
 
-### `cross-model-review.ts` in full — the verdict has flipped once, on real evidence, and could again
+### Historical `cross-model-review.ts` verdict — it flipped once on real evidence
 
 1. **2026-07-24, first reviewer.** One real test: fed the
    extension's actual code a real diff with a known, spec-violating bug
@@ -238,13 +274,13 @@ battery.
 
 | Extension | Status | n | Evidence |
 |---|---|---|---|
-| `protected-paths.ts` | Adopted (vendored, on by default) | 1 live catch | Caught Qwen3.6-27B emitting an absolute path outside the working dir; corrective retry worked. No formal battery — deterministic guard, low complexity. |
+| `protected-paths.ts` | Adopted as a tool guard (vendored, on by default) | 1 live catch | Caught Qwen3.6-27B emitting an absolute path outside the working dir; corrective retry worked. It covers Pi `write`/`edit`, not `bash`, symlink escapes, or OS-level confinement. No formal battery. |
 | `format-on-edit.ts` | Adopted (vendored, on by default) | — | No battery; deterministic gofmt/dart-format pass, not a judgment call. |
 | `rtk-rewrite.ts` | Adopted (vendored, on by default) | — | No battery; deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted (vendored, on by default) | — | No battery; deterministic per-turn snapshotting. |
 | `co-change-suggest.ts` | **Adopted**, 2026-07-24 | 1 real retrospective case | Real retrospective replay against `personal-assistant` (782 commits, real historical dispatch). Found and fixed a real seed-selection bug along the way. With the fix and real diff-derived identifiers, target file ranked **#1 of 8**. Correctly no-signal on a generic paraphrase (expected scoping limit, not a bug). **Not done**: the plan's second half of its kill criterion — "try it live on one new personal-assistant feature task" (forward-looking, not retrospective) — has not been run. |
 | `continuation-nudge.ts` | **Not adopted**, kept loaded as a no-cost no-op | 0 firings / ~46 real trials + 2 targeted attempts | Fired zero times outside mocked unit tests across every real trial run to date. Widened 2026-07-25 to also trigger on a silent empty-content stop (the actual failure mode observed once, for real, in the daily-briefing-screen dispatch — narrower than what the original prose-pattern trigger covered). **Not done**: every one of the ~46+2 real trials predates the 2026-07-25 widening and used the old, narrower trigger only. The new empty-content trigger path has zero real-trial exercises to date — it is unit-tested, not field-tested. **Separately, a real `verificationRan` scoping bug found 2026-07-26 (see "What worked") was fixed (`5778d1b`) and retested the same day** via direct logic replay (no live full-agent reproduction landed — see "What worked" for why); this is about correctness of the trigger's *arming* logic, not about the trigger's firing rate above, which remains as measured. |
-| `cross-model-review.ts` | **Adopted**, 2026-07-25 (reviewer = gemma-4-31B-it-OptiQ-4bit on :8081; previously disabled 2026-07-24 with an earlier reviewer) | see above | Verdict flipped once already based on real evidence — see the full timeline above (item 5 is the latest entry, 2026-07-26), not just this row. |
+| `cross-model-review.ts` | **Enabled but unvalidated in the current configuration**; historical Gemma setup adopted 2026-07-25 | see above | Current primary and reviewer are the same Qwen model on `:8080`. The verdict below applies to the historical Gemma reviewer on `:8081`, not the deployed same-model second pass. |
 | `git-safety.ts` | Adopted, 2026-07-25 | 1 scratch-repo reproduction | Reproduced the exact `git reset --hard main` command that triggered its creation, against a scratch repo; confirmed blocked, repo untouched. Single reproduction, not a battery — the command class is small and deterministic (`reset --hard`, `push --force` w/o lease, `clean -f`, `branch -D`, `checkout/restore -- .`), which is why one clean repro is treated as sufficient here unlike the model-judgment extensions above. |
 | Phase 4 (Aider-based failing-test retry) | **Deliberately not built** | n/a | Gated by the plan itself on Aider dispatch being back in scope. It isn't: `~/.claude/CLAUDE.md` and `agent-configs/pi/AGENTS.md` both record that `dispatch-local` was benchmarked and removed (cost more Anthropic tokens, ran 5-10x slower than editing directly — see `local-model-bench/STATUS.md`). Correctly out of scope, not a gap. |
 

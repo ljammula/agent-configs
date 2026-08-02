@@ -3,6 +3,11 @@
 Updated 2026-07-24. All prior code-level review findings have been addressed
 in `agent-configs` commit `8a7589b` and the preceding fixes in `04d72d5`.
 
+> **Historical snapshot.** This document does not evaluate the 2026-08-02
+> deployed configuration. Use `pi-harness-validation-status.md` for current
+> status, including the finding that Pi's enabled reviewer now uses the same
+> Qwen model and `:8080` route as its primary agent.
+
 **Resolved, 2026-07-26**: the "empirical validation remains incomplete"
 claim below, and the specific `results.tsv`-is-empty observation it's
 based on, describe a snapshot mid-run. The batch this section is

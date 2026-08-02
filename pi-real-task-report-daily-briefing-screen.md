@@ -8,6 +8,13 @@ ran verification myself, and opened/approved the PR. This report is built from
 the session JSONL transcripts (`~/.pi/agent/sessions/.../*.jsonl`), not from
 `pi`'s self-reported summary.
 
+> **Historical run.** The 4-bit model, 85K context window, extension behavior,
+> and network routes below describe this experiment, not the current machine.
+> As of 2026-08-02, local Pi 0.83.0 uses the ThinkingCap Qwen3.6 27B 8-bit
+> route with a 96K context window. Its enabled reviewer is currently a
+> same-model second pass and remains unvalidated in that configuration. See
+> `pi-harness-validation-status.md` for the current ledger.
+
 ## Raw numbers
 
 | Metric | Value |

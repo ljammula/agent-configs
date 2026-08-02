@@ -56,3 +56,5 @@ Plan mode keeps PI's native read-only tools enabled:
 
 It disables `bash`, `edit`, and `write`. Shell command allowlists are not a
 reliable read-only boundary because shell composition can execute writes.
+This is an agent-tool mode, not an OS security sandbox; do not use it as the
+confinement boundary for untrusted or unattended code.

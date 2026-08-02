@@ -41,7 +41,7 @@ gh pr diff <N> --repo ljammula/<repo>
 gh pr diff <N> --repo ljammula/<repo> | ~/.pi/agent/skills/before-done/scripts/local-review.sh
 ```
 
-Treat its output as candidates to check, not confirmed findings — verify each against the actual diff yourself before posting. It's a differently-trained pass that costs no cloud tokens, not a substitute for your own review. If the port isn't reachable, note it in one line (e.g. `local ai-stack model unreachable - skipping local second opinion`) and proceed with your own review.
+Treat its output as candidates to check, not confirmed findings — verify each against the actual diff yourself before posting. In Pi's default local configuration it is a blind second pass by the same ThinkingCap Qwen model as the primary agent, not a differently-trained or independent reviewer. If the port isn't reachable, note it in one line (e.g. `local ai-stack model unreachable - skipping local second opinion`) and proceed with your own review.
 
 Apply the karpathy-guidelines criteria, in priority order:
 1. Correctness bugs (logic, error handling, concurrency, edge cases)

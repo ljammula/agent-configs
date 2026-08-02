@@ -29,7 +29,7 @@ After Phase 1 passes, on machines that can reach the ai-stack local model — lo
 git diff | ~/.pi/agent/skills/before-done/scripts/local-review.sh
 ```
 
-This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." If the port isn't reachable, say so in one line (e.g. `local ai-stack review model unreachable at ${AI_STACK_HOST:-127.0.0.1}:8080 - skipping local review`) and move on; it never blocks completion.
+This is evidence to weigh, not a finding list to trust — the local model self-corrects mechanical mistakes but not logic bugs, so treat its output as "things to double-check," not "things that are wrong." Under Pi's default local configuration this is a blind second pass by the same ThinkingCap Qwen model as the primary agent, not an independent or differently-trained reviewer. If the port isn't reachable, say so in one line (e.g. `local ai-stack review model unreachable at ${AI_STACK_HOST:-127.0.0.1}:8080 - skipping local review`) and move on; it never blocks completion.
 
 ## Phase 1 — Code Correctness (after any code change)
 

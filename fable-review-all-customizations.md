@@ -5,6 +5,13 @@ Reviewer: Fable (advisory review), 2026-07-24. Scope: everything under
 prompts, AGENTS.md), `codex/` (skills), `copilot/` (flat instruction files),
 and `install.sh`.
 
+> **Historical snapshot.** For the current machine state, use
+> `pi-harness-validation-status.md` and `pi/README.md`. In particular, the
+> local Pi now has one resident Qwen route, so the later Gemma review results
+> do not validate the currently deployed same-model reviewer. The
+> `protected-paths.ts` guard also remains a Pi `write`/`edit` interception
+> layer, not a sandbox for shell commands or symlink traversal.
+
 Run as three parallel reviews to keep each pass focused, then combined here.
 The three pi extensions built this session for
 `ai-stack/local-quality-next-steps-plan.md`

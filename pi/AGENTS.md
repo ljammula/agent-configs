@@ -62,6 +62,16 @@ relying on any of them — these instructions load on machines without the stack
 A local model self-corrects mechanical mistakes but not logic bugs. Treat its
 output as evidence to verify, never as a trusted result.
 
+On the default Pi configuration, `cross-model-review.ts` and the local-review
+scripts call the same ThinkingCap Qwen model as the primary agent. They provide
+a blind second pass, not model diversity or independent proof. The historical
+Gemma reviewer results do not validate the current same-model route.
+
+Pi has no built-in sandbox. `protected-paths.ts` guards only Pi's `write` and
+`edit` tools, while `bash` still runs with this user's host permissions. Do not
+treat extension guardrails as filesystem, credential, network, or deployment
+isolation; unattended or untrusted work belongs in an OS/container boundary.
+
 ## Context discipline
 
 The local model has a 96K context window — roughly a fifth of a cloud model's.

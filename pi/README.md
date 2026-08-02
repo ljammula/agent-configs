@@ -17,6 +17,15 @@ see `../pi-harness-validation-status.md`. This file below documents what
 each extension does; that one documents what's actually been proven about
 whether it works.
 
+Current-machine caveats (audited 2026-08-02): Pi 0.83.0 has one resident
+ThinkingCap Qwen3.6-27B route. The primary agent and automatic blind reviewer
+both call that same model on `:8080`, so the historical `cross-model-review.ts`
+name no longer describes the deployed topology and the prior Gemma evidence
+does not validate it. The path guard covers `write`/`edit`, not `bash` or
+symlink escapes; Pi itself has no built-in sandbox. DayTrix-specific skills
+are also still globally installed pending the project-local migration already
+documented in the root README.
+
 ## Launching pi
 
 From any directory, in a normal terminal:
@@ -72,11 +81,15 @@ Written here:
   rather than unconditionally.
 - **`full-stack-dev.ts`** — activates Pi's complete standard development
   toolset: `read`, `edit`, `write`, `find`, `grep`, and `bash` (Pi's terminal
-  and command/test runner). It also requires a plan, small implementation
-  chunks, and a test/debug loop after each chunk.
+  and command/test runner). It applies to backend-only as well as full-stack
+  repositories: the name is historical, while the workflow itself is generic.
+  It requires acceptance criteria, autonomous routine decisions, small
+  implementation chunks, focused verification after each chunk, a persistent
+  edit/test/debug loop until the check passes or an evidenced external blocker
+  is reached, and a final broad verification plus diff review.
 - **`rtk-rewrite.ts`** — port of `claude/hooks/rtk-rewrite.sh`. Routes bash
   commands through `rtk rewrite` for 60-90% less output. Worth more here than
-  under Claude Code: on an 85K window, output reduction is turns.
+  under Claude Code: on the current 96K window, output reduction is turns.
 - **`format-on-edit.ts`** — port of `claude/hooks/format-on-edit.sh`. gofmt/dart
   format after every write/edit. Local models produce unformatted code far more
   often than cloud models, and `make verify` fails on it.
@@ -172,7 +185,14 @@ Written here:
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
   diff + spec to `ai-stack-local` for a second opinion, feeds back a
-  flagged issue). **Verdict (2026-07-24, first reviewer): not adopted** — the
+  flagged issue). **Current state (2026-08-02): enabled but unvalidated in its
+  deployed configuration.** The extension now calls the same ThinkingCap
+  Qwen3.6-27B model and `:8080` route as the primary Pi agent. It remains blind
+  to the primary reasoning, but it is not a distinct-model review. The
+  successful evidence below belongs to the former Gemma `:8081` configuration
+  and must not be used to claim that the current route is adopted.
+
+  **Historical evidence:** **Verdict (2026-07-24, first reviewer): not adopted** — the
   one real test run (a known, spec-violating bug the hidden
   test suite catches) came back negative, reviewer returned
   `NO_ISSUES_FOUND`. Moved to `disabled-extensions/`. **Re-verdict
@@ -187,7 +207,7 @@ Written here:
   signal, not a settled result, until repeated across a few more runs.
   Directly timed the review call against this diff (953 prompt tokens) at
   12.9s, ~20% of `REVIEW_TIMEOUT_MS` (60s) — no need to raise the timeout
-  for tasks this size on the current tuned qwen3.6+gemma4 pair. Separately,
+  for tasks this size on the then-current tuned qwen3.6+gemma4 pair. Separately,
   this same smoke run got killed by `run_one.sh`'s 180s watchdog
   (`PI_EXIT=143`) after the review's fix-it turn extended the session — a
   real instance of the interaction Fable's review flagged (§2), though it's
@@ -300,8 +320,10 @@ Written here:
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
-- **`protected-paths.ts`** — blocks writes to sensitive/generated files, **and
-  to anything outside the working directory**. The confinement is not
+- **`protected-paths.ts`** — blocks Pi `write`/`edit` calls to
+  sensitive/generated files and paths outside the working directory. The guard
+  is not a sandbox: it does not cover shell redirection or commands run through
+  `bash`, and it does not resolve symlink escapes. The `write`/`edit` catch is not
   theoretical: asked to write `main.go` in a temp dir, Qwen3.6-27B emitted an
   absolute path to an unrelated directory and pi's write tool obeyed. With the
   guard, the model gets a corrective message and retries correctly.
@@ -327,20 +349,17 @@ running anything.
 
 ## Dispatching pi for a code change
 
-Whether a skill actually loads depends on the model's own relevance-matching
-against the prompt (`karpathy-guardrail.ts` exists specifically because pi
-"surfaces skills by relevance-matching rather than unconditionally" — there
-is no deterministic slash-command equivalent for skills). At 27B, don't rely
-on that matching alone: **name the skill explicitly in the prompt.** This is
-the one part of the `personal-assistant` daily-briefing-screen dispatch
-(`pi-real-task-report-daily-briefing-screen.md`) that worked end to end —
-`"Use the feature-dev skill to..."` reliably pulled in the right skill; a
-vaguer description of the task might not have.
+Pi advertises skill names and descriptions in the system prompt, then relies on
+the model to read the matching `SKILL.md`. That relevance match is not
+deterministic. Current Pi also exposes every skill as `/skill:<name>`, which is
+the deterministic way to load it in interactive or `-p` mode. Prefer the slash
+form for workflows whose exact instructions matter; naming a skill in ordinary
+prose is only a weaker fallback.
 
 Template:
 
 ```
-Use the <skill-name> skill to <task>.
+/skill:<skill-name> <task>
 
 Spec: <path, if one exists — feature-dev wants this>
 
@@ -366,15 +385,14 @@ Picking the skill name:
 | `pr-remediate` | Addressing review comments on an existing PR |
 | `self-review` | Review a PR under the narsimha-j account (see note below) |
 
-**`self-review` is the one skill naming it in the prompt does not work for.**
-Its frontmatter sets `disable-model-invocation: true`, which per pi's own
-`docs/skills.md` means the skill is hidden from the system prompt entirely
--- pi will never load it via relevance-matching or by being told to use it
-in prose, regardless of phrasing. This is deliberate, not a gap: the skill
+**`self-review` must use its slash command.** Its frontmatter sets
+`disable-model-invocation: true`, so the skill is hidden from the system prompt
+and cannot load through relevance matching or ordinary prose. This is
+deliberate, not a gap: the skill
 posts public PR comments/approvals and switches the machine's active `gh`
 account, so it must only run on an explicit, unambiguous trigger, never as
-an inferred side effect of some other task. The only way to invoke it is
-pi's native per-skill slash command: `/skill:self-review` (works in `-p`
+an inferred side effect of some other task. Invoke it with
+`/skill:self-review` (works in `-p`
 mode too, e.g. `pi -p "/skill:self-review review PR #214"` --
 `enableSkillCommands` defaults to `true` and is unset/default on this
 machine; verified live that `/skill:self-review` loads the real skill
@@ -427,7 +445,7 @@ would mean pi editing tracked files behind your back. Set these by hand:
   more of the available context for actual work.
 
 `AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
-`192.168.1.79` — the LAN box's address has changed once already via DHCP
+`192.168.1.233` — the LAN box's address has changed before via DHCP
 reassignment, so treat this as "whatever `~/.zshrc` currently says," not a
 fixed IP) — unset, every provider points at `127.0.0.1:8080`, where nothing
 is listening on this Mac. Confirmed live, 2026-07-26: a plain `pi` launch
@@ -439,6 +457,6 @@ address `~/.zshrc` exports, with no flags needed.
 - **`pi-mcp-adapter`** — there are no MCP servers configured on this machine
   (`~/.claude.json` has none, globally or per-project). Install it when there
   is something to adapt, not before.
-- **`pi-subagents`** — subagent fan-out multiplies context use, and 85K is
+- **`pi-subagents`** — subagent fan-out multiplies context use, and 96K is
   already the binding constraint.
 - **Aider-style delegation** — see `AGENTS.md`; benchmarked and rejected.

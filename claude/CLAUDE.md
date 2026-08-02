@@ -41,7 +41,7 @@ The read-only local services are still worth using. The served HTTP
 endpoints — code review and log triage (:8080), and SearXNG (:8888),
 used by `before-done`/`self-review`/`local-summarize`/`local-search` — do
 not have to be on this machine. Set `AI_STACK_HOST` to
-the host serving them (e.g. `192.168.1.79` for a LAN box) and every
+the host serving them (currently `192.168.1.233` for this LAN box) and every
 reachability check and script resolves there; unset, it defaults to
 `127.0.0.1`. Set it once in the shell environment so all agents inherit it.
 
