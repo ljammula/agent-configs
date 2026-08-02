@@ -118,8 +118,8 @@ battery.
   also catch a silent empty-content stop, the actual failure mode observed
   once for real, but that widened path has not been exercised in a single
   real trial since.
-- **`cross-model-review.ts`'s first reviewer (Qwen3.6-35B-A3B) missed a
-  known, spec-violating bug twice, at temperature 0** — the initial reason
+- **`cross-model-review.ts`'s first reviewer missed a known, spec-violating
+  bug twice, at temperature 0** — the initial reason
   for disabling it, before the reviewer was swapped to a different model
   family.
 - **The batch validation harness took four discarded attempts to reach one
@@ -188,7 +188,7 @@ battery.
 
 ### `cross-model-review.ts` in full — the verdict has flipped once, on real evidence, and could again
 
-1. **2026-07-24, reviewer = Qwen3.6-35B-A3B.** One real test: fed the
+1. **2026-07-24, first reviewer.** One real test: fed the
    extension's actual code a real diff with a known, spec-violating bug
    (LRU cache — `Put()` on an existing key doesn't promote it to MRU; the
    hidden test suite catches this). Reviewer returned `NO_ISSUES_FOUND`,
@@ -244,7 +244,7 @@ battery.
 | `git-checkpoint.ts` | Adopted (vendored, on by default) | — | No battery; deterministic per-turn snapshotting. |
 | `co-change-suggest.ts` | **Adopted**, 2026-07-24 | 1 real retrospective case | Real retrospective replay against `personal-assistant` (782 commits, real historical dispatch). Found and fixed a real seed-selection bug along the way. With the fix and real diff-derived identifiers, target file ranked **#1 of 8**. Correctly no-signal on a generic paraphrase (expected scoping limit, not a bug). **Not done**: the plan's second half of its kill criterion — "try it live on one new personal-assistant feature task" (forward-looking, not retrospective) — has not been run. |
 | `continuation-nudge.ts` | **Not adopted**, kept loaded as a no-cost no-op | 0 firings / ~46 real trials + 2 targeted attempts | Fired zero times outside mocked unit tests across every real trial run to date. Widened 2026-07-25 to also trigger on a silent empty-content stop (the actual failure mode observed once, for real, in the daily-briefing-screen dispatch — narrower than what the original prose-pattern trigger covered). **Not done**: every one of the ~46+2 real trials predates the 2026-07-25 widening and used the old, narrower trigger only. The new empty-content trigger path has zero real-trial exercises to date — it is unit-tested, not field-tested. **Separately, a real `verificationRan` scoping bug found 2026-07-26 (see "What worked") was fixed (`5778d1b`) and retested the same day** via direct logic replay (no live full-agent reproduction landed — see "What worked" for why); this is about correctness of the trigger's *arming* logic, not about the trigger's firing rate above, which remains as measured. |
-| `cross-model-review.ts` | **Adopted**, 2026-07-25 (reviewer = gemma-4-31B-it-OptiQ-4bit on :8081; previously disabled 2026-07-24 with Qwen3.6-35B-A3B as reviewer) | see above | Verdict flipped once already based on real evidence — see the full timeline above (item 5 is the latest entry, 2026-07-26), not just this row. |
+| `cross-model-review.ts` | **Adopted**, 2026-07-25 (reviewer = gemma-4-31B-it-OptiQ-4bit on :8081; previously disabled 2026-07-24 with an earlier reviewer) | see above | Verdict flipped once already based on real evidence — see the full timeline above (item 5 is the latest entry, 2026-07-26), not just this row. |
 | `git-safety.ts` | Adopted, 2026-07-25 | 1 scratch-repo reproduction | Reproduced the exact `git reset --hard main` command that triggered its creation, against a scratch repo; confirmed blocked, repo untouched. Single reproduction, not a battery — the command class is small and deterministic (`reset --hard`, `push --force` w/o lease, `clean -f`, `branch -D`, `checkout/restore -- .`), which is why one clean repro is treated as sufficient here unlike the model-judgment extensions above. |
 | Phase 4 (Aider-based failing-test retry) | **Deliberately not built** | n/a | Gated by the plan itself on Aider dispatch being back in scope. It isn't: `~/.claude/CLAUDE.md` and `agent-configs/pi/AGENTS.md` both record that `dispatch-local` was benchmarked and removed (cost more Anthropic tokens, ran 5-10x slower than editing directly — see `local-model-bench/STATUS.md`). Correctly out of scope, not a gap. |
 

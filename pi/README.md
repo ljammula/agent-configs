@@ -161,12 +161,12 @@ Written here:
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
   diff + spec to `ai-stack-local` for a second opinion, feeds back a
-  flagged issue). **Verdict (2026-07-24, reviewer = Qwen3.6-35B-A3B): not
-  adopted** — the one real test run (a known, spec-violating bug the hidden
+  flagged issue). **Verdict (2026-07-24, first reviewer): not adopted** — the
+  one real test run (a known, spec-violating bug the hidden
   test suite catches) came back negative, reviewer returned
   `NO_ISSUES_FOUND`. Moved to `disabled-extensions/`. **Re-verdict
-  (2026-07-25, reviewer switched to gemma-4-31B-it-OptiQ-4bit on :8081,
-  replacing 35B-A3B in the resident pair): adopted, moved back to
+  (2026-07-25, reviewer switched to gemma-4-31B-it-OptiQ-4bit on :8081):
+  adopted, moved back to
   `extensions/`.** A live smoke run against the `lru-cache` task (no seeded
   bug — the model's own organically-written solution, tests green) had the
   reviewer catch a real logic bug the test suite missed: the `order` slice
@@ -216,7 +216,7 @@ Written here:
     live `:8081` endpoint. **No regression — an improvement**: the current
     gemma4 reviewer correctly flags it (`` `Put` is not updated to call
     `touch`... eviction logic remains broken for insertions and updates
-    ``), unlike the original 35B-A3B reviewer that missed this exact class
+    ``), unlike the original reviewer that missed this exact class
     on 2026-07-24.
   - **Live smoke tests**, `lru-cache` task, real `pi` + Qwen3.6-27B primary
     + gemma4 reviewer via `scratch-phase-validate/run_one_long.sh` (a
