@@ -8,8 +8,8 @@ pi is deliberately minimal: four default tools (`read`, `write`, `edit`,
 by default, and no built-in MCP, subagents, permission prompts, plan mode,
 todos, or web search (`README.md`, `docs/usage.md`). Everything here re-adds a
 piece of that, chosen for one reason: this machine runs pi against **local
-models** with an 85K context window, not a cloud model, so the harness has to
-carry weight the model cannot.
+models** with 120K and 65,536-token route limits, not a cloud model, so the
+harness has to carry weight the model cannot.
 
 For a single, dated, cross-repo reconciliation of what's actually been
 validated vs. still open (extension-by-extension, with real trial counts),
@@ -65,9 +65,9 @@ round-trip against it — see `../pi-harness-validation-status.md`'s
 Written here:
 
 - **`ai-stack-local.ts`** — registers both ai-stack slots as providers:
-  `ai-stack-local` (:8080, Qwen3.6-27B-4bit, "code") and `ai-stack-general`
-  (:8081, gemma-4-31B-it-OptiQ-4bit, "general"). Both follow
-  `AI_STACK_HOST`.
+  `ai-stack-local` (:8080, ThinkingCap-Qwen3.6-27B-MLX-8bit, "code") and
+  `ai-stack-general` (:8081, Qwen3.6-35B-A3B-5bit, "general"). Both use
+  mlx-vlm 0.6.8 with APC and follow `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally.
@@ -288,6 +288,14 @@ Written here:
   NO_ISSUES_FOUND`) that intentionally still don't match, and the residual
   risk itself pinned down as a currently-passing test rather than prose-only.
 
+  **Runtime sync (2026-08-02):** the resident general slot changed from Gemma
+  back to Qwen3.6-35B-A3B when mlx-vlm 0.6.8 became the shared Qwen baseline.
+  `cross-model-review.ts` now sends the exact current 35B model id so the
+  proxy's stale-model guard does not reject it. The historical Gemma adoption
+  evidence above does not transfer to this reviewer; connectivity is
+  live-verified, but reviewer-quality revalidation remains required before
+  treating the old verdict as current.
+
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
 - **`protected-paths.ts`** — blocks writes to sensitive/generated files, **and
@@ -402,9 +410,9 @@ would mean pi editing tracked files behind your back. Set these by hand:
 ```json
 {
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.6-27B-4bit",
+  "defaultModel": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
   "defaultThinkingLevel": "off",
-  "enabledModels": ["Qwen3.6-27B-4bit", "Qwen3.6-35B-A3B-5bit"],
+  "enabledModels": ["ThinkingCap-Qwen3.6-27B-MLX-8bit", "Qwen3.6-35B-A3B-5bit"],
   "compaction": { "enabled": true, "reserveTokens": 8192, "keepRecentTokens": 24000 }
 }
 ```
@@ -413,8 +421,8 @@ would mean pi editing tracked files behind your back. Set these by hand:
 - `enabledModels` gives Ctrl+P cycling between the code and general slots.
   Glob patterns (`*Qwen3.6*`) do **not** match these models; pi matches the
   path-style IDs by substring, so list the basenames exactly as above.
-- Compaction reserve is lowered to 8192 (= the models' `maxTokens`) to leave
-  more of the 85K window for actual work.
+- Compaction reserve is 8192 (= the providers' `maxTokens`) to leave more of
+  the selected route's 120K or 65,536-token window for actual work.
 
 `AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
 `192.168.1.79` — the LAN box's address has changed once already via DHCP

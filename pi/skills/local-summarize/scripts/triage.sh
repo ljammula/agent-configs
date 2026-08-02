@@ -1,6 +1,6 @@
 #!/bin/bash
 # Triage a large log/output file through the local ai-stack general model
-# (port 8081, Qwen3.6-35B-A3B) to flag which sections deserve Claude's
+# (port 8081, Qwen3.6-35B-A3B 5-bit) to flag which sections deserve Claude's
 # direct read, instead of Claude reading the whole thing into context.
 # Deliberately scoped to triage, not trusted summarization -- a hallucinated
 # summary of a stack trace is worse than useless, so this never replaces

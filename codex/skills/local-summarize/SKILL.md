@@ -19,6 +19,11 @@ useless — the failure mode here isn't "wastes tokens," it's "sends you
 confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
+The current general slot is Qwen3.6-35B-A3B 5-bit on mlx-vlm 0.6.8 with APC;
+see `~/code/agent-configs/local-ai-stack.md` for the current route and measured
+throughput. The script discovers its exact model id from `/v1/models` so it
+remains compatible with the proxy's stale-model guard.
+
 ## Step 1 — triage
 
 ```bash

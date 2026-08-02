@@ -3,7 +3,8 @@
  *
  * Phase 2 of ai-stack/local-quality-next-steps-plan.md: the previously-
  * scoped-but-never-built "blind-reviewer pass". Both ai-stack slots are
- * already resident (:8080 27B "code", :8081 Gemma-4-31B-OptiQ "general");
+ * already resident (:8080 ThinkingCap 27B 8-bit "code", :8081 35B-A3B
+ * 5-bit "general");
  * nothing today has one model review the other's diff before a task is
  * called done.
  *
@@ -67,7 +68,7 @@ const MAX_REVIEW_ROUNDS = 3;
 function reviewModel(): { host: string; model: string } {
 	return {
 		host: process.env.AI_STACK_HOST || "127.0.0.1",
-		model: "/Users/kanna/code/ai-stack/models/gemma-4-31B-it-OptiQ-4bit",
+		model: "/Users/kanna/code/ai-stack/models/Qwen3.6-35B-A3B-5bit",
 	};
 }
 

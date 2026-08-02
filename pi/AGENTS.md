@@ -51,8 +51,8 @@ Read-only local services are still worth using. The served endpoints are:
 
 | Port | Slot | Use |
 |---|---|---|
-| 8080 | Qwen3.6-27B-4bit ("code") | code review, editing |
-| 8081 | gemma-4-31B-it-OptiQ-4bit ("general") | log triage, summarization, cross-model review |
+| 8080 | ThinkingCap-Qwen3.6-27B-MLX-8bit ("code") | code review, editing |
+| 8081 | Qwen3.6-35B-A3B-5bit ("general") | log triage, summarization, cross-model review |
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host
@@ -63,10 +63,17 @@ relying on any of them — these instructions load on machines without the stack
 A local model self-corrects mechanical mistakes but not logic bugs. Treat its
 output as evidence to verify, never as a trusted result.
 
+Both model routes use mlx-vlm 0.6.8 with APC. The code slot has a 120K context
+limit and MTP block size 3; the general slot has a 65,536-token limit and
+exact-snapshot APC. See `~/code/agent-configs/local-ai-stack.md` for measured
+throughput and the route-change rules. Pi provider declarations are static, so
+their exact ids must change whenever an ai-stack route changes; stale ids are
+rejected by the public proxy.
+
 ## Context discipline
 
-The local slots have an 85K context window — roughly a fifth of a cloud model's.
-Protect it:
+The local slots remain much smaller than a cloud model: 120K on the code route
+and 65,536 on the general route. Protect the selected route's window:
 
 - Prefer `rtk <cmd>` over raw `git`/`ls`/`find`/`cargo` etc. It is a
   token-optimized proxy over the same commands and cuts 60-90% of the output.
