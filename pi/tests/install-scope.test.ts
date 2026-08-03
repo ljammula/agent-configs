@@ -12,10 +12,17 @@ const repo = resolve(import.meta.dirname, "../..");
 test("installer removes managed DayTrix globals and installs portable Pi skills", async () => {
 	const home = await mkdtemp(join(tmpdir(), "pi-install-"));
 	const skills = join(home, ".pi/agent/skills");
+	const extensions = join(home, ".pi/agent/extensions");
 	await mkdir(skills, { recursive: true });
+	await mkdir(extensions, { recursive: true });
 	await symlink(join(repo, "pi/skills/backend-dev"), join(skills, "backend-dev"));
+	await symlink(join(repo, "pi/extensions/continuation-nudge.ts"), join(extensions, "continuation-nudge.ts"));
+	await symlink(join(repo, "pi/extensions/co-change-suggest.ts"), join(extensions, "co-change-suggest.ts"));
 	await execFileAsync("bash", [join(repo, "install.sh"), "--force"], { env: { ...process.env, HOME: home } });
 	await assert.rejects(readlink(join(skills, "backend-dev")));
+	await assert.rejects(readlink(join(extensions, "continuation-nudge.ts")));
+	await assert.rejects(readlink(join(extensions, "co-change-suggest.ts")));
 	assert.equal(await readlink(join(skills, "go-service")), join(repo, "pi/skills/go-service"));
 	assert.equal(await readlink(join(skills, "before-done")), join(repo, "pi/skills/before-done"));
+	assert.equal(await readlink(join(extensions, "quality-gate.ts")), join(repo, "pi/extensions/quality-gate.ts"));
 });

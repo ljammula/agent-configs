@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -65,6 +65,23 @@ test("snapshot identity changes with untracked content and sees committed-since-
 			: { code: 0, stdout: "", stderr: "", killed: false },
 	});
 	assert.equal((await snapshotDiff(committedHarness.api, cwd, "base")).material, true);
+});
+
+test("snapshot hashes a symlink target without following its outside content", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-snapshot-link-"));
+	const outside = join(await mkdtemp(join(tmpdir(), "pi-snapshot-outside-")), "secret.txt");
+	await writeFile(outside, "secret one");
+	await symlink(outside, join(cwd, "linked-secret"));
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ args }) => args[0] === "diff"
+			? { code: 0, stdout: "", stderr: "", killed: false }
+			: { code: 0, stdout: "?? linked-secret\0", stderr: "", killed: false },
+	});
+	const first = await snapshotDiff(harness.api, cwd, "base");
+	await writeFile(outside, "secret two");
+	const second = await snapshotDiff(harness.api, cwd, "base");
+	assert.equal(first.hash, second.hash);
 });
 
 test("verification resolution prefers make verify", async () => {

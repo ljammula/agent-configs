@@ -11,6 +11,7 @@ FORCE="${1:-}"
 PORTABLE_SKILLS=(karpathy-guidelines local-search local-summarize docs-verify)
 PI_STACK_SKILLS=(go-service python-service flutter-app postgres-change kafka-processing temporal-go gcp-deploy)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
+DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 
 link() {
   local src="$1" dst="$2"
@@ -89,6 +90,14 @@ link "$REPO_ROOT/pi/skills/before-done" "$HOME/.pi/agent/skills/before-done"
 link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.pi/agent/skills/wiring-verify"
 for f in "$REPO_ROOT"/pi/extensions/*.ts; do
   name="$(basename "$f")"
+  if [[ " ${DISABLED_PI_EXTENSIONS[*]} " == *" $name "* ]]; then
+    target="$HOME/.pi/agent/extensions/$name"
+    if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then
+      rm "$target"
+      echo "unlinked evidence-gated Pi extension: $target"
+    fi
+    continue
+  fi
   if [[ "$name" == "harness-telemetry.ts" || "$name" == "verification.ts" ]]; then
     target="$HOME/.pi/agent/extensions/$name"
     if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then

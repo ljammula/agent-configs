@@ -9,6 +9,9 @@ ln -sfn "$harness_root/AGENTS.md" "$agent_home/AGENTS.md"
 for kind in extensions prompts skills; do
   for source in "$harness_root/$kind"/*; do
     [[ -e "$source" ]] || continue
+    case "$(basename "$source")" in
+      co-change-suggest.ts|continuation-nudge.ts) continue ;;
+    esac
     ln -sfn "$source" "$agent_home/$kind/$(basename "$source")"
   done
 done

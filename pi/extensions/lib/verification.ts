@@ -1,6 +1,7 @@
 // Shared support module; the installed lib directory is not an extension entry point.
 import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { access, lstat, readFile, readlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -92,6 +93,19 @@ async function exists(path: string): Promise<boolean> {
 	return access(path).then(() => true, () => false);
 }
 
+async function hashUntrackedPath(path: string): Promise<string> {
+	try {
+		const metadata = await lstat(path);
+		if (metadata.isSymbolicLink()) return `symlink:${await readlink(path)}`;
+		if (!metadata.isFile()) return `special:${metadata.mode}`;
+		const digest = createHash("sha256");
+		for await (const chunk of createReadStream(path)) digest.update(chunk as Buffer);
+		return digest.digest("hex");
+	} catch {
+		return "unreadable";
+	}
+}
+
 async function documentedCommand(cwd: string): Promise<string | undefined> {
 	for (const name of ["AGENTS.md", "README.md"]) {
 		const body = await readFile(join(cwd, name), "utf8").catch(() => "");
@@ -146,15 +160,11 @@ export async function snapshotDiff(pi: ExtensionAPI, cwd: string, baseSha?: stri
 	const untrackedPaths = materialEntries
 		.filter((line) => line.startsWith("?? "))
 		.map((line) => line.slice(3));
-	const untracked = await Promise.all(
-		untrackedPaths.map(async (path) => ({
-			path,
-			content: await readFile(join(cwd, path)).catch(() => Buffer.from("<unreadable>")),
-		})),
-	);
 	const material = diff.stdout.length > 0 || materialEntries.length > 0;
 	const digest = createHash("sha256").update(diff.stdout).update("\0").update(materialEntries.join("\0"));
-	for (const file of untracked) digest.update("\0").update(file.path).update("\0").update(file.content);
+	for (const path of untrackedPaths.sort()) {
+		digest.update("\0").update(path).update("\0").update(await hashUntrackedPath(join(cwd, path)));
+	}
 	const hash = digest.digest("hex");
 	return { hash, material };
 }
