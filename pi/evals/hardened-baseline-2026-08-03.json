@@ -42,7 +42,8 @@
     "tests_passed": 53,
     "tests_failed": 0,
     "installed_layout_load": "pass",
-    "runtime_dependency_audit": "0 vulnerabilities"
+    "omit_dev_dependency_audit": "0 vulnerabilities",
+    "full_dependency_audit": "1 high: brace-expansion 5.0.7 nested under pinned Pi 0.83.0"
   },
   "application_fixture": {
     "path": "/Users/kanna/code/test-bed/app-x",

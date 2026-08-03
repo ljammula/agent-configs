@@ -77,6 +77,11 @@ categories API, and daily summary API.
 - Browser automation was unavailable in this execution environment. Component
   tests and HTTP smoke checks validate behavior, but there is no screenshot or
   browser-driven visual acceptance record.
+- The pinned Pi 0.83.0 test dependency resolves its nested `brace-expansion` to
+  5.0.7, which npm reports as one high-severity denial-of-service advisory.
+  `npm audit fix`, lock-only update, dedupe, and a compatible 5.0.9 override did
+  not replace Pi's nested resolution. The omit-dev audit is zero, but the full
+  development audit is not; this remains an upstream/pinning limitation.
 - This was one full-stack task, not the randomized paired trial battery required
   to adopt judgment-dependent defaults. No new judgment-dependent extension is
   enabled on the strength of this run.
