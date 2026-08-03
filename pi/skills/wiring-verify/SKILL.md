@@ -70,11 +70,11 @@ For each step in the pattern, construct a grep that detects presence or absence.
 - The step says "add getter to class C" → grep for the getter name in C's file
 - The step says "guard widget with flag" → grep the feature tree for the flag name
 
-Name variant generation is deterministic — use the bundled script instead of deriving manually:
+Name variant generation should be deterministic. If this skill is installed with its helper script, run it from the skill's own `scripts/` directory:
 
 ```bash
 # Emits all 6 variants (snake, camel, Pascal, SCREAMING, getter, Feature constant)
-~/.pi/agent/skills/wiring-verify/scripts/name-variants.sh <feature_name>
+scripts/name-variants.sh <feature_name>
 ```
 
 Then grep for each variant:

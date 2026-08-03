@@ -8,6 +8,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORCE="${1:-}"
 
+PORTABLE_SKILLS=(karpathy-guidelines local-search local-summarize docs-verify)
+PI_STACK_SKILLS=(go-service python-service flutter-app postgres-change kafka-processing temporal-go gcp-deploy)
+PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
+
 link() {
   local src="$1" dst="$2"
   mkdir -p "$(dirname "$dst")"
@@ -29,24 +33,44 @@ link() {
   echo "linked: $dst -> $src"
 }
 
+link_skills() {
+  local source_root="$1" target_root="$2"
+  shift 2
+  for name in "$@"; do
+    [[ -d "$source_root/$name" ]] || continue
+    link "$source_root/$name" "$target_root/$name"
+  done
+}
+
+unlink_managed_project_skills() {
+  local target_root="$1" source_root="$2"
+  for name in "${PROJECT_SKILLS[@]}"; do
+    local target="$target_root/$name"
+    if [[ -L "$target" && "$(readlink "$target")" == "$source_root/$name" ]]; then
+      rm "$target"
+      echo "unlinked project-specific global skill: $target"
+    fi
+  done
+}
+
 # Claude Code
 link "$REPO_ROOT/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 link "$REPO_ROOT/claude/RTK.md" "$HOME/.claude/RTK.md"
 link "$REPO_ROOT/claude/settings.json" "$HOME/.claude/settings.json"
 link "$REPO_ROOT/claude/hooks/rtk-rewrite.sh" "$HOME/.claude/hooks/rtk-rewrite.sh"
 link "$REPO_ROOT/claude/hooks/format-on-edit.sh" "$HOME/.claude/hooks/format-on-edit.sh"
-for d in "$REPO_ROOT"/claude/skills/*/; do
-  name="$(basename "$d")"
-  link "$REPO_ROOT/claude/skills/$name" "$HOME/.claude/skills/$name"
-done
+unlink_managed_project_skills "$HOME/.claude/skills" "$REPO_ROOT/claude/skills"
+link_skills "$REPO_ROOT/claude/skills" "$HOME/.claude/skills" "${PORTABLE_SKILLS[@]}"
+link "$REPO_ROOT/pi/skills/before-done" "$HOME/.claude/skills/before-done"
+link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.claude/skills/wiring-verify"
 
 # Codex
 link "$REPO_ROOT/codex/AGENTS.md" "$HOME/.codex/AGENTS.md"
 link "$REPO_ROOT/codex/RTK.md" "$HOME/.codex/RTK.md"
-for d in "$REPO_ROOT"/codex/skills/*/; do
-  name="$(basename "$d")"
-  link "$REPO_ROOT/codex/skills/$name" "$HOME/.codex/skills/$name"
-done
+unlink_managed_project_skills "$HOME/.codex/skills" "$REPO_ROOT/codex/skills"
+link_skills "$REPO_ROOT/codex/skills" "$HOME/.codex/skills" "${PORTABLE_SKILLS[@]}"
+link "$REPO_ROOT/pi/skills/before-done" "$HOME/.codex/skills/before-done"
+link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.codex/skills/wiring-verify"
 
 # Pi (skills auto-discover from ~/.pi/agent/skills/<name>/SKILL.md; extensions
 # from ~/.pi/agent/extensions/<name>.ts or <name>/index.ts load unconditionally
@@ -59,12 +83,20 @@ done
 # repo would mean pi editing tracked files behind your back. See pi/README.md
 # for the settings this machine expects.
 link "$REPO_ROOT/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
-for d in "$REPO_ROOT"/pi/skills/*/; do
-  name="$(basename "$d")"
-  link "$REPO_ROOT/pi/skills/$name" "$HOME/.pi/agent/skills/$name"
-done
+unlink_managed_project_skills "$HOME/.pi/agent/skills" "$REPO_ROOT/pi/skills"
+link_skills "$REPO_ROOT/pi/skills" "$HOME/.pi/agent/skills" "${PORTABLE_SKILLS[@]}" "${PI_STACK_SKILLS[@]}"
+link "$REPO_ROOT/pi/skills/before-done" "$HOME/.pi/agent/skills/before-done"
+link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.pi/agent/skills/wiring-verify"
 for f in "$REPO_ROOT"/pi/extensions/*.ts; do
   name="$(basename "$f")"
+  if [[ "$name" == "harness-telemetry.ts" || "$name" == "verification.ts" ]]; then
+    target="$HOME/.pi/agent/extensions/$name"
+    if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then
+      rm "$target"
+      echo "unlinked non-extension support module: $target"
+    fi
+    continue
+  fi
   link "$REPO_ROOT/pi/extensions/$name" "$HOME/.pi/agent/extensions/$name"
 done
 for d in "$REPO_ROOT"/pi/extensions/*/; do

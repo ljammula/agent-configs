@@ -1,0 +1,30 @@
+FROM node:24-bookworm-slim
+
+ARG PI_VERSION=0.83.0
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bash ca-certificates git make postgresql-client ripgrep \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}"
+
+RUN useradd --create-home --uid 10001 pi
+COPY AGENTS.md /opt/pi-harness/AGENTS.md
+COPY extensions/ /opt/pi-harness/extensions/
+COPY prompts/ /opt/pi-harness/prompts/
+COPY skills/karpathy-guidelines/ /opt/pi-harness/skills/karpathy-guidelines/
+COPY skills/local-summarize/ /opt/pi-harness/skills/local-summarize/
+COPY skills/docs-verify/ /opt/pi-harness/skills/docs-verify/
+COPY skills/before-done/ /opt/pi-harness/skills/before-done/
+COPY skills/wiring-verify/ /opt/pi-harness/skills/wiring-verify/
+COPY skills/go-service/ /opt/pi-harness/skills/go-service/
+COPY skills/python-service/ /opt/pi-harness/skills/python-service/
+COPY skills/flutter-app/ /opt/pi-harness/skills/flutter-app/
+COPY skills/postgres-change/ /opt/pi-harness/skills/postgres-change/
+COPY skills/kafka-processing/ /opt/pi-harness/skills/kafka-processing/
+COPY skills/temporal-go/ /opt/pi-harness/skills/temporal-go/
+COPY skills/gcp-deploy/ /opt/pi-harness/skills/gcp-deploy/
+COPY containment/container-entrypoint.sh /usr/local/bin/pi-harness-entrypoint
+RUN chmod 0555 /usr/local/bin/pi-harness-entrypoint \
+  && chmod -R a-w /opt/pi-harness
+USER pi
+WORKDIR /workspace
+ENTRYPOINT ["pi-harness-entrypoint"]
