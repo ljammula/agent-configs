@@ -18,6 +18,7 @@ export interface ExecCall {
 export interface HarnessOptions {
 	cwd?: string;
 	exec?: (call: ExecCall) => ExecResult | Promise<ExecResult>;
+	appendEntry?: (type: string, data: unknown) => void;
 	branch?: any[];
 	activeTools?: string[];
 }
@@ -55,7 +56,10 @@ export class ExtensionHarness {
 				this.execCalls.push(call);
 				return options.exec?.(call) ?? { code: 0, stdout: "", stderr: "" };
 			},
-			appendEntry: (type: string, data?: unknown) => this.entries.push({ type, data }),
+			appendEntry: (type: string, data?: unknown) => {
+				options.appendEntry?.(type, data);
+				this.entries.push({ type, data });
+			},
 			sendUserMessage: (content: unknown, messageOptions?: unknown) =>
 				this.messages.push({ content, options: messageOptions }),
 			getActiveTools: () => [...this.activeTools],

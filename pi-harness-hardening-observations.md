@@ -61,6 +61,62 @@ aggregate evidence is recorded in
 `pi/evals/partial-screening-2026-08-02.json`; the reusable runner is
 `pi/evals/run_screening.py`.
 
+## Fixes for the two reliability gaps, and the completed nine-pair screen (2026-08-03)
+
+Both gaps above were fixed directly:
+
+1. `resolveVerificationCommand()` in `pi/extensions/lib/verification.ts` now
+   falls back to a bounded breadth-first scan for nested `Makefile`/`go.mod`/
+   `pyproject.toml`/`pubspec.yaml`/`Cargo.toml`/`package.json` directories
+   when the repository root has none, building a combined
+   `(cd 'dir' && cmd ) && (cd 'dir2' && cmd2 )` command instead of returning
+   `unconfigured`.
+2. `stack-router.ts`'s `before_agent_start` handler and `quality-gate.ts`'s
+   `tool_result`/`agent_settled` handlers now catch Pi's documented
+   stale-extension-context error (`isStaleContextError()` in
+   `pi/extensions/lib/stale-context.ts`) and skip gracefully instead of
+   crashing the turn. Pi throws this error when a captured `pi`/`ctx` is used
+   after session replacement or reload -- confirmed via Pi's own
+   `session_before_compact`/`session_compact` lifecycle events as the
+   likely trigger (auto-compaction on a long run).
+
+Both fixes have new deterministic tests (`pi/tests/verification.test.ts`,
+`pi/tests/stack-router.test.ts`, `pi/tests/quality-gate.test.ts`); the full
+suite is 64/64 passing and typecheck is clean.
+
+The same seed-`20260802` nine-task schedule was then run to completion (all
+nine pairs, eighteen live runs, same model and host):
+
+| Task | Baseline | Harness | Harness runtime overhead |
+|---|---:|---:|---:|
+| go-flutter/notes-app | fail | pass | -10% |
+| go/notes-api | pass | pass | 87% |
+| dart/task-manager | pass | pass | 354% |
+| go-flutter/bookmarks-app | fail | fail | 1% |
+| dart/sequential-runner | pass | pass | 577% |
+| dart/notes-app | pass | pass | 138% |
+| go/lru-cache | pass | pass | 100% |
+| go/lru-cache | pass | pass | 214% |
+| go/notes-api | pass | pass | 23% |
+
+Hidden-test success was baseline 7/9, harness 8/9 -- the harness matched or
+beat baseline, with its one loss (pair 4) a shared failure baseline also hit.
+There were zero extension errors and zero `quality-gate: unconfigured`
+outcomes across all eighteen runs; neither of the two defects above recurred.
+Median paired runtime overhead was 100.3% (prompt tokens +212.6%, completion
+tokens +39.8%) -- both worse than the partial screen's numbers and well above
+the plan's 20% threshold, because the fixed quality-gate now actually runs its
+nested-manifest verification and corrective-follow-up loop on every pair
+instead of silently no-opping or crashing partway through. That earlier,
+lower overhead number was an artifact of the safety net not doing its job.
+
+Verdict: the two reliability defects are fixed and did not reproduce over a
+full battery. Task correctness is at or above baseline. Overhead remains
+substantially above the plan's adoption threshold and is not resolved by this
+pass -- it is now an honestly-measured cost of the harness actually running
+its verification, not a bug-distorted number. Full record:
+`pi/evals/full-screening-2026-08-03.json`.
+
 ## What the run taught us
 
 1. **Loading support modules as extensions is unsafe.** The first launch failed

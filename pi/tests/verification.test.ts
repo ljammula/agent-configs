@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -97,4 +97,23 @@ test("verification resolution falls back to manifests and can stay unconfigured"
 	assert.equal(await resolveVerificationCommand(go), "go test ./...");
 	const empty = await mkdtemp(join(tmpdir(), "pi-empty-"));
 	assert.equal(await resolveVerificationCommand(empty), undefined);
+});
+
+test("verification resolution finds nested manifests when the root has none", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-nested-"));
+	await mkdir(join(cwd, "go"), { recursive: true });
+	await writeFile(join(cwd, "go", "go.mod"), "module example.test\n");
+	await mkdir(join(cwd, "flutter_app"), { recursive: true });
+	await writeFile(join(cwd, "flutter_app", "pubspec.yaml"), "name: app\n");
+	assert.equal(
+		await resolveVerificationCommand(cwd),
+		"(cd 'flutter_app' && flutter test ) && (cd 'go' && go test ./... )",
+	);
+});
+
+test("verification resolution ignores build and dependency trees while scanning nested manifests", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-nested-ignored-"));
+	await mkdir(join(cwd, "node_modules", "pkg"), { recursive: true });
+	await writeFile(join(cwd, "node_modules", "pkg", "package.json"), "{}\n");
+	assert.equal(await resolveVerificationCommand(cwd), undefined);
 });

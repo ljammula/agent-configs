@@ -50,7 +50,7 @@ Three acceptance boundaries remain intentionally not adopted:
   are removed from the installed runtime until randomized paired evidence meets
   the current adoption threshold.
 
-### 2026-08-02 partial randomized screening update
+### 2026-08-02 partial randomized screening update (superseded below)
 
 A seed-`20260802` sequential screen compared stock Pi plus the required model
 provider shim against the installed harness. The run was stopped on request
@@ -70,11 +70,47 @@ Security behavior was not scored.
   errors from `stack-router.ts` and `quality-gate.ts` after session replacement
   or reload.
 
-The defensible interim verdict is negative: deterministic contracts are green,
-but the deployed harness has not shown operational hardening in this live
-sample. This is not a final nine-pair verdict. Aggregate evidence is in
-`pi/evals/partial-screening-2026-08-02.json` and the runner is
-`pi/evals/run_screening.py`.
+The defensible interim verdict was negative: deterministic contracts were green,
+but the deployed harness had not shown operational hardening in this live
+sample. Aggregate evidence is in `pi/evals/partial-screening-2026-08-02.json`
+and the runner is `pi/evals/run_screening.py`.
+
+### 2026-08-03 completed nine-pair screen, after two defect fixes
+
+The two reliability gaps the partial screen exposed were fixed:
+`resolveVerificationCommand()` (`pi/extensions/lib/verification.ts`) now falls
+back to a bounded nested-directory scan for `Makefile`/`go.mod`/`pubspec.yaml`/
+etc. when the repo root has none, instead of returning `unconfigured`; and
+`stack-router.ts`/`quality-gate.ts` now catch and skip Pi's documented
+stale-extension-context error (thrown after auto-compaction or session reload)
+instead of crashing the turn. Both fixes have deterministic test coverage
+(`pi/tests/verification.test.ts`, `pi/tests/stack-router.test.ts`,
+`pi/tests/quality-gate.test.ts`; 64/64 passing) and are installed into the live
+`~/.pi/agent` runtime.
+
+The same seed-`20260802` schedule was then run to completion, all nine pairs,
+eighteen live runs:
+
+- Hidden-test success: baseline 7/9, harness 8/9. Harness matched or beat
+  baseline; its one loss (pair 4) was a shared failure baseline also hit.
+- Zero extension errors and zero `quality-gate: unconfigured` outcomes across
+  all eighteen runs -- both defects found in the partial screen did not recur.
+- Median paired harness runtime overhead rose to 100.3% (prompt tokens +212.6%,
+  completion tokens +39.8%), both above the plan's 20% screening threshold and
+  higher than the partial screen's numbers. This is because the fixed
+  quality-gate now actually runs its nested-manifest verification and
+  corrective-follow-up loop on every pair instead of silently no-opping or
+  crashing partway through -- the safety net doing its job costs real tokens
+  and wall time that the buggy partial run had not paid.
+
+Full record: `pi/evals/full-screening-2026-08-03.json`.
+
+The current verdict: **the two reliability defects are fixed and did not
+reproduce over a full battery** -- the harness is no longer unreliable, and its
+task correctness is at or above baseline. It remains substantially more
+expensive in tokens and runtime than the plan's adoption threshold; that is a
+real, unresolved cost of the harness as currently configured, not a
+bug-inflated or bug-deflated number this time.
 
 ## Historical summary (superseded where the result above differs)
 

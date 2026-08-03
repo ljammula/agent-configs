@@ -1,7 +1,7 @@
 // Shared support module; the installed lib directory is not an extension entry point.
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, lstat, readFile, readlink } from "node:fs/promises";
+import { access, lstat, opendir, readFile, readlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -115,6 +115,57 @@ async function documentedCommand(cwd: string): Promise<string | undefined> {
 	return undefined;
 }
 
+const NESTED_SCAN_IGNORED_DIRS = new Set([
+	".dart_tool", ".git", ".next", "build", "coverage", "dist", "node_modules", "out", "target", "vendor",
+]);
+
+async function manifestCommandForDir(dir: string): Promise<string | undefined> {
+	if (await exists(join(dir, "Makefile"))) {
+		const makefile = await readFile(join(dir, "Makefile"), "utf8");
+		if (/^verify\s*:/m.test(makefile)) return "make verify";
+	}
+	if (await exists(join(dir, "go.mod"))) return "go test ./...";
+	if (await exists(join(dir, "pyproject.toml"))) return "pytest";
+	if (await exists(join(dir, "pubspec.yaml"))) return "flutter test";
+	if (await exists(join(dir, "Cargo.toml"))) return "cargo test";
+	if (await exists(join(dir, "package.json"))) return "npm test";
+	return undefined;
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+// A monorepo's runnable manifests can live below the root (e.g. go/ + flutter_app/
+// siblings), so fall back to a bounded breadth-first scan for nested manifest
+// directories and run each one's canonical command from its own directory.
+async function nestedVerificationCommand(cwd: string, maxEntries = 3000): Promise<string | undefined> {
+	const pending = [""];
+	const manifestDirs: string[] = [];
+	let visited = 0;
+	for (let cursor = 0; cursor < pending.length && visited < maxEntries; cursor += 1) {
+		const relativeDir = pending[cursor]!;
+		const directory = await opendir(join(cwd, relativeDir)).catch(() => undefined);
+		if (!directory) continue;
+		const subdirs: string[] = [];
+		for await (const entry of directory) {
+			visited += 1;
+			if (!entry.isDirectory() || NESTED_SCAN_IGNORED_DIRS.has(entry.name)) continue;
+			subdirs.push(join(relativeDir, entry.name));
+			if (visited >= maxEntries) break;
+		}
+		for (const subdir of subdirs.sort()) {
+			if (await manifestCommandForDir(join(cwd, subdir))) manifestDirs.push(subdir);
+			else pending.push(subdir);
+		}
+	}
+	if (!manifestDirs.length) return undefined;
+	const commands = await Promise.all(
+		manifestDirs.sort().map(async (dir) => `(cd ${shellQuote(dir)} && ${await manifestCommandForDir(join(cwd, dir))} )`),
+	);
+	return commands.join(" && ");
+}
+
 export async function resolveVerificationCommand(cwd: string): Promise<string | undefined> {
 	if (await exists(join(cwd, "Makefile"))) {
 		const makefile = await readFile(join(cwd, "Makefile"), "utf8");
@@ -127,7 +178,7 @@ export async function resolveVerificationCommand(cwd: string): Promise<string | 
 	if (await exists(join(cwd, "pubspec.yaml"))) return "flutter test";
 	if (await exists(join(cwd, "Cargo.toml"))) return "cargo test";
 	if (await exists(join(cwd, "package.json"))) return "npm test";
-	return undefined;
+	return nestedVerificationCommand(cwd);
 }
 
 export async function snapshotDiff(pi: ExtensionAPI, cwd: string, baseSha?: string): Promise<DiffSnapshot> {
