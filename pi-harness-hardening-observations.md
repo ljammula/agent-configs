@@ -20,6 +20,47 @@ and five seed entries. Tests reset a separate `appx_test` schema and leave
 `appx_dev` untouched. HTTP smoke checks passed for the frontend shell,
 categories API, and daily summary API.
 
+## Partial randomized screening battery (2026-08-02)
+
+A planned nine-pair screen compared stock Pi (only the provider shim required
+to reach the local model) with the installed harness. Task order and within-pair
+arm order were randomized from seed `20260802`, runs were strictly sequential,
+and hidden tests were overlaid only after Pi exited. Security controls were out
+of scope. The run was stopped on request after four complete pairs; the fifth
+pair was interrupted before producing a record and is excluded.
+
+| Task | Baseline | Harness | Harness runtime overhead |
+|---|---:|---:|---:|
+| Go+Dart notes app | pass | fail | 47% |
+| Go notes API | pass | pass | 43% |
+| Dart task manager | pass | hidden tests pass; extension lifecycle error | 1,744% |
+| Go+Dart bookmarks app | pass | pass | 69% |
+
+Across the four completed pairs, baseline hidden-test success was 4/4 and
+harness hidden-test success was 3/4. Clean operational success was 4/4 versus
+2/4 after treating the task-manager extension exceptions as a harness failure.
+There were three task-quality ties, one baseline win, and no harness win. The
+median paired runtime overhead was 58.3%; harness prompt-token usage was 147%
+higher and completion-token usage was 11.7% higher.
+
+The screen exposed two concrete reliability gaps:
+
+1. `quality-gate.ts` reported `unconfigured` on both nested Go+Dart fixtures.
+   On the notes fixture, Pi stopped after one large tool call and missed the
+   required `ArgumentError` behavior for two unknown-ID operations; hidden
+   tests caught both failures.
+2. On the Dart task-manager fixture, the generated implementation passed all
+   hidden tests, but `stack-router.ts` and `quality-gate.ts` both raised Pi's
+   stale-context error after session replacement or reload. This is a harness
+   lifecycle failure, not an inference-service failure or a reason to retry the
+   result away.
+
+This partial result does not support an operational-hardening claim. It is not
+the planned final verdict because five randomized pairs remain unrun. The
+aggregate evidence is recorded in
+`pi/evals/partial-screening-2026-08-02.json`; the reusable runner is
+`pi/evals/run_screening.py`.
+
 ## What the run taught us
 
 1. **Loading support modules as extensions is unsafe.** The first launch failed
@@ -82,9 +123,9 @@ categories API, and daily summary API.
   `npm audit fix`, lock-only update, dedupe, and a compatible 5.0.9 override did
   not replace Pi's nested resolution. The omit-dev audit is zero, but the full
   development audit is not; this remains an upstream/pinning limitation.
-- This was one full-stack task, not the randomized paired trial battery required
-  to adopt judgment-dependent defaults. No new judgment-dependent extension is
-  enabled on the strength of this run.
+- The later randomized screen completed only four of nine planned pairs. It is
+  negative interim evidence, not a completed adoption battery or a basis for
+  enabling a judgment-dependent default.
 
 Machine-readable aggregates are in `pi/evals/app-x-2026-08-02.json`; the exact
 post-fix deterministic baseline is `pi/evals/hardened-baseline-2026-08-03.json`.

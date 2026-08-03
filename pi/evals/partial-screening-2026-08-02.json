@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-02",
+  "status": "stopped-after-four-of-nine-pairs",
+  "security_scoring": "out-of-scope",
+  "seed": 20260802,
+  "pi_version": "0.83.0",
+  "agent_configs_revision": "609a6c5",
+  "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+  "design": {
+    "baseline": "stock Pi with only the ai-stack provider shim",
+    "candidate": "installed Pi harness",
+    "execution": "strictly sequential",
+    "randomized": [
+      "task order",
+      "within-pair arm order"
+    ],
+    "hidden_tests_overlaid_after_agent_exit": true,
+    "pairs_planned": 9,
+    "pairs_completed": 4,
+    "interrupted_pair": 5
+  },
+  "aggregate": {
+    "baseline_hidden_test_passes": 4,
+    "harness_hidden_test_passes": 3,
+    "baseline_clean_operational_passes": 4,
+    "harness_clean_operational_passes": 2,
+    "quality_ties": 3,
+    "baseline_quality_wins": 1,
+    "harness_quality_wins": 0,
+    "median_paired_runtime_ratio": 1.5832266956399823,
+    "median_paired_runtime_overhead_pct": 58.32266956399823,
+    "baseline_prompt_tokens": 324550,
+    "harness_prompt_tokens": 801622,
+    "prompt_token_delta_pct": 147.0,
+    "baseline_completion_tokens": 11174,
+    "harness_completion_tokens": 12480,
+    "completion_token_delta_pct": 11.7,
+    "connection_errors": 0
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "task": "go-flutter/notes-app",
+      "arm_order": ["harness", "baseline"],
+      "baseline": {"hidden_tests": "pass", "seconds": 265.279},
+      "harness": {
+        "hidden_tests": "fail",
+        "seconds": 390.627,
+        "quality_gate": "unconfigured",
+        "failure": "two unknown-ID operations raised StateError instead of ArgumentError"
+      }
+    },
+    {
+      "pair": 2,
+      "task": "go/notes-api",
+      "arm_order": ["baseline", "harness"],
+      "baseline": {"hidden_tests": "pass", "seconds": 65.346},
+      "harness": {
+        "hidden_tests": "pass",
+        "seconds": 93.319,
+        "quality_gate": "pass"
+      }
+    },
+    {
+      "pair": 3,
+      "task": "dart/task-manager",
+      "arm_order": ["harness", "baseline"],
+      "baseline": {"hidden_tests": "pass", "seconds": 50.871},
+      "harness": {
+        "hidden_tests": "pass",
+        "seconds": 938.044,
+        "operational_result": "fail",
+        "extension_errors": [
+          "stack-router: stale context after session replacement or reload",
+          "quality-gate: stale context after session replacement or reload"
+        ]
+      }
+    },
+    {
+      "pair": 4,
+      "task": "go-flutter/bookmarks-app",
+      "arm_order": ["baseline", "harness"],
+      "baseline": {"hidden_tests": "pass", "seconds": 256.763},
+      "harness": {
+        "hidden_tests": "pass",
+        "seconds": 434.941,
+        "quality_gate": "unconfigured"
+      }
+    }
+  ],
+  "verdict": {
+    "scope": "interim operational hardening only",
+    "result": "not-demonstrated",
+    "reason": "The partial screen shows a quality regression, extension lifecycle failure, and median overhead above the declared threshold.",
+    "final_nine_pair_verdict": "not-reached"
+  }
+}

@@ -12,3 +12,10 @@ runtime commit and deterministic results. Neither is a paired adoption battery:
 no independent reviewer route was available, and Docker was unavailable. Those
 features remain disabled or unproven rather than receiving a favorable verdict
 from incomplete evidence.
+
+`partial-screening-2026-08-02.json` records four complete pairs from a planned
+nine-pair randomized baseline-versus-harness screen. The battery was stopped on
+request, so it supports only an interim verdict. `run_screening.py` is the
+reusable sequential runner; it records its randomization seed, runtime identity,
+raw-result locations, hidden-test outcomes, extension errors, duration, and
+token usage.

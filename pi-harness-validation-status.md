@@ -25,7 +25,7 @@ new entries at the top of "What worked" and `ai-stack/cross-model-review-bounded
 
 The plan in `plans/pi-harness-hardening-plan.md` is implemented locally. The
 maintained Pi project now typechecks against pinned 0.83.0 public types and has
-53 deterministic tests covering loading, event ordering, retry caps,
+59 deterministic tests covering loading, event ordering, retry caps,
 current-diff verification, shell-masked exits, reviewer truthfulness, symlink
 escapes, external-effect policy, installer scope, stack routing, and extension
 interactions.
@@ -40,7 +40,7 @@ The full trace and direct-review findings are recorded in
 `pi/evals/hardened-baseline-2026-08-03.json`. Narrative findings are in
 `pi-harness-hardening-observations.md`.
 
-Two acceptance boundaries remain intentionally not adopted:
+Three acceptance boundaries remain intentionally not adopted:
 
 - No distinct resident reviewer is configured, so automatic review is
   disabled rather than mislabeled or promoted from historical Gemma evidence.
@@ -49,6 +49,32 @@ Two acceptance boundaries remain intentionally not adopted:
 - `continuation-nudge.ts` and `co-change-suggest.ts` remain source-tested but
   are removed from the installed runtime until randomized paired evidence meets
   the current adoption threshold.
+
+### 2026-08-02 partial randomized screening update
+
+A seed-`20260802` sequential screen compared stock Pi plus the required model
+provider shim against the installed harness. The run was stopped on request
+after four of nine randomized pairs; the interrupted fifth pair is excluded.
+Security behavior was not scored.
+
+- Baseline hidden-test success: 4/4. Harness hidden-test success: 3/4.
+- Clean operational success: baseline 4/4, harness 2/4.
+- Paired quality outcomes: three ties, one baseline win, no harness win.
+- Median paired harness runtime overhead: 58.3%, against the plan's 20%
+  screening threshold.
+- Harness token deltas: 147% more prompt tokens and 11.7% more completion
+  tokens.
+- Both full-stack fixtures recorded `quality-gate` as `unconfigured` because
+  their runnable manifests live below the repository root.
+- The Dart task-manager harness arm passed hidden tests but emitted stale-context
+  errors from `stack-router.ts` and `quality-gate.ts` after session replacement
+  or reload.
+
+The defensible interim verdict is negative: deterministic contracts are green,
+but the deployed harness has not shown operational hardening in this live
+sample. This is not a final nine-pair verdict. Aggregate evidence is in
+`pi/evals/partial-screening-2026-08-02.json` and the runner is
+`pi/evals/run_screening.py`.
 
 ## Historical summary (superseded where the result above differs)
 
