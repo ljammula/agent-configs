@@ -26,3 +26,20 @@ test("installer removes managed DayTrix globals and installs portable Pi skills"
 	assert.equal(await readlink(join(skills, "before-done")), join(repo, "pi/skills/before-done"));
 	assert.equal(await readlink(join(extensions, "quality-gate.ts")), join(repo, "pi/extensions/quality-gate.ts"));
 });
+
+test("ordinary upgrades replace known legacy core skill links", async () => {
+	const home = await mkdtemp(join(tmpdir(), "pi-install-legacy-"));
+	const claudeSkills = join(home, ".claude/skills");
+	const codexSkills = join(home, ".codex/skills");
+	await mkdir(claudeSkills, { recursive: true });
+	await mkdir(codexSkills, { recursive: true });
+	await symlink(join(repo, "claude/skills/before-done"), join(claudeSkills, "before-done"));
+	await symlink(join(repo, "claude/skills/wiring-verify"), join(claudeSkills, "wiring-verify"));
+	await symlink(join(repo, "codex/skills/before-done"), join(codexSkills, "before-done"));
+	await symlink(join(repo, "codex/skills/wiring-verify"), join(codexSkills, "wiring-verify"));
+	await execFileAsync("bash", [join(repo, "install.sh")], { env: { ...process.env, HOME: home } });
+	for (const skills of [claudeSkills, codexSkills]) {
+		assert.equal(await readlink(join(skills, "before-done")), join(repo, "pi/skills/before-done"));
+		assert.equal(await readlink(join(skills, "wiring-verify")), join(repo, "pi/skills/wiring-verify"));
+	}
+});

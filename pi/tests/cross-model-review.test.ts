@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	default as reviewer,
 	extractLastNonEmptyLine,
 	normalizeForMarkerMatch,
 	requestReview,
 	resolveReviewerConfig,
 } from "../extensions/cross-model-review.ts";
+import { ExtensionHarness, type ExecCall } from "./extension-api-harness.ts";
 
 const model = "primary-model";
 const primary = { AI_PRIMARY_BASE_URL: "http://host:8080/v1", AI_PRIMARY_MODEL: model };
@@ -40,4 +42,41 @@ test("review request classifies clean, flagged, malformed, and unreachable respo
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response("bug in app.ts"))).outcome, "flagged");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response(undefined))).outcome, "transient");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).outcome, "transient");
+});
+
+test("a new agent run resets a settled reviewer", async () => {
+	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
+	const previousModel = process.env.AI_REVIEW_MODEL;
+	const previousFetch = globalThis.fetch;
+	process.env.AI_REVIEW_BASE_URL = "http://review/v1";
+	process.env.AI_REVIEW_MODEL = "reviewer";
+	let reviewRequests = 0;
+	globalThis.fetch = async () => {
+		reviewRequests += 1;
+		return { ok: true, json: async () => ({ choices: [{ message: { content: "NO_ISSUES_FOUND" } }] }) } as Response;
+	};
+	try {
+		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+		const harness = new ExtensionHarness({
+			branch,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "base\n", stderr: "", killed: false };
+				if (command === "git" && args[0] === "diff") return { code: 0, stdout: "diff", stderr: "", killed: false };
+				return { code: 1, stdout: "", stderr: "", killed: false };
+			},
+		});
+		reviewer(harness.api);
+		for (let run = 0; run < 2; run += 1) {
+			await harness.emit({ type: "agent_start" } as any);
+			await harness.emit({ type: "tool_result", toolCallId: `verify-${run}`, toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any);
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+		assert.equal(reviewRequests, 2);
+	} finally {
+		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
+		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
+		if (previousModel === undefined) delete process.env.AI_REVIEW_MODEL;
+		else process.env.AI_REVIEW_MODEL = previousModel;
+		globalThis.fetch = previousFetch;
+	}
 });

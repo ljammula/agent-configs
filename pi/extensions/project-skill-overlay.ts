@@ -15,7 +15,7 @@ const PROJECT_SKILLS = [
 ];
 
 export function isDayTrixRemote(remote: string): boolean {
-	return /(?:^|[/:])(?:ljammula\/)?personal-assistant(?:\.git)?$/i.test(remote.trim());
+	return /(?:^|[/:])ljammula\/personal-assistant(?:\.git)?$/i.test(remote.trim());
 }
 
 export async function resolveProjectSkillsRoot(extensionFile = import.meta.filename): Promise<string> {

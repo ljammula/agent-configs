@@ -109,6 +109,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 	let lastReviewedDiff: string | undefined;
 	let reviewInFlight = false;
 	let settled = false;
+	let runId = 0;
 
 	pi.on("session_start", () => {
 		appendHarnessTrace(pi, {
@@ -127,6 +128,11 @@ export default function reviewer(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
+		runId += 1;
+		reviewCount = 0;
+		lastReviewedDiff = undefined;
+		reviewInFlight = false;
+		settled = false;
 		if (baseSha) return;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
 		if (result?.code === 0) baseSha = result.stdout.trim();
@@ -137,14 +143,17 @@ export default function reviewer(pi: ExtensionAPI): void {
 		const command = event.input.command;
 		if (typeof command !== "string" || !isBroadVerificationCommand(command) || verificationPipelineCanMaskFailure(command)) return;
 		reviewInFlight = true;
+		const reviewRunId = runId;
 		const startedAt = Date.now();
 		const args = baseSha ? ["diff", baseSha] : ["diff"];
 		pi.exec("git", args, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
 			.then(async (diffResult) => {
+				if (reviewRunId !== runId) return;
 				const diff = diffResult.code === 0 ? diffResult.stdout.trim() : "";
 				const spec = taskSpec(ctx);
 				if (!diff || !spec || diff === lastReviewedDiff) return;
 				const result = await requestReview(config, spec, diff, ctx.signal);
+				if (reviewRunId !== runId) return;
 				appendHarnessTrace(pi, {
 					extension: "reviewer",
 					diffHash: null,
@@ -169,6 +178,8 @@ export default function reviewer(pi: ExtensionAPI): void {
 			.catch(() => {
 				appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind } });
 			})
-			.finally(() => { reviewInFlight = false; });
+			.finally(() => {
+				if (reviewRunId === runId) reviewInFlight = false;
+			});
 	});
 }

@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { opendir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
@@ -17,10 +17,22 @@ async function body(cwd: string, name: string): Promise<string> {
 }
 
 async function fileNames(cwd: string): Promise<string[]> {
-	return readdir(cwd, { recursive: true }).then(
-		(entries) => entries.map(String).slice(0, 5000),
-		() => [],
-	);
+	const names: string[] = [];
+	const pending = [""];
+	const ignored = new Set([".dart_tool", ".git", ".next", "build", "coverage", "dist", "node_modules", "out", "target", "vendor"]);
+	for (let cursor = 0; cursor < pending.length && names.length < 5000; cursor += 1) {
+		const relativeDir = pending[cursor]!;
+		const directory = await opendir(join(cwd, relativeDir)).catch(() => undefined);
+		if (!directory) continue;
+		for await (const entry of directory) {
+			if (entry.isDirectory() && ignored.has(entry.name)) continue;
+			const name = join(relativeDir, entry.name);
+			names.push(name);
+			if (entry.isDirectory()) pending.push(name);
+			if (names.length >= 5000) break;
+		}
+	}
+	return names;
 }
 
 export async function routeStackSkills(cwd: string): Promise<StackSkill[]> {

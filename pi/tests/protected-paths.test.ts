@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -30,4 +30,12 @@ test("blocks traversal, protected files, and symlink escapes", async () => {
 		const [result] = await harness.emit({ type: "tool_call", toolCallId: path, toolName: "write", input: { path, content: "x" } } as any);
 		assert.equal((result as { block: boolean }).block, true, path);
 	}
+});
+
+test("blocks an in-workspace symlink to a protected file", async () => {
+	const { harness, cwd } = await setup();
+	await writeFile(join(cwd, ".env"), "SECRET=x\n");
+	await symlink(join(cwd, ".env"), join(cwd, "alias.txt"));
+	const [result] = await harness.emit({ type: "tool_call", toolCallId: "alias", toolName: "edit", input: { path: "alias.txt" } } as any);
+	assert.equal((result as { block: boolean }).block, true);
 });

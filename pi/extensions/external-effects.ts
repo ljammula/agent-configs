@@ -20,13 +20,15 @@ const EFFECTS: Array<EffectMatch & { pattern: RegExp; localContext?: RegExp }> =
 	{ category: "infrastructure", pattern: /\bterraform\s+(?:apply|destroy|import)\b/i, description: "mutates managed infrastructure", alternative: "run terraform plan and inspect the saved plan" },
 	{ category: "production-database", pattern: /\b(?:drop\s+(?:database|schema|table)|truncate\s+table|psql\s+[^\n]*(?:prod|production)[^\n]*(?:-f|--file)|migrat\w*\s+[^\n]*(?:prod|production))\b/i, description: "can mutate or destroy production database state", alternative: "run against an ephemeral database or produce the migration plan" },
 	{ category: "kafka-admin", pattern: /\b(?:kafka-topics[^\n]*(?:--delete|--alter)|kafka-configs[^\n]*--alter|kafka-consumer-groups[^\n]*--reset-offsets)\b/i, description: "mutates Kafka topics, configuration, or offsets", alternative: "describe the topic/group and produce the intended change" },
-	{ category: "kubernetes", pattern: /\bkubectl\s+(?:apply|delete|replace|patch)\b/i, localContext: /(?:--context(?:=|\s+)(?:kind-|minikube|docker-desktop)|KUBECONFIG=[^\s]*(?:kind|minikube))/i, description: "mutates a Kubernetes cluster", alternative: "use --dry-run=server or target an explicit local kind/minikube context" },
+	{ category: "kubernetes", pattern: /\bkubectl\b[^;&|\n]*\b(?:apply|delete|replace|patch)\b/i, localContext: /(?:--context(?:=|\s+)(?:kind-|minikube|docker-desktop)|KUBECONFIG=[^\s]*(?:kind|minikube))/i, description: "mutates a Kubernetes cluster", alternative: "use --dry-run=server or target an explicit local kind/minikube context" },
 	{ category: "git-publish", pattern: /\b(?:git\s+(?:push|tag\s+(?:-a|-s|--sign)|push[^\n]*--tags)|gh\s+(?:release\s+create|pr\s+create))\b/i, description: "publishes commits, tags, releases, or pull requests", alternative: "prepare the local commit/diff and request explicit publication authorization" },
 ];
 
 export function classifyExternalEffect(command: string): EffectMatch | undefined {
-	for (const effect of EFFECTS) {
-		if (effect.pattern.test(command) && !effect.localContext?.test(command)) return effect;
+	for (const segment of command.split(/(?:&&|\|\||[;\n|])/)) {
+		for (const effect of EFFECTS) {
+			if (effect.pattern.test(segment) && !effect.localContext?.test(segment)) return effect;
+		}
 	}
 	return undefined;
 }

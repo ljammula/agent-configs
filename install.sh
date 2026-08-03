@@ -54,6 +54,14 @@ unlink_managed_project_skills() {
   done
 }
 
+unlink_legacy_core_skill() {
+  local target="$1" legacy_source="$2"
+  if [[ -L "$target" && "$(readlink "$target")" == "$legacy_source" ]]; then
+    rm "$target"
+    echo "unlinked legacy core skill: $target"
+  fi
+}
+
 # Claude Code
 link "$REPO_ROOT/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 link "$REPO_ROOT/claude/RTK.md" "$HOME/.claude/RTK.md"
@@ -62,6 +70,8 @@ link "$REPO_ROOT/claude/hooks/rtk-rewrite.sh" "$HOME/.claude/hooks/rtk-rewrite.s
 link "$REPO_ROOT/claude/hooks/format-on-edit.sh" "$HOME/.claude/hooks/format-on-edit.sh"
 unlink_managed_project_skills "$HOME/.claude/skills" "$REPO_ROOT/claude/skills"
 link_skills "$REPO_ROOT/claude/skills" "$HOME/.claude/skills" "${PORTABLE_SKILLS[@]}"
+unlink_legacy_core_skill "$HOME/.claude/skills/before-done" "$REPO_ROOT/claude/skills/before-done"
+unlink_legacy_core_skill "$HOME/.claude/skills/wiring-verify" "$REPO_ROOT/claude/skills/wiring-verify"
 link "$REPO_ROOT/pi/skills/before-done" "$HOME/.claude/skills/before-done"
 link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.claude/skills/wiring-verify"
 
@@ -70,6 +80,8 @@ link "$REPO_ROOT/codex/AGENTS.md" "$HOME/.codex/AGENTS.md"
 link "$REPO_ROOT/codex/RTK.md" "$HOME/.codex/RTK.md"
 unlink_managed_project_skills "$HOME/.codex/skills" "$REPO_ROOT/codex/skills"
 link_skills "$REPO_ROOT/codex/skills" "$HOME/.codex/skills" "${PORTABLE_SKILLS[@]}"
+unlink_legacy_core_skill "$HOME/.codex/skills/before-done" "$REPO_ROOT/codex/skills/before-done"
+unlink_legacy_core_skill "$HOME/.codex/skills/wiring-verify" "$REPO_ROOT/codex/skills/wiring-verify"
 link "$REPO_ROOT/pi/skills/before-done" "$HOME/.codex/skills/before-done"
 link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.codex/skills/wiring-verify"
 
@@ -95,14 +107,6 @@ for f in "$REPO_ROOT"/pi/extensions/*.ts; do
     if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then
       rm "$target"
       echo "unlinked evidence-gated Pi extension: $target"
-    fi
-    continue
-  fi
-  if [[ "$name" == "harness-telemetry.ts" || "$name" == "verification.ts" ]]; then
-    target="$HOME/.pi/agent/extensions/$name"
-    if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then
-      rm "$target"
-      echo "unlinked non-extension support module: $target"
     fi
     continue
   fi

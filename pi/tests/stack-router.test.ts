@@ -36,3 +36,12 @@ test("an unrelated backend directory receives no DayTrix or stack instruction", 
 	const cwd = await fixture({ "backend/readme.txt": "household feature-grant localization release account" });
 	assert.deepEqual(await routeStackSkills(cwd), []);
 });
+
+test("skips dependency and build trees while collecting stack evidence", async () => {
+	const cwd = await fixture({
+		"pyproject.toml": "dependencies = ['psycopg']\n",
+		"node_modules/package/migrations/001.sql": "create table x(id int);",
+		"build/schema/001.sql": "create table y(id int);",
+	});
+	assert.deepEqual(await routeStackSkills(cwd), ["python-service"]);
+});

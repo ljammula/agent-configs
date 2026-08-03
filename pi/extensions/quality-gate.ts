@@ -109,9 +109,10 @@ export default function qualityGate(pi: ExtensionAPI): void {
 				signal: ctx.signal,
 			}).catch(() => undefined);
 			const after = await snapshotDiff(pi, ctx.cwd, baseSha);
+			const diffChanged = before.hash !== after.hash;
 			evidence = {
 				command,
-				diffHash: after.hash,
+				diffHash: before.hash,
 				startedAt,
 				endedAt: Date.now(),
 				exitCode: result?.code ?? 1,
@@ -128,6 +129,7 @@ export default function qualityGate(pi: ExtensionAPI): void {
 				metadata: {
 					commandHash: commandHash(command),
 					exitCode: evidence.exitCode,
+					diffChanged,
 					hadOutput: failureOutput.length > 0,
 				},
 			});
@@ -150,8 +152,9 @@ export default function qualityGate(pi: ExtensionAPI): void {
 				});
 			}
 			pi.sendUserMessage(
-				`The current-diff quality gate ran \`${command}\` and it failed for the latest material diff ` +
+				`The current-diff quality gate ran \`${command}\` but did not establish passing evidence for the latest material diff ` +
 					`(attempt ${correctiveFollowUps}/${MAX_CORRECTIVE_FOLLOW_UPS}).` +
+					(diffChanged ? " The check changed the material diff, so the resulting content must be verified again." : "") +
 					(failureOutput ? `\n\nRedacted failure excerpt:\n\n${failureOutput}` : "") +
 					"\n\nInspect the failure, make the smallest fix, and rerun it." +
 					(capHit ? " The correction cap is now reached; report the remaining failure truthfully if it cannot be fixed." : ""),

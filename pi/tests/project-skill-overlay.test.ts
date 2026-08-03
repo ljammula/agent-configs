@@ -9,6 +9,8 @@ import { ExtensionHarness } from "./extension-api-harness.ts";
 test("recognizes only the explicit DayTrix repository remote", () => {
 	assert.equal(isDayTrixRemote("git@github.com:ljammula/personal-assistant.git"), true);
 	assert.equal(isDayTrixRemote("https://github.com/ljammula/personal-assistant"), true);
+	assert.equal(isDayTrixRemote("git@github.com:attacker/personal-assistant.git"), false);
+	assert.equal(isDayTrixRemote("https://gitlab.com/someoneelse/personal-assistant"), false);
 	assert.equal(isDayTrixRemote("https://github.com/example/backend"), false);
 });
 

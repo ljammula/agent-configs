@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 			resolveThroughExistingAncestor(absolutePath),
 		]);
 
-		if (protectedPaths.some((p) => absolutePath.includes(p))) {
+		if (protectedPaths.some((p) => absolutePath.includes(p) || resolvedTarget.includes(p))) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`Blocked write to protected path: ${path}`, "warning");
 			}

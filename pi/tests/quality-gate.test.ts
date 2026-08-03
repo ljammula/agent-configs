@@ -62,6 +62,30 @@ test("green check with no later edit avoids a redundant rerun", async () => {
 	assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 0);
 });
 
+test("canonical check that changes the diff is inconclusive", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
+	await writeFile(join(cwd, "Makefile"), "verify:\n\t@true\n");
+	let diff = "before-check";
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+			if (command === "git" && args[0] === "diff") return result(0, diff);
+			if (command === "git" && args[0] === "status") return result(0, " M app.ts\n");
+			if (command === "bash") {
+				diff = "changed-by-check";
+				return result(0);
+			}
+			return result(1);
+		},
+	});
+	qualityGate(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	await harness.emit({ type: "agent_settled" } as any);
+	assert.equal(harness.messages.length, 1);
+	assert.match(String(harness.messages[0]?.content), /changed the material diff/);
+});
+
 test("green-looking masked evidence reruns the canonical check", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
 	await writeFile(join(cwd, "Makefile"), "verify:\n\t@true\n");

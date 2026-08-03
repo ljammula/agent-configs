@@ -31,3 +31,8 @@ test("permits planning, reads, local Kubernetes, and ordinary tests", () => {
 		"make verify",
 	]) assert.equal(classifyExternalEffect(command), undefined, command);
 });
+
+test("a local kubectl command does not exempt a chained production mutation", () => {
+	const command = "kubectl --context kind-test get pods; kubectl --context prod delete pod x";
+	assert.equal(classifyExternalEffect(command)?.category, "kubernetes");
+});
