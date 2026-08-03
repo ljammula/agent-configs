@@ -6,7 +6,7 @@ This is the implementation record for
 `plans/pi-harness-hardening-plan.md`. The real validation task was saved first
 as `~/code/test-bed/app-x/VALIDATION-TASK.md`, then run with the installed Pi
 0.83.0 harness against the resident ThinkingCap Qwen3.6-27B model.
-The hardened runtime and deterministic suite are pinned by commit `90aa676`.
+The hardened runtime and deterministic suite are pinned by commit `151c122`.
 
 ## Outcome
 

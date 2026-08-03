@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "recorded_at": "2026-08-03",
-  "agent_configs_revision": "90aa676",
+  "agent_configs_revision": "151c122",
   "pi_version": "0.83.0",
   "primary": {
     "base_url": "http://192.168.1.233:8080/v1",

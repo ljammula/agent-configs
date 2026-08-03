@@ -6,7 +6,7 @@
     "pi_version": "0.83.0",
     "plan_commit": "a5ac0e1",
     "implementation_revision_at_run": "working-tree",
-    "post_run_hardening_revision": "90aa676",
+    "post_run_hardening_revision": "151c122",
     "primary_route": "http://192.168.1.233:8080/v1",
     "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
     "primary_model_hash": null,
