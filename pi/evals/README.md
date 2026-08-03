@@ -1,0 +1,14 @@
+# Pi harness evaluation records
+
+This directory stores small, reviewable evidence records for local Pi harness
+runs. Records use aggregate counts, commit identifiers, extension outcomes,
+and verification results. They deliberately exclude prompts, source diffs,
+credentials, complete command output, and chain-of-thought.
+
+`app-x-2026-08-02.json` is the implementation-time full-stack exercise. It
+records its revision as `working-tree` and must not be treated as a reproducible
+adoption baseline. `hardened-baseline-2026-08-03.json` pins the resulting
+runtime commit and deterministic results. Neither is a paired adoption battery:
+no independent reviewer route was available, and Docker was unavailable. Those
+features remain disabled or unproven rather than receiving a favorable verdict
+from incomplete evidence.

@@ -5,14 +5,16 @@ Agent instructions and skills used on this machine, organized by agent.
 **pi harness validation status** (what's adopted vs. not, and why): see
 [pi-harness-validation-status.md](pi-harness-validation-status.md).
 
-**Current-machine Pi audit (2026-08-02):** Pi 0.83.0 uses one resident
-ThinkingCap Qwen3.6-27B route for both primary coding and the automatic blind
-review call. The successful cross-family reviewer evidence was gathered with a
-now-nonresident Gemma route and does not validate the current same-model setup.
-`protected-paths.ts` guards Pi's `write`/`edit` tools but is not a shell or OS
-sandbox, and DayTrix-specific skills remain globally linked while their
-project-local migration is pending. The proposed remediation and proof gates
-are tracked in [PR #5](https://github.com/ljammula/agent-configs/pull/5).
+**Current-machine Pi audit (2026-08-03):** the hardening plan is implemented
+locally. Pi 0.83.0 now has a pinned TypeScript contract suite, current-diff
+quality gate, truthful reviewer configuration, project-scoped DayTrix overlay,
+stack routing, external-effect guard, symlink-safe path checks, versioned trace
+records, and a Docker containment profile. The same-model reviewer is disabled
+by default because it has not earned independent-review status. Docker is not
+installed on this host, so the containment profile is statically verified but
+its escape matrix remains unproven. See
+[the observations](pi-harness-hardening-observations.md) and
+[`pi/evals/`](pi/evals/) for exact evidence and limitations.
 
 The local inference routes used by the machine-conditional skills are recorded
 in [local-ai-stack.md](local-ai-stack.md), including current model ids, runtime
@@ -22,7 +24,7 @@ boundary.
 ## Install
 
 ```bash
-./install.sh            # symlink everything into ~/.claude, ~/.codex, ~/.copilot
+./install.sh            # symlink managed config into Claude, Codex, Copilot, and Pi homes
 ./install.sh --force     # also replace any existing file/dir at the target that isn't already linked here
 ```
 
@@ -90,17 +92,24 @@ agent-configs/
     │   ├── rtk-rewrite.ts          # Port of claude/hooks/rtk-rewrite.sh to tool_call
     │   ├── format-on-edit.ts       # Port of claude/hooks/format-on-edit.sh to tool_result
     │   ├── searxng-search.ts       # web_search tool via local SearXNG (no cloud API key)
-    │   ├── protected-paths.ts      # write/edit cwd guard only; not bash/OS confinement
-    │   ├── continuation-nudge.ts   # Bounded recovery from silent stops/failed verification
-    │   ├── cross-model-review.ts   # Historical name; current :8080 same-model blind review
-    │   ├── co-change-suggest.ts    # Git-history co-change reading suggestions
+    │   ├── protected-paths.ts      # write/edit guard with realpath/symlink containment
+    │   ├── external-effects.ts     # blocks deploy/publish/prod mutation without opt-in
+    │   ├── quality-gate.ts         # final-diff canonical verification, bounded correction
+    │   ├── stack-router.ts         # evidence-based portable stack skill routing
+    │   ├── project-skill-overlay.ts # DayTrix workflows only for its exact Git remote
+    │   ├── continuation-nudge.ts   # Evidence-gated source; not installed by default
+    │   ├── cross-model-review.ts   # Explicit independent route or labeled self-review
+    │   ├── lib/                     # Shared verification and trace support, not entry points
+    │   ├── co-change-suggest.ts    # Evidence-gated source; not installed by default
     │   ├── git-safety.ts           # Blocks selected destructive git commands
     │   ├── plan-mode/              # Vendored: /plan read-only exploration
     │   ├── todo.ts                 # Vendored: task list with persistent state
     │   ├── git-checkpoint.ts       # Vendored: stash checkpoints for /fork restore
     │   └── notify.ts               # Vendored + hasUI gate: terminal notification on finish
+    ├── containment/           # read-only-root Docker profile for unattended runs
+    ├── tests/                 # pinned public-API extension contract tests
     ├── prompts/               # /review, /before-done, /wire, /l10n slash commands
-    └── skills/                # Same skills as claude/codex, pi-flavored
+    └── skills/                # portable cores, stack skills, and gated DayTrix overlays
 ```
 
 ## Install locations
@@ -173,12 +182,15 @@ The intended ownership is:
       self-review/
 ```
 
-The current agent directories still contain both groups while the
-project-local installation path is migrated and tested for each supported
-agent. Do not add further personal-assistant-specific skills here; add them
-to `~/code/personal-assistant` instead. Do not nest category folders inside
-an agent's runtime `skills/` directory: `install.sh` discovers only direct
-children, and each direct child must be one skill containing `SKILL.md`.
+The source tree retains the historical project-specific skill bodies while
+ownership is migrated, but `install.sh` removes their managed global links for
+Claude, Codex, and Pi. Pi exposes the DayTrix bodies only when
+`project-skill-overlay.ts` verifies the exact `ljammula/personal-assistant`
+Git remote. Unrelated repositories receive none of their descriptions or
+bodies. Do not add further project-specific global links. Do not nest category
+folders inside an agent's runtime `skills/` directory: `install.sh` discovers
+only direct children, and each direct child must be one skill containing
+`SKILL.md`.
 
 The deciding question is: “Would this skill remain correct in an unrelated
 repository?” If yes, it is global; if it depends on this app's architecture,

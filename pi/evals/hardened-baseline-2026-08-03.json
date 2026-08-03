@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-03",
+  "agent_configs_revision": "90aa676",
+  "pi_version": "0.83.0",
+  "primary": {
+    "base_url": "http://192.168.1.233:8080/v1",
+    "model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+    "model_hash": null,
+    "context_tokens": 96000,
+    "max_output_tokens": 16384
+  },
+  "effective_extensions": [
+    "ai-stack-local",
+    "cross-model-review",
+    "external-effects",
+    "format-on-edit",
+    "full-stack-dev",
+    "git-checkpoint",
+    "git-safety",
+    "karpathy-guardrail",
+    "notify",
+    "plan-mode",
+    "project-skill-overlay",
+    "protected-paths",
+    "quality-gate",
+    "rtk-rewrite",
+    "searxng-search",
+    "stack-router",
+    "todo"
+  ],
+  "default_disabled": [
+    "co-change-suggest",
+    "continuation-nudge",
+    "independent-review"
+  ],
+  "deterministic_verification": {
+    "install_command": "./install.sh --force",
+    "typecheck_command": "npm --prefix pi run typecheck",
+    "test_command": "npm --prefix pi test",
+    "typecheck": "pass",
+    "tests_passed": 53,
+    "tests_failed": 0,
+    "installed_layout_load": "pass",
+    "runtime_dependency_audit": "0 vulnerabilities"
+  },
+  "application_fixture": {
+    "path": "/Users/kanna/code/test-bed/app-x",
+    "implementation_commit": "dc0769e2e6ad4e4b77114edcb23cd8a1a8649145",
+    "documentation_commit": "a83204a",
+    "verification_command": "make verify",
+    "tests_passed": 35,
+    "production_build": "pass",
+    "http_smoke": "pass"
+  },
+  "limitations": {
+    "reviewer": "no distinct configured route; disabled",
+    "containment": "Docker unavailable; escape matrix not run",
+    "paired_trials": 0,
+    "browser_visual_acceptance": "unavailable"
+  }
+}
