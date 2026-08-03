@@ -38,6 +38,10 @@
  * Retries are bounded to avoid an infinite loop when a model cannot recover.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	BROAD_VERIFICATION_PATTERNS,
+	verificationPipelineCanMaskFailure,
+} from "./lib/verification.ts";
 
 const FORWARD_LOOKING_PATTERNS = [
 	/\bi(?:'ll| will) now\b/i,
@@ -46,19 +50,6 @@ const FORWARD_LOOKING_PATTERNS = [
 	/\blet me now\b/i,
 	/\bi(?:'m| am) going to\b/i,
 ];
-
-const VERIFICATION_COMMAND_PATTERNS = [
-	/\bgo (?:test|build)\b/i,
-	/\bnpm test\b/i,
-	/\byarn test\b/i,
-	/\bpytest\b/i,
-	/\bmake (?:verify|test)\b/i,
-	/\bflutter (?:test|analyze)\b/i,
-	/\bcargo test\b/i,
-	/\bdart (?:test|format)\b/i,
-];
-
-const PIPEFAIL_PATTERN = /\b(?:set\s+-[a-z]*o\s+pipefail|setopt\s+pipefail)\b/i;
 
 const NUDGE_MESSAGES = {
 	"forward-looking": "You described an edit but didn't make it. Make it now.",
@@ -81,57 +72,6 @@ function classifyAbandonedTurn(content: { type: string; text?: string }[]): Aban
 		.trim();
 	if (!text) return "silent";
 	return FORWARD_LOOKING_PATTERNS.some((re) => re.test(text)) ? "forward-looking" : null;
-}
-
-/** Hide quoted text while preserving indexes used to inspect shell operators. */
-function unquotedShellSyntax(command: string): string {
-	const syntax = [...command];
-	let quote: "'" | '"' | null = null;
-
-	for (let i = 0; i < syntax.length; i += 1) {
-		const char = syntax[i];
-		if (quote) {
-			syntax[i] = " ";
-			if (char === "\\" && quote === '"') {
-				i += 1;
-				if (i < syntax.length) syntax[i] = " ";
-			} else if (char === quote) {
-				quote = null;
-			}
-		} else if (char === "'" || char === '"') {
-			quote = char;
-			syntax[i] = " ";
-		} else if (char === "\\") {
-			syntax[i] = " ";
-			i += 1;
-			if (i < syntax.length) syntax[i] = " ";
-		}
-	}
-
-	return syntax.join("");
-}
-
-/** True when a verification command feeds an actual pipeline without pipefail. */
-export function verificationPipelineCanMaskFailure(command: string): boolean {
-	const syntax = unquotedShellSyntax(command);
-	if (PIPEFAIL_PATTERN.test(syntax)) return false;
-
-	const verificationEnds = VERIFICATION_COMMAND_PATTERNS.flatMap((pattern) =>
-		[...syntax.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))].map(
-			(match) => match.index + match[0].length,
-		),
-	);
-
-	return verificationEnds.some((start) => {
-		for (let i = start; i < syntax.length; i += 1) {
-			const char = syntax[i];
-			const next = syntax[i + 1];
-			if (char === ";" || char === "\n" || (char === "&" && next === "&")) return false;
-			if (char === "|" && next === "|") return false;
-			if (char === "|") return true;
-		}
-		return false;
-	});
 }
 
 export default function (pi: ExtensionAPI) {
@@ -163,7 +103,7 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName !== "bash") return;
 		const command = event.input?.command;
 		if (typeof command !== "string") return;
-		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
+		if (!BROAD_VERIFICATION_PATTERNS.some((re) => re.test(command))) return;
 		const pipelineCanMaskFailure = verificationPipelineCanMaskFailure(command);
 		latestVerificationFailed = event.isError || pipelineCanMaskFailure;
 	});
@@ -202,7 +142,7 @@ export default function (pi: ExtensionAPI) {
 					c.type === "toolCall" &&
 					c.name === "bash" &&
 					typeof c.arguments?.command === "string" &&
-					VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(c.arguments.command)),
+					BROAD_VERIFICATION_PATTERNS.some((re) => re.test(c.arguments.command)),
 			);
 		});
 		if (verificationRan && !latestVerificationFailed) return;

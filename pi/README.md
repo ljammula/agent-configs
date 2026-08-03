@@ -17,14 +17,26 @@ see `../pi-harness-validation-status.md`. This file below documents what
 each extension does; that one documents what's actually been proven about
 whether it works.
 
-Current-machine caveats (audited 2026-08-02): Pi 0.83.0 has one resident
-ThinkingCap Qwen3.6-27B route. The primary agent and automatic blind reviewer
-both call that same model on `:8080`, so the historical `cross-model-review.ts`
-name no longer describes the deployed topology and the prior Gemma evidence
-does not validate it. The path guard covers `write`/`edit`, not `bash` or
-symlink escapes; Pi itself has no built-in sandbox. DayTrix-specific skills
-are also still globally installed pending the project-local migration already
-documented in the root README.
+Current-machine state (audited 2026-08-03): Pi 0.83.0 has one resident
+ThinkingCap Qwen3.6-27B route. `cross-model-review.ts` therefore disables
+itself unless a distinct `AI_REVIEW_BASE_URL` and `AI_REVIEW_MODEL` are set;
+same-primary review requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
+`blind-self-review`, never cross-model. The write/edit guard resolves symlinks,
+and an external-effect guard blocks deploy, publish, infrastructure, production
+database, Kafka-admin, and Kubernetes mutations without an explicit category
+opt-in. Whole-process confinement remains the job of `containment/`; Docker is
+not present on this host, so that profile has not completed its live escape
+matrix. DayTrix-specific skills are absent from global runtime discovery and
+are added only after the exact project remote is verified.
+
+The committed `package.json`, pinned Pi API dependency, and `tests/` directory
+provide repeatable type and behavior checks. `quality-gate.ts` binds passing
+evidence to the current diff hash, rejects truncated or shell-masked results,
+runs the repository's canonical broad check directly at settlement, and caps
+automatic corrective follow-ups at three. `stack-router.ts` selects only
+portable Go, Python, Flutter, PostgreSQL, Kafka, Temporal, and GCP guidance from
+repository evidence. Versioned trace entries support later evaluation without
+recording prompts, source, secrets, or full command output.
 
 ## Launching pi
 
@@ -69,6 +81,13 @@ round-trip against it — see `../pi-harness-validation-status.md`'s
 | `extensions/*.ts`, `extensions/*/` | `~/.pi/agent/extensions/…` | Loaded unconditionally at startup |
 | `disabled-extensions/*.ts` | *(not linked)* | Built, code-reviewed, kept for reference — not loaded by default; see below |
 
+`continuation-nudge.ts` and `co-change-suggest.ts` also remain beside their
+tests under `extensions/`, but the installer explicitly removes/skips their
+runtime links. Their existing evidence does not meet the hardening plan's
+paired-adoption threshold. `cross-model-review.ts` is linked so it can report
+its resolved identity, but remains internally disabled unless truthful reviewer
+configuration is supplied.
+
 ### Extensions
 
 Written here:
@@ -102,7 +121,8 @@ Written here:
   skill -- the pi-side copy of that skill was redundant with this tool and
   has been removed; the Claude Code copy stays, since Claude Code has no
   competing built-in tool for this.
-- **`continuation-nudge.ts`** — Phase 1 of
+- **`continuation-nudge.ts`** — **default-disabled as of 2026-08-03 pending
+  paired evaluation.** Phase 1 of
   `ai-stack/local-quality-next-steps-plan.md`: targets the plan-then-abandon
   failure mode (model announces an edit in prose, no tool call, turn ends with
   `stopReason: "stop"`) seen in the `local-model-bench` pi-local run. On a
@@ -144,7 +164,9 @@ Written here:
   verification command feeding a shell pipeline is treated as inconclusive
   unless `pipefail` is set, preventing tools such as `head` or `grep` from
   masking a failing test exit without misclassifying unrelated pipe characters.
-- **`co-change-suggest.ts`** — Phase 3 of the same plan: ports
+- **`co-change-suggest.ts`** — **default-disabled as of 2026-08-03 because its
+  single retrospective case does not meet the paired-adoption threshold.**
+  Phase 3 of the same plan: ports
   `ai-stack/scripts/suggest_read_files.py`'s co-change ranking (git
   co-change count² ÷ total historical touch count) into pi. On the first
   prompt that actually has grep-matchable identifiers (a greeting first
@@ -185,12 +207,13 @@ Written here:
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
   diff + spec to `ai-stack-local` for a second opinion, feeds back a
-  flagged issue). **Current state (2026-08-02): enabled but unvalidated in its
-  deployed configuration.** The extension now calls the same ThinkingCap
-  Qwen3.6-27B model and `:8080` route as the primary Pi agent. It remains blind
-  to the primary reasoning, but it is not a distinct-model review. The
-  successful evidence below belongs to the former Gemma `:8081` configuration
-  and must not be used to claim that the current route is adopted.
+  flagged issue). **Current state (2026-08-03): disabled unless explicitly and
+  truthfully configured.** An independent endpoint/model is labeled
+  `independent-review`; the primary route/model is rejected unless
+  `AI_REVIEW_ALLOW_SELF=1`, in which case it is labeled `blind-self-review`.
+  The successful evidence below belongs to the former Gemma `:8081`
+  configuration and must not be used to claim that today's resident model is
+  an independent reviewer.
 
   **Historical evidence:** **Verdict (2026-07-24, first reviewer): not adopted** — the
   one real test run (a known, spec-violating bug the hidden

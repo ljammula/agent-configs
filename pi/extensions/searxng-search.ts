@@ -45,7 +45,7 @@ export default function (pi: ExtensionAPI) {
         if (!response.ok) {
           return {
             content: [{ type: "text", text: `SearXNG returned HTTP ${response.status}. Continue without web results.` }],
-            details: { error: true },
+            details: { error: true, count: 0 },
           };
         }
         payload = await response.json();
@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
                 `Continue without web results, and say so rather than guessing an answer.`,
             },
           ],
-          details: { error: true },
+          details: { error: true, count: 0 },
         };
       }
 
@@ -67,7 +67,7 @@ export default function (pi: ExtensionAPI) {
       if (results.length === 0) {
         return {
           content: [{ type: "text", text: `No results for "${params.query}".` }],
-          details: { count: 0 },
+          details: { error: false, count: 0 },
         };
       }
 
@@ -77,7 +77,7 @@ export default function (pi: ExtensionAPI) {
 
       return {
         content: [{ type: "text", text }],
-        details: { count: results.length },
+        details: { error: false, count: results.length },
       };
     },
   });

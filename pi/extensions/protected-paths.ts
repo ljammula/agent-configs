@@ -16,13 +16,28 @@
  *    lands in the right place -- a wrong write that fails loudly is
  *    recoverable, one that silently succeeds elsewhere is not.
  *
- * This is a guardrail, not a sandbox: it resolves `..` but does not chase
- * symlinks out of the tree. For real isolation use pi's sandbox/ or gondolin/
- * extensions.
+ * This is a guardrail, not a sandbox: it resolves `..` and existing symlink
+ * ancestors, but bash and child processes still need OS-level containment.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { relative, resolve } from "path";
+import { realpath } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+
+async function resolveThroughExistingAncestor(path: string): Promise<string> {
+	let cursor = path;
+	const suffix: string[] = [];
+	while (true) {
+		try {
+			return resolve(await realpath(cursor), ...suffix.reverse());
+		} catch {
+			const parent = dirname(cursor);
+			if (parent === cursor) return path;
+			suffix.push(cursor.slice(parent.length + 1));
+			cursor = parent;
+		}
+	}
+}
 
 export default function (pi: ExtensionAPI) {
 	const protectedPaths = [
@@ -40,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 
 	function isOutsideCwd(absolutePath: string, cwd: string): boolean {
 		const rel = relative(cwd, absolutePath);
-		return rel.startsWith("..");
+		return rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || resolve(rel) === rel;
 	}
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -52,22 +67,26 @@ export default function (pi: ExtensionAPI) {
 		if (!path) return undefined;
 
 		const absolutePath = resolve(ctx.cwd, path);
+		const [realCwd, resolvedTarget] = await Promise.all([
+			realpath(ctx.cwd).catch(() => resolve(ctx.cwd)),
+			resolveThroughExistingAncestor(absolutePath),
+		]);
 
-		if (protectedPaths.some((p) => absolutePath.includes(p))) {
+		if (protectedPaths.some((p) => absolutePath.includes(p) || resolvedTarget.includes(p))) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`Blocked write to protected path: ${path}`, "warning");
 			}
 			return { block: true, reason: `Path "${path}" is protected` };
 		}
 
-		if (isOutsideCwd(absolutePath, ctx.cwd)) {
+		if (isOutsideCwd(resolvedTarget, realCwd)) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`Blocked write outside working directory: ${path}`, "warning");
 			}
 			return {
 				block: true,
-				reason:
-					`Path "${path}" resolves to "${absolutePath}", which is outside the working ` +
+					reason:
+					`Path "${path}" resolves to "${resolvedTarget}", which is outside the working ` +
 					`directory "${ctx.cwd}". Write to a path inside the working directory instead ` +
 					`-- a plain relative path such as "main.go" is usually what you want.`,
 			};

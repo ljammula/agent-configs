@@ -1,293 +1,185 @@
 /**
- * Cross-model second-opinion review extension.
+ * Truthful blind-review extension.
  *
- * Phase 2 of ai-stack/local-quality-next-steps-plan.md: the previously-
- * scoped-but-never-built "blind-reviewer pass". Both ai-stack slots are
- * currently exposes ThinkingCap 27B on :8080. The review is an independent
- * inference call, not a distinct-model review, while that is the only route.
- * nothing today has one model review the other's diff before a task is
- * called done.
- *
- * On the first green run of the task's own verification command this
- * session, sends the diff since session start (working tree + any commits
- * made mid-session) plus the original task spec (the first user message) to
- * ai-stack-local with a tight review prompt. Blind by construction: the
- * reviewer sees only the diff and spec, never the first model's own
- * reasoning or self-assessment, so it can't just agree with a stated
- * conclusion. On a flagged issue, feeds it back as a fix-it turn.
- *
- * The `tool_result` handler is deliberately synchronous (not `async`) and
- * never returns the review's promise: pi awaits whatever a handler returns,
- * and this handler fires from `agent.afterToolCall`, which is awaited
- * *before* the tool result is returned to the primary model. Awaiting the
- * review here would mean the primary model sees its own "tests passed"
- * result up to REVIEW_TIMEOUT_MS late, every single time, for a check it
- * didn't ask for. The review instead runs as an untracked background
- * promise; `sendUserMessage(..., { deliverAs: "followUp" })` is safe to call
- * whether the primary run is still streaming (queues correctly) or has
- * already settled by the time the review finishes (starts a fresh turn) --
- * both paths are handled by pi's own `prompt()`, not by this extension.
- *
- * Bounded at MAX_REVIEW_ROUNDS review rounds per agent run (see
- * ai-stack/cross-model-review-bounded-loop-plan.md): each round is a real
- * extra model turn, not a free check, so the loop stops as soon as a round
- * comes back clean or the cap is hit, whichever comes first. A round is
- * only consumed once a non-empty diff has actually been submitted and
- * answered with a real (flagged or clean) verdict -- a green test run
- * before any edit, an empty diff, an identical diff to the last-reviewed
- * one, a request that times out (REVIEW_TIMEOUT_MS, combined with
- * ctx.signal), or a transient ai-stack outage doesn't burn a round -- a
- * later qualifying bash call can retry. `reviewInFlight` prevents two
- * overlapping attempts from a rapid run of qualifying bash calls before the
- * first attempt resolves.
+ * The historical filename is retained so existing installations keep the
+ * same symlink. Runtime behavior is explicitly configured: an independent
+ * endpoint/model enables review; a same-route/model reviewer is disabled by
+ * default and labeled blind-self-review when explicitly allowed.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
+import { isBroadVerificationCommand, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
-const VERIFICATION_COMMAND_PATTERNS = [
-	/\bgo (?:test|build)\b/i,
-	/\bnpm test\b/i,
-	/\byarn test\b/i,
-	/\bpytest\b/i,
-	/\bmake (?:verify|test)\b/i,
-	/\bflutter (?:test|analyze)\b/i,
-	/\bcargo test\b/i,
-	/\bdart (?:test|format)\b/i,
-];
-
-const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
-// 60s (the prior value) measured too short for realistic diffs: a ~10.5k-
-// token multi-file diff (a real personal-assistant feature commit) took
-// 73.5s end-to-end against the live gemma4 endpoint, which would abort
-// under the old timeout and silently skip the review. 120s leaves headroom
-// above that measurement (see ai-stack/cross-model-review-bounded-loop-plan.md
-// validation item 4).
+export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
 const REVIEW_TIMEOUT_MS = 120_000;
 const EXEC_TIMEOUT_MS = 5000;
 const MAX_REVIEW_ROUNDS = 3;
 
-function reviewModel(): { host: string; model: string } {
-	return {
-		host: process.env.AI_STACK_HOST || "127.0.0.1",
-		model: "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
-	};
+export interface ReviewerConfig {
+	enabled: boolean;
+	kind: "independent-review" | "blind-self-review" | "disabled";
+	baseUrl?: string;
+	model?: string;
+	reason?: "missing-configuration" | "invalid-configuration" | "same-primary";
 }
 
-function messageText(content: string | { type: string; text?: string }[]): string {
-	if (typeof content === "string") return content;
-	return content
-		.filter((c) => c.type === "text")
-		.map((c) => c.text ?? "")
-		.join("\n");
-}
-
-/**
- * Formatting-only tolerance for the clean-verdict marker: strips backtick /
- * markdown-emphasis wrapping from the *edges* of the reply and trims
- * whitespace, then the caller still requires full-string equality against
- * NO_ISSUE_MARKER. Only the edges, not a global strip -- NO_ISSUE_MARKER
- * itself contains underscores, so a blanket `_` strip would corrupt the
- * marker being matched against. Deliberately not a prefix match either -- a
- * genuine finding phrased as "No issues found in the core logic, but ..."
- * must stay "flagged", not silently collapse to "clean" (see
- * ai-stack/cross-model-review-bounded-loop-plan.md's NO_ISSUE_MARKER
- * section).
- */
-function normalizeForMarkerMatch(text: string): string {
-	return text
-		.trim()
-		.replace(/^[`*_]+/, "")
-		.replace(/[`*_]+$/, "")
-		.trim();
-}
-
-/**
- * Scopes the clean-verdict check to the reply's last non-empty line instead
- * of the whole reply: a reviewer that reasons at length before a terse
- * verdict (observed live, see
- * ai-stack/cross-model-review-marker-lastline-fix-plan.md) would otherwise
- * never full-string-match NO_ISSUE_MARKER and get scored "flagged" for a
- * genuinely clean diff. Drops trailing code-fence-only lines first, since a
- * model told to "reply with exactly: X" commonly wraps X in a code block.
- */
-function extractLastNonEmptyLine(text: string): string {
-	const lines = text
-		.split("\n")
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0);
-	while (lines.length > 0 && /^```\S*$/.test(lines[lines.length - 1])) {
-		lines.pop();
-	}
-	return lines.length > 0 ? lines[lines.length - 1] : "";
-}
-
-type ReviewOutcome = "unchanged" | "no-diff" | "no-spec" | "transient" | "clean" | "flagged";
-
-interface ReviewResult {
-	outcome: ReviewOutcome;
-	/** Present on "clean" | "flagged", for the caller's lastReviewedDiff. */
-	diff?: string;
-	/** Present on "flagged" only -- the reviewer's actual finding. */
-	reviewText?: string;
-}
-
-async function runReview(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	baseSha: string | undefined,
-	lastReviewedDiff: string | undefined,
-): Promise<ReviewResult> {
-	// Diff since session start: baseSha..working-tree, so commits made
-	// mid-session are included, not just uncommitted changes.
-	const diffArgs = baseSha ? ["diff", baseSha] : ["diff"];
-	const diffResult = await pi.exec("git", diffArgs, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
-	if (!diffResult || diffResult.code !== 0) return { outcome: "transient" };
-	const diff = diffResult.stdout.trim();
-	if (!diff) return { outcome: "no-diff" }; // nothing to review yet -- don't consume a round
-	if (diff === lastReviewedDiff) return { outcome: "unchanged" }; // rerun with no edits -- don't consume a round
-
-	const leaf = ctx.sessionManager.getLeafEntry();
-	const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
-	const firstUserEntry = branch.find((e) => e.type === "message" && e.message.role === "user");
-	const spec =
-		firstUserEntry && firstUserEntry.type === "message" && firstUserEntry.message.role === "user"
-			? messageText(firstUserEntry.message.content)
-			: "";
-	if (!spec) return { outcome: "no-spec" };
-
-	const { host, model } = reviewModel();
-	const prompt = [
-		"Keep your internal reasoning short -- a few sentences at most -- then",
-		"give your verdict immediately.",
-		"",
-		"You are reviewing a code diff against its task spec. You did not write",
-		"this diff and have not seen the author's reasoning -- judge only what's",
-		"in front of you.",
-		"",
-		"Look specifically for logic bugs a passing test suite would not catch:",
-		"wrong-but-plausible fixture data, a convention from sibling code that",
-		"was not followed, an edge case the tests do not exercise.",
-		"",
-		`If you find a real, concrete issue, describe it precisely (file, what's`,
-		"wrong, why it matters). If you find nothing, reply with exactly:",
-		NO_ISSUE_MARKER,
-		"",
-		"## Task spec",
-		spec,
-		"",
-		"## Diff",
-		"```diff",
-		diff,
-		"```",
-	].join("\n");
-
-	const signals = [AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])];
-	let reviewText: string;
+function normalizeUrl(value: string): string | undefined {
 	try {
-		const res = await fetch(`http://${host}:8080/v1/chat/completions`, {
+		const url = new URL(value);
+		if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return undefined;
+		return url.toString().replace(/\/$/, "");
+	} catch {
+		return undefined;
+	}
+}
+
+export function resolveReviewerConfig(env: NodeJS.ProcessEnv = process.env): ReviewerConfig {
+	const rawBaseUrl = env.AI_REVIEW_BASE_URL;
+	const model = env.AI_REVIEW_MODEL?.trim();
+	if (!rawBaseUrl || !model) return { enabled: false, kind: "disabled", reason: "missing-configuration" };
+	const baseUrl = normalizeUrl(rawBaseUrl);
+	if (!baseUrl) return { enabled: false, kind: "disabled", reason: "invalid-configuration" };
+
+	const primaryBaseUrl = normalizeUrl(
+		env.AI_PRIMARY_BASE_URL ?? `http://${env.AI_STACK_HOST || "127.0.0.1"}:8080/v1`,
+	);
+	const primaryModel = env.AI_PRIMARY_MODEL ?? "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit";
+	const samePrimary = baseUrl === primaryBaseUrl && model === primaryModel;
+	if (samePrimary && env.AI_REVIEW_ALLOW_SELF !== "1") {
+		return { enabled: false, kind: "disabled", baseUrl, model, reason: "same-primary" };
+	}
+	return { enabled: true, kind: samePrimary ? "blind-self-review" : "independent-review", baseUrl, model };
+}
+
+export function normalizeForMarkerMatch(text: string): string {
+	return text.trim().replace(/^[`*_]+/, "").replace(/[`*_]+$/, "").trim();
+}
+
+export function extractLastNonEmptyLine(text: string): string {
+	const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+	while (lines.length > 0 && /^```\S*$/.test(lines.at(-1)!)) lines.pop();
+	return lines.at(-1) ?? "";
+}
+
+export async function requestReview(
+	config: ReviewerConfig,
+	spec: string,
+	diff: string,
+	signal?: AbortSignal,
+	fetchImpl: typeof fetch = fetch,
+): Promise<{ outcome: "clean" | "flagged" | "transient"; text?: string }> {
+	if (!config.enabled || !config.baseUrl || !config.model) return { outcome: "transient" };
+	const prompt = [
+		"Review this code diff only against its task spec. Focus on concrete logic bugs that passing tests may miss.",
+		`If there is no concrete issue, end with exactly ${NO_ISSUE_MARKER}.`,
+		"## Task spec", spec, "## Diff", "```diff", diff, "```",
+	].join("\n");
+	try {
+		const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				model,
-				messages: [{ role: "user", content: prompt }],
-				temperature: 0,
-			}),
-			signal: AbortSignal.any(signals),
+			body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], temperature: 0 }),
+			signal: AbortSignal.any([AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(signal ? [signal] : [])]),
 		});
-		if (!res.ok) return { outcome: "transient" };
-		const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-		reviewText = data.choices?.[0]?.message?.content?.trim() ?? "";
+		if (!response.ok) return { outcome: "transient" };
+		const body = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+		const text = body.choices?.[0]?.message?.content?.trim();
+		if (!text) return { outcome: "transient" };
+		return normalizeForMarkerMatch(extractLastNonEmptyLine(text)) === NO_ISSUE_MARKER
+			? { outcome: "clean", text }
+			: { outcome: "flagged", text };
 	} catch {
 		return { outcome: "transient" };
 	}
-
-	if (!reviewText) return { outcome: "transient" };
-
-	if (normalizeForMarkerMatch(extractLastNonEmptyLine(reviewText)) === NO_ISSUE_MARKER) {
-		// Verbose-but-clean replies are the exact failure mode last-line
-		// matching was added to tolerate -- log the full reply so a future
-		// recurrence of "verbose reasoning that isn't actually about a found
-		// issue" is auditable from session logs, not only catchable by
-		// someone happening to read a transcript by hand.
-		if (reviewText.length > 200) {
-			pi.appendEntry("cross-model-review-verbose-clean", { reviewText });
-		}
-		return { outcome: "clean", diff };
-	}
-	return { outcome: "flagged", diff, reviewText };
 }
 
-export default function (pi: ExtensionAPI) {
+function taskSpec(ctx: ExtensionContext): string {
+	const leaf = ctx.sessionManager.getLeafEntry();
+	const branch = leaf ? ctx.sessionManager.getBranch(leaf.id) : [];
+	const entry = branch.find((candidate) => candidate.type === "message" && candidate.message.role === "user");
+	if (!entry || entry.type !== "message" || entry.message.role !== "user") return "";
+	if (typeof entry.message.content === "string") return entry.message.content;
+	return entry.message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+}
+
+export default function reviewer(pi: ExtensionAPI): void {
+	const config = resolveReviewerConfig();
+	let baseSha: string | undefined;
 	let reviewCount = 0;
 	let lastReviewedDiff: string | undefined;
-	let done = false;
 	let reviewInFlight = false;
-	let baseSha: string | undefined;
+	let settled = false;
+	let runId = 0;
 
-	pi.on("agent_start", async (_event, ctx) => {
-		reviewCount = 0;
-		lastReviewedDiff = undefined;
-		done = false;
-		reviewInFlight = false;
-		baseSha = undefined;
-		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
-		if (result && result.code === 0) {
-			baseSha = result.stdout.trim();
-		}
+	pi.on("session_start", () => {
+		appendHarnessTrace(pi, {
+			extension: "reviewer",
+			diffHash: null,
+			event: "startup",
+			outcome: config.enabled ? "pass" : "blocked",
+			durationMs: 0,
+			metadata: {
+				kind: config.kind,
+				baseUrl: config.baseUrl ?? null,
+				model: config.model ?? null,
+				reason: config.reason ?? null,
+			},
+		});
 	});
 
-	// Deliberately synchronous: see file header for why this must not return
-	// (and therefore pi must not await) the review's promise.
+	pi.on("agent_start", async (_event, ctx) => {
+		runId += 1;
+		reviewCount = 0;
+		lastReviewedDiff = undefined;
+		reviewInFlight = false;
+		settled = false;
+		if (baseSha) return;
+		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
+		if (result?.code === 0) baseSha = result.stdout.trim();
+	});
+
 	pi.on("tool_result", (event, ctx) => {
-		if (done || reviewInFlight) return;
-		if (event.toolName !== "bash") return;
-		if (event.isError) return;
-		const command = event.input?.command;
-		if (typeof command !== "string") return;
-		if (!VERIFICATION_COMMAND_PATTERNS.some((re) => re.test(command))) return;
-
+		if (!config.enabled || settled || reviewInFlight || event.toolName !== "bash" || event.isError) return;
+		const command = event.input.command;
+		if (typeof command !== "string" || !isBroadVerificationCommand(command) || verificationPipelineCanMaskFailure(command)) return;
 		reviewInFlight = true;
-		runReview(pi, ctx, baseSha, lastReviewedDiff)
-			.then((result) => {
-				if (result.outcome === "unchanged" || result.outcome === "no-diff" || result.outcome === "no-spec" || result.outcome === "transient") {
-					return;
-				}
-
-				lastReviewedDiff = result.diff;
-
+		const reviewRunId = runId;
+		const startedAt = Date.now();
+		const args = baseSha ? ["diff", baseSha] : ["diff"];
+		pi.exec("git", args, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
+			.then(async (diffResult) => {
+				if (reviewRunId !== runId) return;
+				const diff = diffResult.code === 0 ? diffResult.stdout.trim() : "";
+				const spec = taskSpec(ctx);
+				if (!diff || !spec || diff === lastReviewedDiff) return;
+				const result = await requestReview(config, spec, diff, ctx.signal);
+				if (reviewRunId !== runId) return;
+				appendHarnessTrace(pi, {
+					extension: "reviewer",
+					diffHash: null,
+					event: "review",
+					outcome: result.outcome,
+					durationMs: Date.now() - startedAt,
+					metadata: { kind: config.kind, round: reviewCount + 1 },
+				});
+				if (result.outcome === "transient") return;
+				lastReviewedDiff = diff;
 				if (result.outcome === "clean") {
-					done = true;
+					settled = true;
 					return;
 				}
-
-				// flagged
 				reviewCount += 1;
-				const capHit = reviewCount >= MAX_REVIEW_ROUNDS;
-				if (capHit) done = true;
-
+				settled = reviewCount >= MAX_REVIEW_ROUNDS;
 				pi.sendUserMessage(
-					[
-						"A blind second-opinion review (ai-stack-local, diff + spec only,",
-						"no access to your reasoning) flagged a possible issue with your",
-						`passing-tests diff (review round ${reviewCount} of ${MAX_REVIEW_ROUNDS}):`,
-						"",
-						result.reviewText ?? "",
-						"",
-						"Investigate. If it's real, fix it. If it's a false positive, say why",
-						"briefly and move on.",
-						...(capHit
-							? [
-									"",
-									`This was round ${MAX_REVIEW_ROUNDS} of ${MAX_REVIEW_ROUNDS} -- no further`,
-									"automatic review will happen this session.",
-								]
-							: []),
-					].join("\n"),
+					`A ${config.kind} flagged a possible issue (round ${reviewCount}/${MAX_REVIEW_ROUNDS}):\n\n${result.text}\n\nInvestigate it against the code and spec; fix it if real, otherwise explain why it is false.`,
 					{ deliverAs: "followUp" },
 				);
 			})
-			.catch(() => {})
+			.catch(() => {
+				appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind } });
+			})
 			.finally(() => {
-				reviewInFlight = false;
+				if (reviewRunId === runId) reviewInFlight = false;
 			});
 	});
 }

@@ -1,6 +1,6 @@
 # pi harness — consolidated validation status
 
-**Current configuration audited 2026-08-02. Historical validation evidence
+**Current configuration audited 2026-08-03. Historical validation evidence
 through 2026-07-26 remains below.**
 This supersedes nothing by deleting it — it exists because the real story
 is split across ~10 documents in two repos (`agent-configs`, `ai-stack`)
@@ -21,15 +21,43 @@ time, later the same day, once that finding (and a separately-found
 new entries at the top of "What worked" and `ai-stack/cross-model-review-bounded-loop-plan.md`'s
 "Live retest, round 3" for the full writeup.
 
-## Summary
+## 2026-08-03 hardening result
 
-The current local Pi is 0.83.0 and has one resident inference route:
-`ThinkingCap-Qwen3.6-27B-MLX-8bit` on `:8080`. The enabled
-`cross-model-review.ts` now calls that same model and route as the primary
-agent. Its name is historical: the 2026-07-25 adoption evidence below came
-from Gemma on `:8081` and does **not** validate today's same-model second pass.
-Treat the deployed reviewer as enabled but unvalidated, not as an independent
-cross-model gate.
+The plan in `plans/pi-harness-hardening-plan.md` is implemented locally. The
+maintained Pi project now typechecks against pinned 0.83.0 public types and has
+53 deterministic tests covering loading, event ordering, retry caps,
+current-diff verification, shell-masked exits, reviewer truthfulness, symlink
+escapes, external-effect policy, installer scope, stack routing, and extension
+interactions.
+
+The hardened harness built and exercised the full-stack fixture in
+`~/code/test-bed/app-x` at commit `dc0769e`. Its canonical `make verify` passes
+35 tests, TypeScript checks, and a production frontend build. PostgreSQL setup
+is idempotent, tests leave the development database untouched, and HTTP smoke
+checks covered the UI shell, default categories, and holistic daily summary.
+The full trace and direct-review findings are recorded in
+`pi/evals/app-x-2026-08-02.json`; the exact post-fix deterministic baseline is
+`pi/evals/hardened-baseline-2026-08-03.json`. Narrative findings are in
+`pi-harness-hardening-observations.md`.
+
+Two acceptance boundaries remain intentionally not adopted:
+
+- No distinct resident reviewer is configured, so automatic review is
+  disabled rather than mislabeled or promoted from historical Gemma evidence.
+- Docker is unavailable on this Mac. The containment Dockerfile and launcher
+  pass static shell/install checks, but R-5's live escape matrix is not proven.
+- `continuation-nudge.ts` and `co-change-suggest.ts` remain source-tested but
+  are removed from the installed runtime until randomized paired evidence meets
+  the current adoption threshold.
+
+## Historical summary (superseded where the result above differs)
+
+Before this hardening pass, local Pi 0.83.0 had one resident inference route:
+`ThinkingCap-Qwen3.6-27B-MLX-8bit` on `:8080`, and the enabled
+`cross-model-review.ts` called that same model and route as the primary agent.
+The 2026-07-25 adoption evidence below came from Gemma on `:8081` and did
+**not** validate that same-model second pass. The 2026-08-03 implementation
+above replaced this state with truthful configuration and default disablement.
 
 Of the other judgment-dependent extensions, `co-change-suggest.ts` is adopted
 on useful but single-case retrospective evidence, while
@@ -37,11 +65,11 @@ on useful but single-case retrospective evidence, while
 evidence for its widened behavior. `full-stack-dev.ts` is structurally tested
 and applies to backend-only as well as full-stack work, but has no controlled
 outcome comparison. The deterministic extensions reduce risk, but their scope
-still matters: `protected-paths.ts` intercepts Pi `write` and `edit` calls; it
-does not confine `bash`, resolve symlink escapes, or provide an OS sandbox.
-There is no maintained, committed TypeScript extension test project, so much
-of the evidence still comes from temporary mock harnesses and small-n live
-runs. The validation harness itself
+still mattered: `protected-paths.ts` intercepted Pi `write` and `edit` calls
+but did not confine `bash`, resolve symlink escapes, or provide an OS sandbox.
+There was no maintained, committed TypeScript extension test project, so much
+of the older evidence came from temporary mock harnesses and small-n live runs.
+The validation harness itself
 (`scratch-phase-validate/`) took five attempts to produce one clean batch,
 each earlier attempt killed by a different real bug. Separately, one full
 real-world feature dispatch was analyzed in depth and produced three

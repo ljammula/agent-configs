@@ -3,6 +3,7 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   },
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -42,6 +43,5 @@
   },
   "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,
-  "theme": "auto",
-  "model": "sonnet"
+  "theme": "auto"
 }

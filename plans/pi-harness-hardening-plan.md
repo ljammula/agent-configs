@@ -1,10 +1,11 @@
 # Pi harness and skill hardening plan
 
-Status: proposed
+Status: implemented locally; independent-review and container-runtime validation remain gated
 
 Date: 2026-08-02
 
-Scope: planning only; this document changes no runtime behavior
+Scope: implementation contract and acceptance criteria; runtime evidence is recorded in
+`pi/evals/` and `pi-harness-hardening-observations.md`
 
 ## Outcome
 
@@ -21,7 +22,8 @@ this machine's local-model workload.
 
 ## Non-goals
 
-- Do not implement any extension or skill in this planning PR.
+- Keep the plan as the implementation contract; record runtime changes and deviations in
+  separate evidence artifacts.
 - Do not make production deployment, database migration, infrastructure apply,
   tag creation, or force-push operations implicit side effects of autonomy.
 - Do not install one large stack-specific system prompt in every session.

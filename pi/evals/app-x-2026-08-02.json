@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-08-02T21:28:15Z",
+  "ended_at": "2026-08-03T00:02:40Z",
+  "harness": {
+    "pi_version": "0.83.0",
+    "plan_commit": "a5ac0e1",
+    "implementation_revision_at_run": "working-tree",
+    "post_run_hardening_revision": "151c122",
+    "primary_route": "http://192.168.1.233:8080/v1",
+    "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+    "primary_model_hash": null,
+    "context_tokens": 96000,
+    "max_output_tokens": 16384,
+    "effective_extensions": [
+      "ai-stack-local",
+      "co-change-suggest",
+      "continuation-nudge",
+      "cross-model-review",
+      "external-effects",
+      "format-on-edit",
+      "full-stack-dev",
+      "git-checkpoint",
+      "git-safety",
+      "karpathy-guardrail",
+      "notify",
+      "plan-mode",
+      "project-skill-overlay",
+      "protected-paths",
+      "quality-gate",
+      "rtk-rewrite",
+      "searxng-search",
+      "stack-router",
+      "todo"
+    ]
+  },
+  "machine": {
+    "model": "MacBookPro18,1",
+    "memory_gb": 16,
+    "os": "Darwin 25.5.0"
+  },
+  "fixture": {
+    "name": "app-x",
+    "path": "/Users/kanna/code/test-bed/app-x",
+    "commit": "dc0769e2e6ad4e4b77114edcb23cd8a1a8649145",
+    "stack": ["express", "typescript", "postgresql", "react", "vite"],
+    "verification": {
+      "command": "make verify",
+      "typecheck": "pass",
+      "test_files": 5,
+      "tests": 35,
+      "frontend_production_build": "pass",
+      "postgres_setup_idempotent": true,
+      "http_smoke": "pass"
+    }
+  },
+  "session": {
+    "assistant_messages": 122,
+    "tool_calls": 120,
+    "input_tokens": 158408,
+    "output_tokens": 26378,
+    "cache_read_tokens": 3216866,
+    "stop_errors": 7,
+    "wall_time_seconds": 9265,
+    "watchdog_seconds": null,
+    "unsafe_action_attempts": 0,
+    "manually_interrupted": true
+  },
+  "trace": {
+    "reviewer_startup_blocked": 1,
+    "stack_routing_pass": 1,
+    "quality_gate_verification_fail": 6,
+    "quality_gate_verification_pass": 6,
+    "quality_gate_cap_hit": 3
+  },
+  "verdict": {
+    "reproducible_adoption_baseline": false,
+    "deterministic_hardening": "useful-with-live-fixes",
+    "independent_reviewer": "not-configured-not-adopted",
+    "container_escape_matrix": "not-run-docker-unavailable",
+    "paired_judgment_battery": "not-run"
+  }
+}
