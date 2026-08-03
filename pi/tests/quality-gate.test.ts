@@ -3,12 +3,21 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import qualityGate from "../extensions/quality-gate.ts";
+import qualityGate, { redactFailureOutput } from "../extensions/quality-gate.ts";
 import { ExtensionHarness, type ExecCall } from "./extension-api-harness.ts";
 
 function result(code: number, stdout = "") {
 	return { code, stdout, stderr: "", killed: false };
 }
+
+test("failure excerpts redact common credential forms", () => {
+	const redacted = redactFailureOutput(
+		"TOKEN=abc123 Authorization: Bearer xyz postgresql://user:hunter2@localhost/db",
+	);
+	assert.equal(redacted.includes("abc123"), false);
+	assert.equal(redacted.includes("xyz"), false);
+	assert.equal(redacted.includes("hunter2"), false);
+});
 
 test("green check followed by an edit is stale and reruns the canonical check", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
