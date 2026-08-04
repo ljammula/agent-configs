@@ -55,9 +55,11 @@ Read-only local services are still worth using. The served endpoints are:
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host
-(`192.168.1.233` for the LAN box); unset, it defaults to `127.0.0.1`. Every
-script and reachability check resolves through it. Check reachability before
-relying on any of them — these instructions load on machines without the stack.
+(`kannasmacstudio.lan` for the LAN box -- a stable router-assigned hostname,
+not the raw DHCP IP, since that address has changed on every reboot); unset,
+it defaults to `127.0.0.1`. Every script and reachability check resolves
+through it. Check reachability before relying on any of them — these
+instructions load on machines without the stack.
 
 A local model self-corrects mechanical mistakes but not logic bugs. Treat its
 output as evidence to verify, never as a trusted result.

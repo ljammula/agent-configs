@@ -32,7 +32,9 @@ remains compatible with the proxy's stale-model guard.
 
 The script does its own reachability check -- do not pre-flight it with a
 separate `curl`. (`AI_STACK_HOST` points at a LAN-served stack when the
-instance isn't local, currently `192.168.1.233` here; unset it defaults to localhost.)
+instance isn't local, `kannasmacstudio.lan` here (a stable router-assigned
+hostname, not the raw DHCP IP -- that changes on every reboot); unset it
+defaults to localhost.)
 If it exits `not reachable` — the stack is down or the resident model is not
 available — relay that one line and Read the file directly instead.
 
