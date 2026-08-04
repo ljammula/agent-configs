@@ -117,6 +117,32 @@ pass -- it is now an honestly-measured cost of the harness actually running
 its verification, not a bug-distorted number. Full record:
 `pi/evals/full-screening-2026-08-03.json`.
 
+### Pair 4 deep-dive: a real model limit, not a harness regression
+
+Pair 4 (go-flutter/bookmarks-app) was the only task both arms failed, in both
+the full battery and an independent standalone rerun. Both failures have the
+identical signature: `go test -race` catches a data race in
+`handleVisit()` -- the mutex correctly guards the visit-counter increment, but
+the handler marshals the response JSON from the shared `*Bookmark` pointer
+*after* releasing the lock, so a concurrent visit can race the read. The task
+spec explicitly calls this endpoint out as "the primary concurrency stress
+point," and both baseline and harness independently wrote the same class of
+bug -- a genuine 27B-model concurrency-reasoning gap, unrelated to either
+harness fix.
+
+The harness arm's session for this task is also the battery's token-usage
+outlier (37-38 assistant turns, ~487-492K cumulative prompt tokens, driven by
+quality-gate's corrective-follow-up loop retrying against a bug it couldn't
+repair). Breaking that total down by field (37-turn rerun session) shows APC
+absorbing nearly all of it: 21,418 fresh/uncached input tokens vs. 464,956
+cache reads (95.6%). The real cost of this outlier session is not ~490K
+tokens of fresh compute -- it's sustaining a large, continuously-growing KV
+cache resident in GPU-wired memory for the session's full multi-minute
+duration, which is a more plausible driver of host memory pressure during a
+long multi-hour battery than raw token throughput. `sum_cacheWrite=0` for
+that session is unexplained and worth checking against `ai-stack`'s own APC
+accounting. Full record: `pi/evals/pair4-race-condition-2026-08-03.json`.
+
 ## What the run taught us
 
 1. **Loading support modules as extensions is unsafe.** The first launch failed
