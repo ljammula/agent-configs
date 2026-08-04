@@ -5,7 +5,8 @@ Status: implemented locally; independent-review and container-runtime validation
 Date: 2026-08-02
 
 Scope: implementation contract and acceptance criteria; runtime evidence is recorded in
-`pi/evals/` and `pi-harness-hardening-observations.md`
+`pi/evals/`, current status in `pi-harness-validation-status.md`, and the full
+dated investigation in `pi-harness-history.md`
 
 ## Outcome
 

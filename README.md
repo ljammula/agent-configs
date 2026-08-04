@@ -13,8 +13,9 @@ records, and a Docker containment profile. The same-model reviewer is disabled
 by default because it has not earned independent-review status. Docker is not
 installed on this host, so the containment profile is statically verified but
 its escape matrix remains unproven. See
-[the observations](pi-harness-hardening-observations.md) and
-[`pi/evals/`](pi/evals/) for exact evidence and limitations.
+[pi-harness-validation-status.md](pi-harness-validation-status.md) for current
+status, [pi-harness-history.md](pi-harness-history.md) for the full dated
+investigation, and [`pi/evals/`](pi/evals/) for exact evidence.
 
 The local inference routes used by the machine-conditional skills are recorded
 in [local-ai-stack.md](local-ai-stack.md), including current model ids, runtime
