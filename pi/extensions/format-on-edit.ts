@@ -1,5 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolve } from "path";
+import { access } from "node:fs/promises";
+import { join, resolve } from "path";
+
+const JS_TS_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
+
+async function exists(path: string): Promise<boolean> {
+  return access(path).then(() => true, () => false);
+}
 
 // Port of claude/hooks/format-on-edit.sh (a PostToolUse hook) to pi's
 // tool_result event.
@@ -23,6 +30,14 @@ export default function (pi: ExtensionAPI) {
       await pi.exec("gofmt", ["-w", absolutePath], { timeout: 10000 }).catch(() => undefined);
     } else if (absolutePath.endsWith(".dart")) {
       await pi.exec("dart", ["format", absolutePath], { timeout: 30000 }).catch(() => undefined);
+    } else if (JS_TS_EXTENSIONS.some((ext) => absolutePath.endsWith(ext))) {
+      // Unlike gofmt/dart format, there's no formatter bundled with the
+      // language itself -- only run prettier if the repo actually installed
+      // it, never via npx (which would silently fetch from the network).
+      const prettierBin = join(ctx.cwd, "node_modules", ".bin", "prettier");
+      if (await exists(prettierBin)) {
+        await pi.exec(prettierBin, ["--write", absolutePath], { timeout: 10000 }).catch(() => undefined);
+      }
     }
 
     // Returning undefined leaves the tool result untouched: the model should

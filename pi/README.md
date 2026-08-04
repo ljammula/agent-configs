@@ -34,9 +34,10 @@ provide repeatable type and behavior checks. `quality-gate.ts` binds passing
 evidence to the current diff hash, rejects truncated or shell-masked results,
 runs the repository's canonical broad check directly at settlement, and caps
 automatic corrective follow-ups at three. `stack-router.ts` selects only
-portable Go, Python, Flutter, PostgreSQL, Kafka, Temporal, and GCP guidance from
-repository evidence. Versioned trace entries support later evaluation without
-recording prompts, source, secrets, or full command output.
+portable Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka,
+Temporal, and GCP guidance from repository evidence. Versioned trace entries
+support later evaluation without recording prompts, source, secrets, or full
+command output.
 
 ## Launching pi
 

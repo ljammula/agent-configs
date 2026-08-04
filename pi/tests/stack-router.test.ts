@@ -38,6 +38,11 @@ test("an unrelated backend directory receives no DayTrix or stack instruction", 
 	assert.deepEqual(await routeStackSkills(cwd), []);
 });
 
+test("routes TypeScript/JavaScript from package.json presence", async () => {
+	const cwd = await fixture({ "package.json": "{\"name\": \"app\"}\n" });
+	assert.deepEqual(await routeStackSkills(cwd), ["typescript-service"]);
+});
+
 test("skips dependency and build trees while collecting stack evidence", async () => {
 	const cwd = await fixture({
 		"pyproject.toml": "dependencies = ['psycopg']\n",

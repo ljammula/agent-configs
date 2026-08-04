@@ -8,6 +8,7 @@ export type StackSkill =
 	| "go-service"
 	| "python-service"
 	| "flutter-app"
+	| "typescript-service"
 	| "postgres-change"
 	| "kafka-processing"
 	| "temporal-go"
@@ -49,6 +50,7 @@ export async function routeStackSkills(cwd: string): Promise<StackSkill[]> {
 	if (goMod) skills.push("go-service");
 	if (pyproject) skills.push("python-service");
 	if (pubspec) skills.push("flutter-app");
+	if (packageJson) skills.push("typescript-service");
 	if (goMod && /go\.temporal\.io\/sdk/.test(goMod)) skills.push("temporal-go");
 	if (/kafka|confluent/.test(dependencyText)) skills.push("kafka-processing");
 	const hasMigrations = names.some((name) => /(^|\/)(migrations?|schema)(\/|$)/i.test(name));
