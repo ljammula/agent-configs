@@ -284,11 +284,16 @@ def execute_arm(
         )
     except subprocess.TimeoutExpired as error:
         timed_out = True
+        # TimeoutExpired.stdout/.stderr are captured as raw bytes even though
+        # text=True was passed to subprocess.run() -- only the normal
+        # CompletedProcess return path decodes them. Decode here so the later
+        # Path.write_text(), JSON parsing, and string concatenation on
+        # pi_result.stdout/.stderr don't raise TypeError on a timed-out arm.
         pi_result = subprocess.CompletedProcess(
             command,
             124,
-            error.stdout or "",
-            error.stderr or "",
+            (error.stdout or b"").decode(errors="replace") if isinstance(error.stdout, bytes) else (error.stdout or ""),
+            (error.stderr or b"").decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or ""),
         )
     harness_seconds = time.monotonic() - started
 

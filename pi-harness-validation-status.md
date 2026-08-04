@@ -25,10 +25,11 @@ new entries at the top of "What worked" and `ai-stack/cross-model-review-bounded
 
 The plan in `plans/pi-harness-hardening-plan.md` is implemented locally. The
 maintained Pi project now typechecks against pinned 0.83.0 public types and has
-59 deterministic tests covering loading, event ordering, retry caps,
+64 deterministic tests covering loading, event ordering, retry caps,
 current-diff verification, shell-masked exits, reviewer truthfulness, symlink
-escapes, external-effect policy, installer scope, stack routing, and extension
-interactions.
+escapes, external-effect policy, installer scope, stack routing, extension
+interactions, nested verification manifests, and stale-extension-context
+handling.
 
 The hardened harness built and exercised the full-stack fixture in
 `~/code/test-bed/app-x` at commit `dc0769e`. Its canonical `make verify` passes

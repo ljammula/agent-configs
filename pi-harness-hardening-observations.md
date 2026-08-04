@@ -205,9 +205,12 @@ accounting. Full record: `pi/evals/pair4-race-condition-2026-08-03.json`.
   `npm audit fix`, lock-only update, dedupe, and a compatible 5.0.9 override did
   not replace Pi's nested resolution. The omit-dev audit is zero, but the full
   development audit is not; this remains an upstream/pinning limitation.
-- The later randomized screen completed only four of nine planned pairs. It is
-  negative interim evidence, not a completed adoption battery or a basis for
-  enabling a judgment-dependent default.
+- The first randomized screen attempt was stopped after four of nine planned
+  pairs and was negative interim evidence only, not a completed adoption
+  battery. It was superseded by a completed nine-of-nine-pair rerun after the
+  two defects it exposed were fixed -- see "Fixes for the two reliability
+  gaps, and the completed nine-pair screen" above and
+  `pi/evals/full-screening-2026-08-03.json` for the current result.
 
 Machine-readable aggregates are in `pi/evals/app-x-2026-08-02.json`; the exact
 post-fix deterministic baseline is `pi/evals/hardened-baseline-2026-08-03.json`.
