@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-03",
+  "purpose": "deep-dive on pair 4 (go-flutter/bookmarks-app), the one task both arms failed in the completed nine-pair battery",
+  "related": "pi/evals/full-screening-2026-08-03.json",
+  "root_cause": {
+    "failure": "go test -race: TestConcurrentVisits fails with 'race detected during execution of test' in both arms, both runs",
+    "location": "server/bookmarksapi.go handleVisit()",
+    "explanation": "The mutex correctly guards the POST /bookmarks/{id}/visit increment (bm.Visits++), but bm is a *Bookmark pointer into the shared store and writeJSON(w, http.StatusOK, bm) marshals it AFTER s.mu.Unlock() -- a concurrent visit's write can race with this goroutine's read during JSON encoding. Fix would be to copy the value (resp := *bm) or encode while still holding the lock.",
+    "spec_note": "local-model-bench task spec explicitly calls this out: 'This is the primary concurrency stress point: many concurrent visits to the same bookmark must all be counted (no lost updates).' Both baseline and hardened-harness independently wrote the same class of bug -- a genuine 27B-model concurrency-reasoning gap, not something targeted by either harness fix (nested-manifest verification, stale-context handling)."
+  },
+  "runs": [
+    {
+      "source": "full nine-pair battery (seed 20260802)",
+      "baseline": {"passed": false, "hidden_test_exit": 1, "seconds": 375.21, "usage": {"prompt_tokens": 83030, "completion_tokens": 4540, "assistant_messages": 8, "tool_calls": 9}},
+      "harness": {"passed": false, "hidden_test_exit": 1, "seconds": 378.473, "quality_gate": "fail", "usage": {"prompt_tokens": 481920, "completion_tokens": 6018, "assistant_messages": 38, "tool_calls": 37}}
+    },
+    {
+      "source": "standalone rerun, same task and arm order, to rule out stochastic result",
+      "baseline": {"passed": false, "hidden_test_exit": 1, "seconds": 180.39, "usage": {"prompt_tokens": 102588, "completion_tokens": 4639, "assistant_messages": 11, "tool_calls": 14}},
+      "harness": {"passed": false, "hidden_test_exit": 1, "seconds": 398.801, "usage": {"prompt_tokens": 486374, "completion_tokens": 6086, "assistant_messages": 37, "tool_calls": 36}}
+    }
+  ],
+  "reproducibility": "Both arms failed with the identical race-condition failure signature across two independent runs -- this is a consistent capability limit for this task, not a stochastic one-off.",
+  "harness_token_breakdown": {
+    "note": "run_screening.py's prompt_tokens is a cumulative sum of usage.input + usage.cacheRead + usage.cacheWrite across every assistant turn in the session, so the large total does not mean that many tokens were freshly computed -- APC (automatic prefix caching) on the :8080 route serves most of a growing session's repeated prefix from cache.",
+    "source_run": "rerun harness arm (37 assistant turns, /private/tmp/pi-screen-04-harness-q5i_1phh/pi-output.jsonl)",
+    "sum_input_fresh_uncached": 21418,
+    "sum_cacheRead_served_from_cache": 464956,
+    "sum_cacheWrite": 0,
+    "sum_output": 6086,
+    "cache_read_share_pct": 95.6,
+    "interpretation": "Only ~4.4% of the reported prompt-token total was fresh compute; APC absorbed the rest. The real cost of this outlier session is not ~490K tokens of fresh GPU work -- it's sustaining a large, continuously-growing KV cache resident for the session's full ~37-turn, multi-minute duration, which is the more plausible driver of host memory pressure during a long multi-hour battery than raw token throughput. sum_cacheWrite=0 is unexplained (expected at least an initial prefix write) and worth checking against ai-stack's own APC accounting rather than assumed to be a real gap."
+  }
+}

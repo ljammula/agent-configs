@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { routeStackSkills } from "../extensions/stack-router.ts";
+import stackRouter, { routeStackSkills } from "../extensions/stack-router.ts";
+import { ExtensionHarness } from "./extension-api-harness.ts";
 
 async function fixture(files: Record<string, string>): Promise<string> {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-stack-"));
@@ -37,6 +38,11 @@ test("an unrelated backend directory receives no DayTrix or stack instruction", 
 	assert.deepEqual(await routeStackSkills(cwd), []);
 });
 
+test("routes TypeScript/JavaScript from package.json presence", async () => {
+	const cwd = await fixture({ "package.json": "{\"name\": \"app\"}\n" });
+	assert.deepEqual(await routeStackSkills(cwd), ["typescript-service"]);
+});
+
 test("skips dependency and build trees while collecting stack evidence", async () => {
 	const cwd = await fixture({
 		"pyproject.toml": "dependencies = ['psycopg']\n",
@@ -44,4 +50,17 @@ test("skips dependency and build trees while collecting stack evidence", async (
 		"build/schema/001.sql": "create table y(id int);",
 	});
 	assert.deepEqual(await routeStackSkills(cwd), ["python-service"]);
+});
+
+test("a stale extension context after session replacement does not crash the turn", async () => {
+	const cwd = await fixture({ "go.mod": "module x\n" });
+	const harness = new ExtensionHarness({
+		cwd,
+		appendEntry: () => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		},
+	});
+	stackRouter(harness.api);
+	const results = await harness.emit({ type: "before_agent_start", systemPrompt: "base" } as any);
+	assert.deepEqual(results, [undefined]);
 });

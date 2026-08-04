@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
+import { isStaleContextError } from "./lib/stale-context.ts";
 import {
 	evidencePassesCurrentDiff,
 	isBroadVerificationCommand,
@@ -57,28 +58,32 @@ export default function qualityGate(pi: ExtensionAPI): void {
 		if (event.toolName !== "bash") return;
 		const command = event.input.command;
 		if (typeof command !== "string" || !isBroadVerificationCommand(command)) return;
-		const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
-		const inconclusive = verificationPipelineCanMaskFailure(command) || truncated(event.details);
-		evidence = {
-			command,
-			diffHash: snapshot.hash,
-			startedAt: starts.get(event.toolCallId) ?? Date.now(),
-			endedAt: Date.now(),
-			exitCode: event.isError || inconclusive ? 1 : 0,
-			truncated: truncated(event.details),
-		};
-		appendHarnessTrace(pi, {
-			extension: "quality-gate",
-			diffHash: snapshot.hash,
-			event: "verification",
-			outcome: evidence.exitCode === 0 ? "pass" : "fail",
-			durationMs: evidence.endedAt - evidence.startedAt,
-			metadata: {
-				commandHash: commandHash(command),
-				pipedWithoutPipefail: verificationPipelineCanMaskFailure(command),
-				truncated: evidence.truncated,
-			},
-		});
+		try {
+			const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+			const inconclusive = verificationPipelineCanMaskFailure(command) || truncated(event.details);
+			evidence = {
+				command,
+				diffHash: snapshot.hash,
+				startedAt: starts.get(event.toolCallId) ?? Date.now(),
+				endedAt: Date.now(),
+				exitCode: event.isError || inconclusive ? 1 : 0,
+				truncated: truncated(event.details),
+			};
+			appendHarnessTrace(pi, {
+				extension: "quality-gate",
+				diffHash: snapshot.hash,
+				event: "verification",
+				outcome: evidence.exitCode === 0 ? "pass" : "fail",
+				durationMs: evidence.endedAt - evidence.startedAt,
+				metadata: {
+					commandHash: commandHash(command),
+					pipedWithoutPipefail: verificationPipelineCanMaskFailure(command),
+					truncated: evidence.truncated,
+				},
+			});
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
+		}
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
@@ -160,6 +165,8 @@ export default function qualityGate(pi: ExtensionAPI): void {
 					(capHit ? " The correction cap is now reached; report the remaining failure truthfully if it cannot be fixed." : ""),
 				{ deliverAs: "followUp" },
 			);
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
 		} finally {
 			settling = false;
 		}

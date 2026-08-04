@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-03",
+  "status": "complete-nine-of-nine-pairs",
+  "security_scoring": "out-of-scope",
+  "seed": 20260802,
+  "pi_version": "0.83.0",
+  "agent_configs_revision": "056b914-plus-stale-context-and-nested-manifest-fixes",
+  "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+  "supersedes": "pi/evals/partial-screening-2026-08-02.json",
+  "fixes_since_partial_screen": [
+    "resolveVerificationCommand() now falls back to a bounded nested-directory scan for Makefile/go.mod/pubspec.yaml/etc. when the repo root has none, instead of returning unconfigured (pi/extensions/lib/verification.ts)",
+    "stack-router.ts and quality-gate.ts catch and skip Pi's documented stale-extension-context error (thrown after auto-compaction/session reload) instead of crashing the turn (pi/extensions/lib/stale-context.ts)"
+  ],
+  "design": {
+    "baseline": "stock Pi with only the ai-stack provider shim",
+    "candidate": "installed Pi harness",
+    "execution": "strictly sequential",
+    "randomized": ["task order", "within-pair arm order"],
+    "hidden_tests_overlaid_after_agent_exit": true,
+    "pairs_planned": 9,
+    "pairs_completed": 9
+  },
+  "aggregate": {
+    "baseline_hidden_test_passes": 7,
+    "harness_hidden_test_passes": 8,
+    "baseline_valid_runs": 9,
+    "harness_valid_runs": 9,
+    "baseline_extension_errors": 0,
+    "harness_extension_errors": 0,
+    "quality_gate_unconfigured_outcomes": 0,
+    "median_paired_runtime_ratio": 2.0031102096010818,
+    "median_paired_runtime_overhead_pct": 100.31102096010818,
+    "baseline_prompt_tokens": 310220,
+    "harness_prompt_tokens": 969683,
+    "prompt_token_delta_pct": 212.6,
+    "baseline_completion_tokens": 12551,
+    "harness_completion_tokens": 17550,
+    "completion_token_delta_pct": 39.8,
+    "connection_errors": 0
+  },
+  "pairs": [
+    {"pair": 1, "task": "go-flutter/notes-app", "baseline": {"hidden_tests": "fail", "seconds": 397.322}, "harness": {"hidden_tests": "pass", "seconds": 357.927, "quality_gate": "fail"}},
+    {"pair": 2, "task": "go/notes-api", "baseline": {"hidden_tests": "pass", "seconds": 256.565}, "harness": {"hidden_tests": "pass", "seconds": 480.092, "quality_gate": "pass"}},
+    {"pair": 3, "task": "dart/task-manager", "baseline": {"hidden_tests": "pass", "seconds": 53.63}, "harness": {"hidden_tests": "pass", "seconds": 243.474, "quality_gate": "fail"}},
+    {"pair": 4, "task": "go-flutter/bookmarks-app", "baseline": {"hidden_tests": "fail", "seconds": 375.21}, "harness": {"hidden_tests": "fail", "seconds": 378.473, "quality_gate": "fail"}},
+    {"pair": 5, "task": "dart/sequential-runner", "baseline": {"hidden_tests": "pass", "seconds": 21.264}, "harness": {"hidden_tests": "pass", "seconds": 143.934, "quality_gate": "fail"}},
+    {"pair": 6, "task": "dart/notes-app", "baseline": {"hidden_tests": "pass", "seconds": 150.33}, "harness": {"hidden_tests": "pass", "seconds": 357.183, "quality_gate": "fail"}},
+    {"pair": 7, "task": "go/lru-cache", "baseline": {"hidden_tests": "pass", "seconds": 36.975}, "harness": {"hidden_tests": "pass", "seconds": 74.065, "quality_gate": "pass"}},
+    {"pair": 8, "task": "go/lru-cache", "baseline": {"hidden_tests": "pass", "seconds": 37.126}, "harness": {"hidden_tests": "pass", "seconds": 116.747, "quality_gate": "pass"}},
+    {"pair": 9, "task": "go/notes-api", "baseline": {"hidden_tests": "pass", "seconds": 69.117}, "harness": {"hidden_tests": "pass", "seconds": 84.815, "quality_gate": "pass"}}
+  ],
+  "verdict": {
+    "scope": "operational hardening, full nine-pair battery",
+    "reliability_result": "demonstrated",
+    "reliability_reason": "Zero extension errors and zero quality-gate unconfigured outcomes across all 18 runs, versus two lifecycle failures and two unconfigured outcomes in the four-pair partial screen. The two identified defects (nested-manifest blind spot, stale-context crash) did not recur.",
+    "correctness_result": "at-or-above-baseline",
+    "correctness_reason": "Harness hidden-test passes (8/9) matched or exceeded baseline (7/9); the only harness loss (pair 4) was a shared failure baseline also hit.",
+    "overhead_result": "not-demonstrated",
+    "overhead_reason": "Median paired runtime overhead is 100.3% and prompt-token overhead is 212.6%, both well above the plan's 20% screening threshold. This is higher than the partial screen's 58.3%/147%, because quality-gate now actually executes its nested-manifest verification and corrective-follow-up loop instead of silently no-opping (unconfigured) or crashing partway through -- the safety net doing its job costs real tokens and wall time.",
+    "overall": "The two reliability defects found in the interim screen are fixed and did not reproduce across a full nine-pair battery. The harness is no longer unreliable, and its task correctness is competitive with baseline. It remains meaningfully more expensive in tokens and wall time than the plan's adoption threshold, which is a real, unresolved cost -- not a defect masked by a bug this time, but the harness's actual price for running full verification."
+  }
+}

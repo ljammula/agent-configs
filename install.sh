@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORCE="${1:-}"
 
 PORTABLE_SKILLS=(karpathy-guidelines local-search local-summarize docs-verify)
-PI_STACK_SKILLS=(go-service python-service flutter-app postgres-change kafka-processing temporal-go gcp-deploy)
+PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgres-change kafka-processing temporal-go gcp-deploy)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 

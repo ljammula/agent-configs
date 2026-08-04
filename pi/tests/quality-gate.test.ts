@@ -126,6 +126,40 @@ test("failed canonical checks nudge at most three times and record cap hit", asy
 	assert.equal(harness.entries.some((entry) => (entry.data as any)?.outcome === "cap-hit"), true);
 });
 
+test("a stale extension context during tool_result does not crash the turn", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-stale-tool-"));
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+			if (command === "git") throw new Error("This extension ctx is stale after session replacement or reload.");
+			return result(1);
+		},
+	});
+	qualityGate(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	await assert.doesNotReject(
+		harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any),
+	);
+});
+
+test("a stale extension context during agent_settled does not crash the turn", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-stale-settle-"));
+	await writeFile(join(cwd, "Makefile"), "verify:\n\t@true\n");
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+			if (command === "git" && args[0] === "diff") return result(0, "diff");
+			if (command === "git" && args[0] === "status") throw new Error("This extension ctx is stale after session replacement or reload.");
+			return result(1);
+		},
+	});
+	qualityGate(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	await assert.doesNotReject(harness.emit({ type: "agent_settled" } as any));
+});
+
 test("an unconfigured repository records evidence instead of guessing success", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-empty-"));
 	const harness = new ExtensionHarness({

@@ -2,11 +2,13 @@ import { opendir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
+import { isStaleContextError } from "./lib/stale-context.ts";
 
 export type StackSkill =
 	| "go-service"
 	| "python-service"
 	| "flutter-app"
+	| "typescript-service"
 	| "postgres-change"
 	| "kafka-processing"
 	| "temporal-go"
@@ -48,6 +50,7 @@ export async function routeStackSkills(cwd: string): Promise<StackSkill[]> {
 	if (goMod) skills.push("go-service");
 	if (pyproject) skills.push("python-service");
 	if (pubspec) skills.push("flutter-app");
+	if (packageJson) skills.push("typescript-service");
 	if (goMod && /go\.temporal\.io\/sdk/.test(goMod)) skills.push("temporal-go");
 	if (/kafka|confluent/.test(dependencyText)) skills.push("kafka-processing");
 	const hasMigrations = names.some((name) => /(^|\/)(migrations?|schema)(\/|$)/i.test(name));
@@ -65,21 +68,26 @@ export async function routeStackSkills(cwd: string): Promise<StackSkill[]> {
 
 export default function stackRouter(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (event, ctx) => {
-		const skills = await routeStackSkills(ctx.cwd);
-		appendHarnessTrace(pi, {
-			extension: "stack-router",
-			diffHash: null,
-			event: "routing",
-			outcome: "pass",
-			durationMs: 0,
-			metadata: { skills: skills.join(",") },
-		});
-		if (skills.length === 0) return undefined;
-		return {
-			systemPrompt:
-				event.systemPrompt +
-				`\n\nStack evidence for this repository matches these project-agnostic skills: ${skills.join(", ")}. ` +
-				"Load only the relevant skill instructions before changing that stack. This routing does not authorize deployments or external effects.",
-		};
+		try {
+			const skills = await routeStackSkills(ctx.cwd);
+			appendHarnessTrace(pi, {
+				extension: "stack-router",
+				diffHash: null,
+				event: "routing",
+				outcome: "pass",
+				durationMs: 0,
+				metadata: { skills: skills.join(",") },
+			});
+			if (skills.length === 0) return undefined;
+			return {
+				systemPrompt:
+					event.systemPrompt +
+					`\n\nStack evidence for this repository matches these project-agnostic skills: ${skills.join(", ")}. ` +
+					"Load only the relevant skill instructions before changing that stack. This routing does not authorize deployments or external effects.",
+			};
+		} catch (error) {
+			if (isStaleContextError(error)) return undefined;
+			throw error;
+		}
 	});
 }

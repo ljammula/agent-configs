@@ -1,0 +1,623 @@
+# pi harness — investigation history
+
+This is the archive for dated, narrative evidence that used to live inline in
+`pi-harness-validation-status.md`, `pi-harness-hardening-observations.md`
+(now removed — its content is preserved here in full), and `pi/README.md`.
+Those files now state only current status; this file keeps the full
+evidence trail (what was tried, what broke, what got fixed, and when) so
+nothing is lost, just moved out of the way of the current-state docs.
+
+Nothing here supersedes the current-state docs when the two disagree — treat
+this as provenance, not as the current verdict.
+
+## From `pi-harness-hardening-observations.md` (implementation record, 2026-08-03)
+
+This is the implementation record for `plans/pi-harness-hardening-plan.md`.
+The real validation task was saved first as
+`~/code/test-bed/app-x/VALIDATION-TASK.md`, then run with the installed Pi
+0.83.0 harness against the resident ThinkingCap Qwen3.6-27B model. The
+hardened runtime and deterministic suite are pinned by commit `151c122`.
+
+### Outcome
+
+Pi produced a coherent full-stack personal command center at app commit
+`dc0769e`: editable browser voice capture, text logging, PostgreSQL JSONB
+metadata, default and custom categories, timeline, holistic non-medical
+feedback, migrations, seed data, and local documentation. After direct audit,
+`make verify` passes TypeScript checks, 35 tests in five files, and a
+production Vite build. Repeated migration/seed setup remains at four default
+categories and five seed entries. Tests reset a separate `appx_test` schema
+and leave `appx_dev` untouched. HTTP smoke checks passed for the frontend
+shell, categories API, and daily summary API.
+
+### Partial randomized screening battery (2026-08-02) — superseded
+
+A planned nine-pair screen compared stock Pi (only the provider shim required
+to reach the local model) with the installed harness. Task order and
+within-pair arm order were randomized from seed `20260802`, runs were
+strictly sequential, and hidden tests were overlaid only after Pi exited.
+Security controls were out of scope. The run was stopped on request after
+four complete pairs; the fifth pair was interrupted before producing a
+record and is excluded.
+
+| Task | Baseline | Harness | Harness runtime overhead |
+|---|---:|---:|---:|
+| Go+Dart notes app | pass | fail | 47% |
+| Go notes API | pass | pass | 43% |
+| Dart task manager | pass | hidden tests pass; extension lifecycle error | 1,744% |
+| Go+Dart bookmarks app | pass | pass | 69% |
+
+Across the four completed pairs, baseline hidden-test success was 4/4 and
+harness hidden-test success was 3/4. Clean operational success was 4/4 versus
+2/4 after treating the task-manager extension exceptions as a harness
+failure. There were three task-quality ties, one baseline win, and no harness
+win. The median paired runtime overhead was 58.3%; harness prompt-token
+usage was 147% higher and completion-token usage was 11.7% higher.
+
+The screen exposed two concrete reliability gaps:
+
+1. `quality-gate.ts` reported `unconfigured` on both nested Go+Dart fixtures.
+   On the notes fixture, Pi stopped after one large tool call and missed the
+   required `ArgumentError` behavior for two unknown-ID operations; hidden
+   tests caught both failures.
+2. On the Dart task-manager fixture, the generated implementation passed all
+   hidden tests, but `stack-router.ts` and `quality-gate.ts` both raised
+   Pi's stale-context error after session replacement or reload. This is a
+   harness lifecycle failure, not an inference-service failure or a reason
+   to retry the result away.
+
+This partial result did not support an operational-hardening claim. Aggregate
+evidence is in `pi/evals/partial-screening-2026-08-02.json`; the reusable
+runner is `pi/evals/run_screening.py`.
+
+### Fixes for the two reliability gaps, and the completed nine-pair screen (2026-08-03)
+
+Both gaps above were fixed directly:
+
+1. `resolveVerificationCommand()` in `pi/extensions/lib/verification.ts` now
+   falls back to a bounded breadth-first scan for nested
+   `Makefile`/`go.mod`/`pyproject.toml`/`pubspec.yaml`/`Cargo.toml`/`package.json`
+   directories when the repository root has none, building a combined
+   `(cd 'dir' && cmd ) && (cd 'dir2' && cmd2 )` command instead of returning
+   `unconfigured`.
+2. `stack-router.ts`'s `before_agent_start` handler and `quality-gate.ts`'s
+   `tool_result`/`agent_settled` handlers now catch Pi's documented
+   stale-extension-context error (`isStaleContextError()` in
+   `pi/extensions/lib/stale-context.ts`) and skip gracefully instead of
+   crashing the turn. Pi throws this error when a captured `pi`/`ctx` is used
+   after session replacement or reload -- confirmed via Pi's own
+   `session_before_compact`/`session_compact` lifecycle events as the likely
+   trigger (auto-compaction on a long run).
+
+Both fixes had new deterministic tests and the full suite passed at 64/64.
+
+The same seed-`20260802` nine-task schedule was then run to completion (all
+nine pairs, eighteen live runs, same model and host):
+
+| Task | Baseline | Harness | Harness runtime overhead |
+|---|---:|---:|---:|
+| go-flutter/notes-app | fail | pass | -10% |
+| go/notes-api | pass | pass | 87% |
+| dart/task-manager | pass | pass | 354% |
+| go-flutter/bookmarks-app | fail | fail | 1% |
+| dart/sequential-runner | pass | pass | 577% |
+| dart/notes-app | pass | pass | 138% |
+| go/lru-cache | pass | pass | 100% |
+| go/lru-cache | pass | pass | 214% |
+| go/notes-api | pass | pass | 23% |
+
+Hidden-test success was baseline 7/9, harness 8/9. There were zero extension
+errors and zero `quality-gate: unconfigured` outcomes across all eighteen
+runs; neither of the two defects above recurred. Median paired runtime
+overhead was 100.3% (prompt tokens +212.6%, completion tokens +39.8%), both
+worse than the partial screen's numbers and well above the plan's 20%
+threshold -- because the fixed quality-gate now actually runs its
+nested-manifest verification and corrective-follow-up loop on every pair
+instead of silently no-opping or crashing partway through. The partial
+screen's lower overhead number was an artifact of the safety net not doing
+its job. Full record: `pi/evals/full-screening-2026-08-03.json`.
+
+### Pair 4 deep-dive
+
+Pair 4 (go-flutter/bookmarks-app) was the only task both arms failed, in both
+the full battery and an independent standalone rerun. Both failures have the
+identical signature: `go test -race` catches a data race in `handleVisit()`
+-- the mutex correctly guards the visit-counter increment, but the handler
+marshals the response JSON from the shared `*Bookmark` pointer *after*
+releasing the lock, so a concurrent visit can race the read. The task spec
+explicitly calls this endpoint out as "the primary concurrency stress
+point," and both baseline and harness independently wrote the same class of
+bug -- a genuine 27B-model concurrency-reasoning gap, unrelated to either
+harness fix.
+
+The harness arm's session for this task is also the battery's token-usage
+outlier (37-38 assistant turns, ~487-492K cumulative prompt tokens, driven
+by quality-gate's corrective-follow-up loop retrying against a bug it
+couldn't repair). Breaking that total down by field (37-turn rerun session)
+shows APC absorbing nearly all of it: 21,418 fresh/uncached input tokens vs.
+464,956 cache reads (95.6%). The real cost of this outlier session is not
+~490K tokens of fresh compute -- it's sustaining a large, continuously-growing
+KV cache resident in GPU-wired memory for the session's full multi-minute
+duration, which is a more plausible driver of host memory pressure during a
+long multi-hour battery than raw token throughput. `sum_cacheWrite=0` for
+that session is unexplained and worth checking against `ai-stack`'s own APC
+accounting. Full record: `pi/evals/pair4-race-condition-2026-08-03.json`.
+
+### What the app-x run taught us
+
+1. **Loading support modules as extensions is unsafe.** The first launch
+   failed because top-level symlinks changed relative import resolution.
+   Shared code now lives under the installed `extensions/lib/` directory,
+   whose lack of an `index.ts` keeps it from being treated as an entry
+   point. A load test covers every installed extension against the pinned
+   public API.
+2. **The settlement event matters.** An early quality-gate version listened
+   to the wrong lifecycle boundary. In the live run, queued follow-ups
+   continued after a later green check and the nominal three-attempt cap
+   reached attempts four and five. The gate now runs on `agent_settled`,
+   refuses work once the cap is reached, and has an explicit five-settlement
+   regression test.
+3. **Exit code alone is insufficient evidence.** The trace contained
+   `npm test; echo EXIT=$?`, which can return zero even when the test fails.
+   Verification evidence now rejects unquoted pipelines without pipefail,
+   sequencing with later commands, `||`, negation, and background execution.
+   The gate reruns the canonical repository command directly when evidence
+   is missing, stale, truncated, or maskable.
+4. **A green generated suite is not a product audit.** Pi's initial 33 tests
+   missed a voice-source attribution bug, zero-count categories being
+   described as tracked, a backend entry point that never started,
+   migration/seed files that did nothing when invoked, test writes leaking
+   into the development database, and a UTC/local-day boundary error. Direct
+   audit added regression coverage and raised the suite to 35 tests.
+5. **Generated claims must match configuration.** Pi said frontend tests
+   ran, but the original Vitest include pattern excluded them. The root
+   test config now includes frontend component tests and the canonical
+   command also builds the production client.
+6. **Routing can only use evidence present at prompt time.** The greenfield
+   directory initially contained only the validation brief, so stack
+   routing correctly returned no skills. Once manifests exist, deterministic
+   tests show Go, Python, Flutter, PostgreSQL, Kafka, Temporal, and GCP
+   signals route to the corresponding portable guidance. This is a known
+   limitation for an empty repository, not a reason to inject every stack
+   skill globally.
+7. **Truthful disablement is better than false diversity.** The reviewer
+   trace recorded `blocked: missing-configuration`. With only the primary
+   Qwen route resident, no current evidence supports an independent-review
+   label. A same-primary second pass is available only as explicit
+   `blind-self-review`; it remains off by default.
+
+### Evidence boundaries (as of the 2026-08-03 implementation)
+
+- The main Pi session was manually interrupted after 2h34m because the
+  original quality-gate loop was not truly capped. The resulting trace has
+  122 assistant messages, 120 tool calls, 158,408 input tokens, 26,378
+  output tokens, 3,216,866 cached-read tokens, and seven stop errors. These
+  are diagnostic facts, not a latency or cost win.
+- A fresh no-session Pi audit completed after the lifecycle/cap correction,
+  without the runaway behavior. The maintained deterministic suite is the
+  repeatable proof for the exact cap branches.
+- The pinned Pi 0.83.0 test dependency resolves its nested `brace-expansion`
+  to 5.0.7, which npm reports as one high-severity denial-of-service
+  advisory. `npm audit fix`, lock-only update, dedupe, and a compatible
+  5.0.9 override did not replace Pi's nested resolution. The omit-dev audit
+  is zero, but the full development audit is not; this remains an
+  upstream/pinning limitation.
+
+Machine-readable aggregates are in `pi/evals/app-x-2026-08-02.json`; the
+exact post-fix deterministic baseline is
+`pi/evals/hardened-baseline-2026-08-03.json`.
+
+## From `pi-harness-validation-status.md`'s original consolidation
+
+This document started as a pure reconciliation of existing evidence (no new
+testing), checked against what's actually on disk (git logs,
+`scratch-phase-validate/results.tsv`, extension source). It was updated a
+first time, same day, with a real new live batch targeting two
+specifically-identified untested branches — see
+`ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live validation, round
+2" for the full writeup — which surfaced a new `cross-model-review.ts`
+false-positive finding. It was updated a second time, later the same day,
+once that finding (and a separately-found `continuation-nudge.ts` bug) had
+fixes landed and retested — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+"Live retest, round 3" for the full writeup.
+
+### What worked
+
+- **2026-07-26: `cross-model-review.ts`'s verbose-but-correct "clean"
+  reviewer response being misclassified as `flagged` — found, fixed, and
+  retested same day.** Real, reproduced instance during the day's live
+  validation batch — see `ai-stack/cross-model-review-bounded-loop-plan.md`'s
+  "Live validation, round 2" section. The reviewer reasoned at length and
+  correctly concluded no issue, ending its reply with the exact
+  `NO_ISSUES_FOUND` marker, but the marker-match logic required the
+  *entire* (edge-trimmed) reply to equal the marker, so the verdict was
+  scored `flagged` instead of `clean`. Fixed via
+  `cross-model-review-marker-lastline-fix-plan.md` (Fable-reviewed) and
+  landed as this repo's `715f0c7` (match against the reply's last non-empty
+  line, not the whole reply). **Retest, same evening** (see
+  `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live retest, round
+  3"): live end-to-end review pipeline still correctly flags real bugs
+  post-fix (one fresh live run caught a genuine missing-eviction bug); the
+  specific verbose-clean reviewer behavior could not be forced live on
+  demand within budget, so the fix itself was verified by running the exact
+  shipped `normalizeForMarkerMatch`/`extractLastNonEmptyLine` functions
+  (copied verbatim, not reimplemented) against the original idx13
+  reproduction text plus three other cases (adversarial near-miss,
+  fence-wrapped terse clean, accepted residual risk) — all four resolve as
+  designed.
+- **2026-07-26: `continuation-nudge.ts`'s `verificationRan` scanning the
+  whole invocation instead of since the latest ask — found, fixed, and
+  retested same day.** Real occurrence in `local-model-bench`'s
+  `go/notes-api` run: an early, unrelated `go test` pass permanently
+  disarmed the nudge for the rest of the session, so a later real
+  abandonment (after a `cross-model-review.ts` followUp flagged a bug) went
+  unnudged. Fixed as this repo's `5778d1b` (scope to since the most recent
+  user-role message). **Retest, same evening**: two live combined-extension
+  runs (`cross-model-review.ts` + `continuation-nudge.ts` together, via a
+  new `ai-stack/scratch-phase-validate/run_combined.sh`) on `notes-api` both
+  ran out the extended watchdog before completing a full dispatch (the task
+  is large enough, and the LAN box contended enough, that 420-600s wasn't
+  sufficient) — no live full-agent reproduction landed. Fell back to a
+  direct deterministic test of the shipped `verificationRan` logic (copied
+  verbatim from the extension) against a synthetic branch reproducing the
+  exact real notes-api entry sequence (early `go test` → injected review
+  followUp → prose-only abandonment): the old whole-invocation scan
+  reproduces the bug (stays silent), the new since-last-ask scan fires the
+  nudge as intended.
+- **`co-change-suggest.ts` — adopted, 2026-07-24.** Real retrospective
+  replay against `personal-assistant` (782 commits, real historical
+  dispatch). Found and fixed a real seed-selection bug along the way; with
+  the fix and real diff-derived identifiers, the target file ranked **#1 of
+  8**. Correctly produces no signal on a generic paraphrase (expected
+  scoping limit, not a bug).
+- **Historical Gemma configuration: `cross-model-review.ts` — adopted,
+  2026-07-25, reviewer = gemma-4-31B-it-OptiQ-4bit.** Caught the exact
+  known bug the original Qwen-family reviewer missed (once a
+  bounded-reasoning prompt fix was applied), then separately caught a
+  second, unseeded real bug (unbounded `order`-slice growth) on an organic
+  smoke run. The bounded-loop rewrite that followed passed 14/14 unit
+  assertions, including the adversarial near-miss case, and improved on
+  (not just matched) the original disablement case in a regression check.
+  Full timeline in "Historical `cross-model-review.ts` verdict" below — the
+  verdict flipped once, so it's worth reading in full before trusting it.
+- **`protected-paths.ts`** caught a real escape attempt live: asked to
+  write `main.go` in a temp dir, Qwen3.6-27B emitted an absolute path to an
+  unrelated directory; the guard corrected it and the model retried
+  correctly.
+- **`git-safety.ts` — adopted, 2026-07-25.** Reproduced the exact `git
+  reset --hard main` command that caused its creation, against a scratch
+  repo; confirmed blocked, repo untouched.
+- **The batch validation harness eventually produced one genuinely clean
+  27-run batch** — verified on the day: `results.tsv` on disk has 27 rows,
+  `ext_errors` is 0 throughout, no connection errors.
+- **The one real end-to-end feature dispatch** (daily-briefing-screen) had
+  genuinely good code shape and convention-following, including one
+  unprompted refactor judgment call not in the spec.
+
+### What didn't work
+
+- **The 2026-07-26-era `cross-model-review.ts` configuration was not the
+  configuration that earned adoption.** Both primary and reviewer resolved
+  to the same Qwen model on `:8080` at that point; the independently
+  trained Gemma reviewer used by the successful 2026-07-25 experiments was
+  no longer resident. (Current state: disabled unless truthfully
+  configured — see `pi-harness-validation-status.md`.)
+- **Extension regression checks were not committed as a maintained test
+  suite at that point.** Important branches were checked with temporary
+  mocks or copied helper logic, which was useful evidence but made drift
+  easy and repeatable verification harder. (Current state: 64 committed
+  deterministic tests.)
+- **`continuation-nudge.ts` had fired zero times in ~46 real trials plus 2
+  targeted attempts** as of that point — every trial to date used the
+  trigger's original, narrower form (forward-looking prose only). It was
+  widened 2026-07-25 to also catch a silent empty-content stop, the actual
+  failure mode observed once for real, but that widened path had not been
+  exercised in a single real trial since, as of this writing.
+- **`cross-model-review.ts`'s first reviewer missed a known, spec-violating
+  bug twice, at temperature 0** — the initial reason for disabling it,
+  before the reviewer was swapped to a different model family.
+- **The batch validation harness took four discarded attempts to reach one
+  clean run**, each killed by a different real bug: a hardcoded `tests/`
+  subdirectory that broke Go package resolution; a silent `sendUserMessage`
+  delivery failure that made *both* judgment-dependent extensions no-ops
+  for two entire batches without ever surfacing an error; hidden tests
+  exposed to the model before its run instead of after; and a
+  scheduled-inference-jobs window on the serving box that produced 19
+  straight connection-error failures misleadingly recorded as results.
+- **The one real feature dispatch needed 3 attempts, not 1**: it ran an
+  unprompted destructive `git reset --hard` to resolve a self-inflicted
+  branch conflict; silently stopped short of its own stated completion
+  condition once, with no tool call and no explanatory text; and shipped a
+  real, gate-missed l10n duplicate-key bug that `make verify` did not
+  catch. Its own bottom line — "the harness reduced typing, not review
+  load" — was not re-tested as of that entry, since the three fixes it
+  produced landed.
+- **A review-feedback document sat untracked in this repo for two days
+  making a claim that had already been overtaken by events** (see "Stale
+  documents" below) — a concrete instance of the staleness risk this whole
+  consolidation was created to catch.
+
+### Historical `cross-model-review.ts` verdict — it flipped once on real evidence
+
+1. **2026-07-24, first reviewer.** One real test: fed the extension's
+   actual code a real diff with a known, spec-violating bug (LRU cache —
+   `Put()` on an existing key doesn't promote it to MRU; the hidden test
+   suite catches this). Reviewer returned `NO_ISSUES_FOUND`, reproduced
+   twice at temperature 0. **Disabled**, moved to `disabled-extensions/`.
+2. **2026-07-24, same day, reviewer swapped to gemma-4-31B-it-OptiQ-4bit**
+   on the hypothesis that same-family (Qwen+Qwen) review shares blind
+   spots. First attempt degenerated (empty `content` field, garbled
+   reasoning, twice) — traced to unbounded reasoning length, not a
+   capability ceiling (control prompt worked fine). Fixed with a one-line
+   "keep reasoning short" prompt addition; re-ran the identical known-bug
+   case twice — Gemma caught it both times, byte-identical output.
+   **Re-adopted** on this basis.
+3. **2026-07-25, moved back into `extensions/`.** A separate live smoke run
+   (organic, non-seeded model output on `lru-cache`) had the Gemma reviewer
+   catch a second real bug the test suite also missed (unbounded
+   `order`-slice growth on repeated `Put`s) — an unseeded catch, a stronger
+   signal than a seeded reproduction, still n=1.
+4. **2026-07-25, bounded-loop rewrite**
+   (`cross-model-review-bounded-loop-plan.md`, reviewed by Fable before
+   implementation). Replaced the one-shot boolean with a 3-round cap,
+   outcome-typed `runReview`, and formatting-only marker tolerance.
+   Validated: 14/14 mocked-`ExtensionAPI` unit assertions (cap enforcement,
+   clean short-circuit, unchanged-diff skip, tolerant marker matching
+   across 5 wrapped forms, and the adversarial near-miss case — a real
+   finding phrased "No issues found... but ..." correctly resolves to
+   `flagged`, not `clean`); a regression check replaying the original
+   2026-07-24 disablement case against the current code (Gemma now catches
+   it — confirmed improvement, not just non-regression); 3 live end-to-end
+   runs on `lru-cache` (3/3 exercised round 1 correctly; 1/3 exercised a
+   real round-1→round-2 progression on a genuine fix; cap-hit and
+   clean-short-circuit branches were exercised only by the unit harness,
+   not live); a cost check (73.5s on a real ~40KB multi-file diff from
+   `personal-assistant`, exceeding the then-current 60s timeout — raised to
+   120s as a direct result).
+5. **2026-07-26, marker-lastline fix.** A live batch targeting the
+   still-untested round-2/round-3/clean-short-circuit branches (see item 4)
+   surfaced a new false positive instead: a verbose-but-correct clean
+   verdict scored `flagged`. Fixed same day (`715f0c7`) and retested same
+   evening — see "What worked" above. Verdict as of this item: still
+   **adopted**, not flipped again.
+
+### Full extension-by-extension table (as reconciled on 2026-07-26)
+
+| Extension | Status at the time | n | Evidence |
+|---|---|---|---|
+| `protected-paths.ts` | Adopted as a tool guard (vendored, on by default) | 1 live catch | Caught Qwen3.6-27B emitting an absolute path outside the working dir; corrective retry worked. It covers Pi `write`/`edit`, not `bash`, symlink escapes, or OS-level confinement. No formal battery. |
+| `format-on-edit.ts` | Adopted (vendored, on by default) | — | No battery; deterministic gofmt/dart-format pass, not a judgment call. |
+| `rtk-rewrite.ts` | Adopted (vendored, on by default) | — | No battery; deterministic bash-output filter. |
+| `git-checkpoint.ts` | Adopted (vendored, on by default) | — | No battery; deterministic per-turn snapshotting. |
+| `co-change-suggest.ts` | Adopted, 2026-07-24 (later default-disabled 2026-08-03 pending paired evidence — see current status doc) | 1 real retrospective case | Real retrospective replay against `personal-assistant` (782 commits, real historical dispatch). Found and fixed a real seed-selection bug along the way. With the fix and real diff-derived identifiers, target file ranked **#1 of 8**. Correctly no-signal on a generic paraphrase (expected scoping limit, not a bug). Not done at the time: the plan's second half of its kill criterion — "try it live on one new personal-assistant feature task" (forward-looking, not retrospective) — had not been run. |
+| `continuation-nudge.ts` | Not adopted at the time, kept loaded as a no-cost no-op (later default-disabled 2026-08-03 — see current status doc) | 0 firings / ~46 real trials + 2 targeted attempts, as of that point | Fired zero times outside mocked unit tests across every real trial run to date at that point. Widened 2026-07-25 to also trigger on a silent empty-content stop (the actual failure mode observed once, for real, in the daily-briefing-screen dispatch). A real `verificationRan` scoping bug found 2026-07-26 was fixed (`5778d1b`) and retested the same day via direct logic replay. |
+| `cross-model-review.ts` | Enabled but unvalidated in the (then-)current same-model configuration; historical Gemma setup adopted 2026-07-25 | see above | Current primary and reviewer were the same Qwen model on `:8080` at that point. The verdict applies to the historical Gemma reviewer on `:8081`, not that same-model second pass. (Current state as of 2026-08-03: disabled unless explicitly and truthfully configured — see current status doc.) |
+| `git-safety.ts` | Adopted, 2026-07-25 | 1 scratch-repo reproduction | Reproduced the exact `git reset --hard main` command that triggered its creation, against a scratch repo; confirmed blocked, repo untouched. |
+| Phase 4 (Aider-based failing-test retry) | Deliberately not built | n/a | Gated by the plan itself on Aider dispatch being back in scope. It isn't: `~/.claude/CLAUDE.md` and `agent-configs/pi/AGENTS.md` both record that `dispatch-local` was benchmarked and removed. |
+
+### Harness infrastructure: what was proven to work, as of 2026-07-26
+
+- **The `scratch-phase-validate/` batch harness produced exactly one
+  genuinely clean 27-run batch**: `results.tsv` on disk had 27 data rows,
+  `ext_errors` was 0 in every row, and no `Connection error` entries —
+  consistent with the "Fifth attempt superseded" narrative in
+  `local-quality-next-steps-status.md`. Getting there took four earlier
+  discarded batches, each invalidated by a different real bug (see "What
+  didn't work" above).
+- **`AI_STACK_HOST` is a real, confirmed operational fragility**, not a
+  theoretical one: any non-interactive `pi` invocation from a shell that
+  doesn't source `~/.zshrc` (cron, launchd, a sandboxed tool shell)
+  silently falls back to `127.0.0.1`, where nothing listens on this
+  machine, and fails with a bare `Connection error.` with no hint at the
+  cause. Confirmed by reproducing the failure and the fix directly.
+- **Terminal launch, verified live, 2026-07-26**: the LAN box's address had
+  changed once already at that point (DHCP reassignment,
+  `192.168.1.233` → `192.168.1.79`) — see
+  `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live retest, round
+  3" for the retest this triggered. Launched `pi` exactly as a user would
+  from a terminal — `zsh -ic 'pi --print ...'` against a real `lru-cache`
+  bug, zero explicit `--provider`/`-e`/`--no-extensions` flags. Confirmed
+  via `lsof` mid-run: an actual `ESTABLISHED` TCP connection from the `pi`
+  process to `192.168.1.79:8080`. `cross-model-review.ts` fired against
+  `192.168.1.79:8081`, flagged a real eviction bug in round 1, the model
+  fixed it, final `go test` passed, zero extension errors. (The box's
+  address has since moved to a stable hostname, `kannasmacstudio.lan` —
+  see `pi/README.md`.)
+
+### The one full real-task dispatch (not a benchmark — a case study)
+
+`pi-real-task-report-daily-briefing-screen.md`: one DayTrix feature,
+delegated end-to-end via `pi -p`, analyzed from real session JSONL
+transcripts. Required 3 dispatches, not 1; ran an unprompted destructive
+`git reset --hard` (root cause of `git-safety.ts`); silently stopped short
+of its own stated completion condition once (root cause of the
+`continuation-nudge.ts` widening); and shipped a real, gate-missed l10n
+duplicate-key bug (root cause of a new `make verify` check in
+`personal-assistant`). Code *shape* and *convention-following* were
+genuinely good, including one unprompted refactor judgment call. This is
+n=1 for "how does pi do unsupervised on a real feature," and its own bottom
+line — "the harness reduced typing, not review load" — was not re-tested as
+of that entry, since the three fixes it produced landed.
+
+### Stale documents found during the 2026-07-26 consolidation
+
+- **`agent-configs/claude-pi-quality-extensions-review-feedback.md`** (dated
+  2026-07-24, was sitting **untracked** in this repo, never committed)
+  claimed: *"the full benchmark comparison is still required ...
+  `results.tsv` has only its header, `batch.log` is empty, and there is no
+  active batch or Pi process."* This was factually superseded — the batch
+  it describes as not-yet-run is the same one that completed cleanly and is
+  recorded in `ai-stack/local-quality-next-steps-status.md`'s "Fifth
+  attempt superseded" section, with the resulting `results.tsv` still on
+  disk at the time. The file was committed with a note marking the
+  specific claim resolved, rather than silently deleted, since the rest of
+  its content (the focused deterministic-extension check results) was
+  still accurate.
+- **`ai-stack/local-quality-next-steps-status.md`** was accurate for
+  everything it covered (Phases 1-3 through the 2026-07-24 clean batch and
+  Phase 3 retrospective validation) but predated and did not mention: the
+  Gemma reviewer swap, the 2026-07-25 re-adoption of
+  `cross-model-review.ts`, the bounded-loop rewrite, `git-safety.ts`, or
+  the `continuation-nudge.ts` widening. A stale-notice pointer was added at
+  the top of that file, and it was restructured into the same
+  Summary/What worked/What didn't/Todo/Historical log shape as this file.
+
+## From `pi/README.md`: `cross-model-review.ts`'s full adoption saga
+
+The current-state summary in `pi/README.md` covers what the extension does
+and its current disabled-unless-configured status. The detailed history
+below (verdicts, live-run counts, cost checks) is kept here for provenance.
+
+**Verdict (2026-07-24, first reviewer): not adopted** — the one real test
+run (a known, spec-violating bug the hidden test suite catches) came back
+negative, reviewer returned `NO_ISSUES_FOUND`. Moved to
+`disabled-extensions/`. **Re-verdict (2026-07-25, reviewer switched to
+gemma-4-31B-it-OptiQ-4bit on :8081): adopted, moved back to `extensions/`.**
+A live smoke run against the `lru-cache` task (no seeded bug — the model's
+own organically-written solution, tests green) had the reviewer catch a
+real logic bug the test suite missed: the `order` slice grows unbounded on
+repeated `Put`s to existing keys, unpruned during updates. This is a
+stronger result than the plan's own kill criterion (an unseeded catch, not
+a seeded one) but still n=1. Directly timed the review call against this
+diff (953 prompt tokens) at 12.9s, ~20% of `REVIEW_TIMEOUT_MS` (60s).
+Separately, this same smoke run got killed by `run_one.sh`'s 180s watchdog
+(`PI_EXIT=143`) after the review's fix-it turn extended the session — a
+property of the validation harness's fixed timeout, not of real
+interactive `pi` usage, which has no such cap.
+
+**Bounded-loop rewrite (2026-07-25, `ai-stack/cross-model-review-bounded-loop-plan.md`):**
+the prior one-shot boolean (`reviewedThisRun`) was replaced with a
+`reviewCount`/`lastReviewedDiff`/`done` state machine bounded at
+`MAX_REVIEW_ROUNDS = 3`, so a flagged issue's *fix* gets re-reviewed instead
+of the loop ending after one nudge. `runReview` returns a typed
+`ReviewResult` (`unchanged | no-diff | no-spec | transient | clean |
+flagged`) instead of a bare boolean, and the clean-verdict marker match
+tolerates markdown wrapping (backticks/emphasis stripped from the string
+*edges* only) instead of requiring byte-exact equality. Validated:
+
+- **Unit-level**: 14/14 assertions pass, covering cap enforcement,
+  clean-short-circuit, unchanged-diff skip, tolerant marker matching across
+  five realistic wrapped forms, and the adversarial case Fable's plan
+  review called out (a genuine finding phrased "No issues found in the core
+  logic, but ..." resolves to `flagged`, not `clean`). This harness caught
+  a real bug in the first implementation: the marker normalizer stripped
+  `` ` * _ `` globally, which corrupted `NO_ISSUES_FOUND`'s own underscores
+  and made every clean verdict register as flagged — fixed to strip only
+  at the string's edges before this shipped.
+- **Regression check against the original disablement case**: rebuilt the
+  seeded bug that caused the 2026-07-24 disablement (`Get` fixed for
+  recency, `Put` on an *existing* key left un-touched) and ran it through
+  the extension's real, unmodified `runReview` logic against the live
+  `:8081` endpoint. No regression — an improvement: the current gemma4
+  reviewer correctly flags it, unlike the original reviewer that missed
+  this exact class on 2026-07-24.
+- **Live smoke tests**, `lru-cache` task, real `pi` + Qwen3.6-27B primary +
+  gemma4 reviewer via `scratch-phase-validate/run_one_long.sh` (watchdog
+  raised to 600s). 3 sequential runs: run 1 — round 1 flagged, model
+  rebutted it as a false positive (correctly, on inspection) and made no
+  further edit; a repeat `go build` on the identical diff correctly hit the
+  `unchanged` outcome, `PI_EXIT=0` at 156s. Run 2 — round 1 flagged a real
+  edge case; the model investigated via an ad-hoc `go run` scratch program
+  instead of rerunning a verification-matching command, so round 2
+  correctly never triggered, `PI_EXIT=0` at 220s. Run 3 — round 1 flagged a
+  real bug (`moveToBack` silently dropped new keys from the order slice),
+  the model fixed it, round 2 fired on the updated diff and flagged a
+  second issue that the model rebutted as a false positive, session ended
+  naturally with no round 3, `PI_EXIT=0` at 335s, tests green throughout.
+  Net: 3/3 real end-to-end runs exercised round 1 correctly; 1/3 exercised
+  a genuine round-1→round-2 progression on a real fix. The cap-hit (round
+  3) and clean-short-circuit branches were not observed live in these 3
+  runs but are deterministically exercised by the unit harness above.
+- **Cost check on a realistic diff size**: the prior 12.9s figure was only
+  ever measured on the 953-token `lru-cache` fixture. Timed the same
+  unmodified `runReview` HTTP call against a real multi-file feature diff
+  from `personal-assistant` (`186282ef`, ~40KB / ~10.5k prompt tokens):
+  73.5s, which exceeds the prior `REVIEW_TIMEOUT_MS` (60s). Raised
+  `REVIEW_TIMEOUT_MS` to 120s to leave headroom above the measured 73.5s.
+  Separately, on the small `lru-cache` fixture, `run_one.sh`'s real 180s
+  watchdog still killed a run mid-fix-it-turn after just one flagged round
+  (`PI_EXIT=143`, reproduced again during this validation).
+
+**Last-line marker matching (2026-07-26, `ai-stack/cross-model-review-marker-lastline-fix-plan.md`):**
+a live run showed the clean-verdict check's edge-stripped *whole-reply*
+equality scoring `flagged` on a reviewer reply that reasoned correctly
+through a bug hypothesis at length (~1500 characters) before ending with
+`NO_ISSUES_FOUND` on its own line — a false positive that burns a
+bounded-loop round on a genuinely clean diff. The check now runs
+`normalizeForMarkerMatch` against `extractLastNonEmptyLine(reviewText)`
+instead of the full reply, so a verbose-then-terse reply matches while a
+single-line near-miss like "No issues found in the core logic, but ..."
+still doesn't. This is a trade, not a strict improvement: a genuine
+multi-paragraph finding whose literal last line happens to equal the
+marker would now also resolve `clean` — an accepted, tracked residual risk,
+mitigated by logging the full raw reply via `pi.appendEntry` (session-only,
+not in LLM context) on every `clean` verdict over 200 characters. Validated:
+8/8 mocked-`ExtensionAPI` assertions, including the idx13 verbose-clean
+case, the original single-line adversarial regression, a new multi-line
+adversarial case, a fenced terse verdict, and two canaries (formatting
+variants that intentionally still don't match, and the residual risk
+itself pinned down as a currently-passing test).
+
+## From `pi/README.md`: other extensions' adoption narrative
+
+**`continuation-nudge.ts`** — Phase 1 of
+`ai-stack/local-quality-next-steps-plan.md`. **Verdict as of 2026-07-24**
+(see `ai-stack/local-quality-next-steps-status.md`): not adopted, but kept
+loaded — across ~50 real trials the trigger condition never fired outside
+deterministic mocked tests. **Updated 2026-07-25**, after a real occurrence
+in the `personal-assistant` daily-briefing-screen dispatch: the model
+stopped with `stopReason: "stop"`, no tool call, and *zero text content* —
+not forward-looking prose. The original trigger required non-empty text
+matching a forward-looking pattern and so, correctly per its own logic,
+never fired on this case. Widened to also fire on a stop-with-empty-content
+turn, and fixed a related bug found in the same review:
+`verificationRan` scanned the whole persisted `--continue` branch, so once
+*any* pass in a multi-dispatch session ran a verification command, the
+nudge was permanently disarmed for every later pass too — now scoped to the
+current invocation only. See `pi-real-task-report-daily-briefing-screen.md`
+for the full transcript analysis. **Fixed 2026-07-26**, after a real
+occurrence in `local-model-bench`'s `go/notes-api` run: the model ran
+`go test` early for its original implementation, `cross-model-review.ts`
+then flagged a real routing bug, and the model correctly diagnosed the fix
+in prose and abandoned it without a tool call — but the nudge stayed
+silent, because `verificationRan` still scanned the *whole current
+invocation*, and that early, unrelated `go test` pass permanently disarmed
+it for the rest of the session even though the abandoned fix itself was
+never verified. Now scoped to since the most recent ask instead of since
+the invocation start. See `local-model-bench/SPEC.md`'s 2026-07-26 report
+for the full transcript trace. **Updated 2026-08-02** after two Pi
+calendar-app runs stopped immediately after `flutter analyze` failed:
+verification is now tracked by outcome, so a failing check triggers a
+corrective follow-up instead of disarming the nudge.
+
+**`co-change-suggest.ts`** — Phase 3 of the same plan. **Verdict
+(2026-07-24, see `ai-stack/local-quality-next-steps-status.md`): adopted.**
+Re-ran the plan's retrospective kill criterion for real against
+`personal-assistant`'s actual mood-streak dispatch (782 commits of real
+history, checked out at the exact pre-dispatch commit): found and fixed a
+real seed-selection bug in the process (per-identifier grep counting was
+missing, so seed selection was effectively "first 5 files in git's listing
+order" with no relevance weighting). After the fix, the target file
+(`contract_matrix_phase2_test.go`) surfaced at rank #1 given a spec using
+the real identifiers from that dispatch's diff — beating the plan's own
+claimed #2 for the original script.
+
+**`git-safety.ts`** — added 2026-07-25. Added after `pi`, in `-p` mode, ran
+`git reset --hard main` unprompted to resolve a self-inflicted "branch
+already exists" conflict, discarding a prior commit; `git-checkpoint.ts`
+could have recovered it but only via `/fork`, which is interactive-UI-only
+and does nothing in `-p` mode. Each block names a safe alternative rather
+than a bare refusal, since the `flutter gen-l10n` rediscovery flail in the
+daily-briefing-screen dispatch (~8 failed bash commands in a 5-minute span)
+is direct evidence this model thrashes when blocked with no alternative
+given. Verified live: reproduced the exact command against a scratch repo,
+confirmed it's blocked and the repo's commits are untouched. See
+`pi-real-task-report-daily-briefing-screen.md`.
+
+**`AI_STACK_HOST` / terminal launch, confirmed live, 2026-07-26**: a plain
+`pi` launch from an interactive shell (no flags) opened a real connection
+to the box at the address `~/.zshrc` exported at the time
+(`192.168.1.233`). See "Terminal launch, verified live, 2026-07-26" above
+for the fuller version of this same check. The box's address has since
+moved to a stable hostname, `kannasmacstudio.lan`, specifically to stop
+this kind of note from going stale on every reboot.
