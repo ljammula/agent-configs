@@ -9,22 +9,22 @@ it.
 
 ## Current configuration
 
-Pi 0.83.0 has one resident inference route: `ThinkingCap-Qwen3.6-27B-MLX-8bit`
-on `:8080` (host `kannasmacstudio.lan`). `cross-model-review.ts` disables
-itself unless a distinct `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are set;
-same-primary review requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
-`blind-self-review`, never cross-model. The maintained Pi project typechecks
-against pinned 0.83.0 public types and has 64 deterministic tests covering
+Pi 0.83.0 has two resident inference routes: `ThinkingCap-Qwen3.6-27B-MLX-8bit`
+on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
+`:8082` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are now
+set in `~/.zshrc`, so `cross-model-review.ts` resolves to genuine
+`independent-review` rather than disabling itself; same-primary review still
+requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
+cross-model, if it's ever pointed back at the same route. The maintained Pi
+project typechecks
+against pinned 0.83.0 public types and has 67 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
 exits, reviewer truthfulness, symlink escapes, external-effect policy,
 installer scope, stack routing, extension interactions, nested verification
 manifests, and stale-extension-context handling.
 
-Three acceptance boundaries remain intentionally not adopted:
+Two acceptance boundaries remain intentionally not adopted:
 
-- No distinct resident reviewer is configured, so automatic review is
-  disabled rather than mislabeled or promoted from historical Gemma
-  evidence.
 - Docker is unavailable on this Mac. The containment Dockerfile and
   launcher pass static shell/install checks, but the live escape matrix is
   not proven.
@@ -43,7 +43,15 @@ exited) is the current operational-hardening evidence:
   failure baseline also hit — a `go test -race` data race in a
   visit-counter HTTP handler, a genuine 27B-model concurrency-reasoning
   gap, not a harness defect (detail in `pi-harness-history.md`'s pair-4
-  deep-dive).
+  deep-dive). An isolated spot-check (2026-08-03, not a paired battery run)
+  reproduced the exact bug in a standalone repro package and gave it to
+  `gemma-4-26b-a4b-it` with only the `go test -race` failure output as
+  context: it correctly diagnosed the pointer-outside-lock cause and
+  applied the same snapshot-under-lock fix `pi-harness-history.md`'s
+  root-cause note recommends; `go vet` and `go test -race` passed clean
+  against a control that reproduced the original failure. This is n=1
+  evidence Gemma may not share Qwen's concurrency-reasoning gap, not proof
+  it clears the paired-battery bar — see todo below.
 - Zero extension errors and zero `quality-gate: unconfigured` outcomes
   across all eighteen runs.
 - Median paired runtime overhead: 100.3% (prompt tokens +212.6%, completion
@@ -68,14 +76,19 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, and GCP guidance from repository evidence. Deterministic tests for all routes; only Go/Dart routes have battery coverage (see battery result above), the rest are wired and unit-tested but not battery-proven. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target file #1 of 8) does not meet the paired-adoption threshold. Live (non-retrospective) validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic branch tests pass; the widened empty-content-stop trigger has zero real-trial field evidence. |
-| `cross-model-review.ts` | Disabled unless explicitly and truthfully configured | Linked so it can report its resolved identity. No distinct reviewer route is currently resident, so it is never mislabeled as independent review. |
+| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` set in `~/.zshrc` to `gemma-4-26b-a4b-it` on `:8082`, distinct from the `:8080` Qwen primary. Deterministic tests pass (67/67); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. Not yet battery-proven — see todo. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Gated on Aider dispatch being in scope; it isn't (`~/.claude/CLAUDE.md`, benchmarked and removed). |
 
 ## Todo
 
-- Restore genuine reviewer diversity or rename/disable the current
-  reviewer, then rerun the seeded battery on the exact deployed route. Do
-  not transfer the historical Gemma verdict to the same-Qwen configuration.
+- Rerun the seeded battery with `cross-model-review.ts` live against the
+  Gemma route to get real adoption evidence for `independent-review`, not
+  just the live-checked resolution/flagging smoke test above.
+- Rerun pair 4 (go-flutter/bookmarks-app) specifically as a full paired
+  battery task, not just the isolated bug repro, to see whether Gemma's
+  spot-check win on the visit-counter race generalizes to the actual task
+  end-to-end (harness loop, quality-gate corrective retries, other tests
+  in the suite) before drawing any conclusion beyond n=1.
 - Run TypeScript/JavaScript task fixtures through the battery — currently
   routed and unit-tested only, same status as Python/Postgres/Kafka/Temporal/GCP.
 - Bind verification to the final tree/diff across all judgment-dependent

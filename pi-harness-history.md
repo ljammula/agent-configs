@@ -621,3 +621,37 @@ to the box at the address `~/.zshrc` exported at the time
 for the fuller version of this same check. The box's address has since
 moved to a stable hostname, `kannasmacstudio.lan`, specifically to stop
 this kind of note from going stale on every reboot.
+
+## `cross-model-review.ts` wired to a live Gemma route, 2026-08-04
+
+A second model, `gemma-4-26b-a4b-it`, came up on `:8082` on the same LAN
+box. Before wiring it in as the reviewer, ran two checks:
+
+1. **Throughput**: single-shot, same prompt/`max_tokens`/temp=0 on both
+   routes — Gemma ~19.9 tok/s vs. the resident Qwen route's ~24.3 tok/s
+   (~18% slower). Not disqualifying for a once-per-turn reviewer role.
+2. **Capability spot-check on the pair-4 concurrency bug**: rather than
+   trust the speed number alone, reproduced the exact `go-flutter/
+   bookmarks-app` race (see pair-4 deep-dive above — `handleVisit()`
+   marshals a shared `*Bookmark` pointer after releasing the mutex) in a
+   standalone Go package, confirmed a control build reproduces the same
+   `go test -race` failure signature, then gave Gemma only the failure
+   output (no hints toward "race condition" or "pointer") and asked it to
+   diagnose and fix. It correctly identified the read-after-unlock
+   mechanism and applied `snapshot := *bm` taken under the lock — the
+   exact fix this history file's root-cause note recommends. `go build`,
+   `go vet`, and `go test -race` all passed clean against the fix. This is
+   n=1 on an isolated repro, not a battery result — see the todo in
+   `pi-harness-validation-status.md` for the pair-4 paired-battery rerun
+   needed before drawing a broader conclusion.
+
+Set `AI_REVIEW_BASE_URL=http://${AI_STACK_HOST}:8082/v1` and
+`AI_REVIEW_MODEL=gemma-4-26b-a4b-it` in `~/.zshrc`. Verified live:
+`resolveReviewerConfig()` now resolves `{ enabled: true, kind:
+"independent-review", baseUrl: "http://kannasmacstudio.lan:8082/v1", model:
+"gemma-4-26b-a4b-it" }`, and `requestReview()` against the real endpoint
+correctly flagged a deliberately planted bug (subtraction instead of
+addition) with an accurate explanation instead of returning
+`NO_ISSUES_FOUND`. Full deterministic suite still passes 67/67 after the
+change (also corrected the validation-status doc's stale "64 deterministic
+tests" figure to the current 67 while in there).
