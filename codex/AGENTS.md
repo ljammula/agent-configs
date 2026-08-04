@@ -16,10 +16,11 @@ case the local model self-corrects mechanical mistakes but not logic bugs,
 so treat its output as evidence to review — never a trusted result.
 
 The served HTTP endpoints (code review and log triage :8080, SearXNG :8888)
-need not be on this machine: set `AI_STACK_HOST` to the serving host (currently
-`192.168.1.233` for this LAN box) and the reachability checks and scripts resolve
-there; unset, it defaults to `127.0.0.1`. Set it once in the shell environment
-so all agents inherit it.
+need not be on this machine: set `AI_STACK_HOST` to the serving host
+(`kannasmacstudio.lan` for this LAN box -- a stable router-assigned hostname,
+not the raw DHCP IP, since that address has changed on every reboot) and the
+reachability checks and scripts resolve there; unset, it defaults to
+`127.0.0.1`. Set it once in the shell environment so all agents inherit it.
 
 Current route details and performance are recorded in
 `~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the ThinkingCap

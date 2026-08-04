@@ -41,9 +41,11 @@ The read-only local services are still worth using. The served HTTP
 endpoints — code review and log triage (:8080), and SearXNG (:8888),
 used by `before-done`/`self-review`/`local-summarize`/`local-search` — do
 not have to be on this machine. Set `AI_STACK_HOST` to
-the host serving them (currently `192.168.1.233` for this LAN box) and every
-reachability check and script resolves there; unset, it defaults to
-`127.0.0.1`. Set it once in the shell environment so all agents inherit it.
+the host serving them (`kannasmacstudio.lan` for this LAN box — a
+router-assigned local hostname, not the raw DHCP IP, since that address has
+changed on every reboot) and every reachability check and script resolves
+there; unset, it defaults to `127.0.0.1`. Set it once in the shell
+environment so all agents inherit it.
 
 Current route details and performance are recorded in
 `~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the ThinkingCap

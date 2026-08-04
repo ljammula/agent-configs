@@ -467,13 +467,14 @@ would mean pi editing tracked files behind your back. Set these by hand:
 - Compaction reserve is set to 16384 (= the models' `maxTokens`) to leave
   more of the available context for actual work.
 
-`AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, currently
-`192.168.1.233` — the LAN box's address has changed before via DHCP
-reassignment, so treat this as "whatever `~/.zshrc` currently says," not a
-fixed IP) — unset, every provider points at `127.0.0.1:8080`, where nothing
-is listening on this Mac. Confirmed live, 2026-07-26: a plain `pi` launch
-from an interactive shell opened a real connection to the box at the
-address `~/.zshrc` exports, with no flags needed.
+`AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, set to
+`kannasmacstudio.lan` — the LAN box's raw IP has changed on every reboot via
+DHCP reassignment, so `~/.zshrc` points at this stable router-assigned
+hostname instead of a fixed IP) — unset, every provider points at
+`127.0.0.1:8080`, where nothing is listening on this Mac. Confirmed live,
+2026-07-26: a plain `pi` launch from an interactive shell opened a real
+connection to the box at the address `~/.zshrc` exports, with no flags
+needed.
 
 ## Deliberately not installed
 
