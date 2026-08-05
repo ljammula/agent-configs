@@ -9,7 +9,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
-import { isBroadVerificationCommand, resolveDiffTarget, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
+import { buildReviewDiff, isBroadVerificationCommand, resolveDiffTarget, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
 const REVIEW_TIMEOUT_MS = 240_000;
@@ -158,13 +158,30 @@ export default function reviewer(pi: ExtensionAPI): void {
 		// index, which is silently empty if the model staged everything with
 		// `git add` before this fires -- resolveDiffTarget's empty-tree
 		// fallback for an unborn HEAD gives a real, non-empty target instead.
+		// buildReviewDiff additionally synthesizes diff blocks for untracked
+		// files, since a bare `git diff` never shows their content -- without
+		// this, a project with nothing committed or staged yet (exactly the
+		// state new-project-scaffold.ts leaves a repo in) always sees an empty
+		// diff and never actually reviews anything, silently.
 		inFlightReview = resolveDiffTarget(pi, ctx.cwd, baseSha)
-			.then((target) => pi.exec("git", ["diff", target], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }))
-			.then(async (diffResult) => {
+			.then((target) => buildReviewDiff(pi, ctx.cwd, target))
+			.then(async (diff) => {
 				if (reviewRunId !== runId) return;
-				const diff = diffResult.code === 0 ? diffResult.stdout.trim() : "";
 				const spec = taskSpec(ctx);
-				if (!diff || !spec || diff === lastReviewedDiff) return;
+				if (!diff || !spec || diff === lastReviewedDiff) {
+					appendHarnessTrace(pi, {
+						extension: "reviewer",
+						diffHash: null,
+						event: "review",
+						outcome: "blocked",
+						durationMs: Date.now() - startedAt,
+						metadata: {
+							kind: config.kind,
+							reason: !diff ? "empty-diff" : !spec ? "no-task-spec" : "unchanged-since-last-review",
+						},
+					});
+					return;
+				}
 				const result = await requestReview(config, spec, diff, ctx.signal);
 				if (reviewRunId !== runId) return;
 				appendHarnessTrace(pi, {

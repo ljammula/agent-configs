@@ -1356,3 +1356,72 @@ instrumentation-confirmed working, and the only genuinely open item from this bu
 is the pre-existing, narrower, already-documented one — the reviewer's purely reactive `tool_result`
 trigger structurally cannot fire on task suites (like `local-model-bench`) that hide tests until
 after `pi` exits, which is a design gap, not a `-p`-mode bug.
+
+## Correction of the correction: the retraction above was itself wrong on the reviewer, 2026-08-05
+
+An independent Opus review of the retraction commit, asked to check its reasoning against the
+actual source and pi's own durable session records (`~/.pi/agent/sessions/**/*.jsonl` — separate
+from, and unlike, the `--mode json` stdout log the retraction relied on), found the retraction's
+mechanism was wrong and its "no real bug" conclusion was wrong for `cross-model-review.ts`
+specifically. `appendHarnessTrace` calls `pi.appendEntry(...)`, which persists to the session file
+— not stdout — so it cannot be lost to a killed process's stdout buffer the way the retraction
+claimed. Checked directly: **all 7 real personal-budget-simplifier build sessions carry a reviewer
+`startup` trace (`outcome: "pass"`), and zero of them carry a `review` trace** — including the two
+sessions (20:07, 20:28 UTC) that ran after the `AI_REVIEW_*` config was already correct. The
+reviewer genuinely never completed a single review round anywhere in this build. The original
+same-day claim was right; the retraction was wrong to clear it.
+
+**Root cause, this time confirmed against source, not inferred**: `cross-model-review.ts`'s
+`tool_result` handler built its diff with a bare `pi.exec("git", ["diff", target])`. `git diff`
+never shows untracked file content, under any target — that's normal git behavior, not a bug in
+the target-resolution logic. `personal-budget-simplifier` had exactly one commit for its entire
+build, made at the very end; every chunk ran against an all-untracked working tree, so `git diff`
+was empty on every single tool_result, `!diff` short-circuited before `requestReview` was ever
+called, and no trace was emitted on that path — silent by construction, matching the observed
+startup-then-nothing signature exactly. `quality-gate.ts`'s `snapshotDiff` (used for its own
+verification-evidence hash) already handles this correctly, merging `git diff` with
+`git status --porcelain --untracked-files=all` and hashing untracked file content — the two
+extensions simply didn't share that logic.
+
+**Fixed for real, verified for real**: added `buildReviewDiff()` to `extensions/lib/verification.ts`
+— gathers the same `git status --untracked-files=all` untracked-path list `snapshotDiff` does and
+synthesizes a diff block per untracked file (reading its content, formatting as a `new file`-style
+unified diff; skips binary/oversized files defensively) instead of shelling out to `git add -N`,
+which would mutate the index as a side effect of what should be a read-only review pass.
+`cross-model-review.ts` now calls this instead of a bare `git diff`. Also added a `review`/`blocked`
+trace on the previously-silent early-return paths (`!diff` / `!spec` / unchanged-since-last-review)
+so this class of bug is diagnosable from the trace record alone next time, without needing to read
+session JSONL files by hand. First attempt at the fix broke one of the 123 deterministic tests
+(`buildReviewDiff`'s `Promise.all` accidentally swallowed exec rejections via a blanket
+`.catch(() => undefined)`, which broke the existing stale-context-during-review test — a stale-
+context rejection must propagate to the caller's `isStaleContextError` handling, not get silently
+treated as "no diff"); fixed by removing that catch and letting genuine rejections propagate, kept
+only the "resolved but non-zero exit code" case as an expected empty result. `npm run typecheck`
+clean, `npm test` 123/123. **Live-verified against the exact original bug condition**: a fresh
+scratch repo, `git init`, zero commits, one untracked `.go` file — the reviewer previously would
+never fire here; after the fix, a real `pi -p` run against it produced a genuine `outcome: "clean"`
+review trace with the file confirmed still untracked (`git status` showing `?? main.go`, no commits)
+at the time.
+
+**Quality-gate's corrective follow-up: left as genuinely open, not re-closed.** The isolated
+`/tmp/qg-test` result reported above (a second `agent_settled` firing ~1 minute after the first,
+`correctiveFollowUps=1` carried forward) is real and stands — but checking the *actual* chunk-3
+build session directly (`2026-08-05T19-36-29…jsonl`) shows the opposite: one `quality-gate`
+`outcome: "fail"` trace, zero occurrences of the follow-up message text anywhere in the session,
+and the file ends immediately after the last assistant turn — no second round happened there. The
+isolated test used a small, single-file, few-turn scratch repo; the real chunk-3 session had
+already run nine assistant turns by the time it failed. Whether turn count, context size, or
+something else explains the difference is not established. Downgrading `quality-gate.ts`'s
+corrective-follow-up status back to **unresolved / context-dependent** — confirmed capable of
+working in a simple case, confirmed not to have fired in the one real multi-turn case checked. Not
+claiming it as fixed or broken; it needs a repro closer to a real chunk's shape (many turns, larger
+context) before either conclusion is defensible.
+
+**Standing lesson, reinforced twice in one day**: `--mode json`'s redirected stdout stream and
+`pi`'s own session JSONL files are not the same record, and a claim about what fired or didn't
+should be checked against the session files (`~/.pi/agent/sessions/**/*.jsonl`), not just a
+redirected log — this is what the first retraction itself failed to do, and what an independent
+second reviewer catching that failure via `git show`/`git diff` on the retraction commit (not by
+re-running anything) is direct evidence for treating "a second independent read" as more valuable
+than another self-directed instrumented test. Full detail, the exact `buildReviewDiff` diff, and
+the live-fire confirmation transcript in `pi-real-task-report-personal-budget-simplifier.md`.

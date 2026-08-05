@@ -257,6 +257,91 @@ export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, baseSha?:
 	return head && head.code === 0 ? "HEAD" : EMPTY_TREE_HASH;
 }
 
+const MAX_UNTRACKED_DIFF_BYTES = 200_000;
+
+function looksBinary(buffer: Buffer): boolean {
+	return buffer.subarray(0, 8000).includes(0);
+}
+
+// cross-model-review.ts needs diff *text* to hand an LLM, not just the
+// materiality hash snapshotDiff() computes below. A bare `git diff <target>`
+// never shows untracked files' content -- `git diff` only ever compares
+// tracked content against the target, regardless of what that target is --
+// so a freshly `git init`'d project with nothing staged or committed yet
+// (exactly the state new-project-scaffold.ts leaves a repo in, and exactly
+// this harness's own state for the entire personal-budget-simplifier build,
+// which made zero commits until the very end) always produces an empty
+// diff, and the reviewer silently never has anything to review for the
+// project's whole lifetime up to its first commit. Confirmed via the
+// project's own session records: `startup` traces present in all 7 real
+// build sessions, `review` traces in zero of them. See "Reopened: the
+// cross-model-review untracked-file gap" in pi-harness-history.md.
+//
+// Build a synthetic diff block per untracked file instead of shelling out
+// to `git add -N` (intent-to-add), which would mutate the index as a side
+// effect of what should be a read-only review pass.
+// Deliberately does not swallow exec rejections here (e.g. via `.catch(() =>
+// undefined)`): a stale-context rejection must propagate to the caller's own
+// `isStaleContextError` handling, same as the plain `pi.exec("git", ["diff",
+// target])` call this replaced did. Only a *resolved* non-zero exit code is
+// treated as "nothing to show" -- that is a normal, expected outcome, not an
+// exceptional one.
+export async function buildReviewDiff(pi: ExtensionAPI, cwd: string, target: string): Promise<string> {
+	const [diffResult, statusResult] = await Promise.all([
+		pi.exec("git", ["diff", "--binary", target], { cwd, timeout: 10_000 }),
+		pi.exec(
+			"git",
+			[
+				"status",
+				"--porcelain=v1",
+				"-z",
+				"--untracked-files=all",
+				"--",
+				".",
+				":(exclude)node_modules",
+				":(exclude)build",
+				":(exclude)dist",
+				":(exclude).dart_tool",
+			],
+			{ cwd, timeout: 10_000 },
+		),
+	]);
+	const trackedDiff = diffResult.code === 0 ? diffResult.stdout.trim() : "";
+	if (statusResult.code !== 0) return trackedDiff;
+
+	const untrackedPaths = statusResult.stdout
+		.split(/[\0\n]/)
+		.filter(Boolean)
+		.filter((entry) => entry.startsWith("?? ") && !entry.startsWith("?? .pi/harness-traces/"))
+		.map((entry) => entry.slice(3));
+
+	const untrackedBlocks: string[] = [];
+	for (const path of untrackedPaths.sort()) {
+		try {
+			const buffer = await readFile(join(cwd, path));
+			if (buffer.length > MAX_UNTRACKED_DIFF_BYTES || looksBinary(buffer)) {
+				untrackedBlocks.push(`diff --git a/${path} b/${path}\nnew file (binary or too large to inline, ${buffer.length} bytes)`);
+				continue;
+			}
+			const lines = buffer.toString("utf8").split("\n").map((line) => `+${line}`);
+			untrackedBlocks.push(
+				[
+					`diff --git a/${path} b/${path}`,
+					"new file mode 100644",
+					"--- /dev/null",
+					`+++ b/${path}`,
+					`@@ -0,0 +1,${lines.length} @@`,
+					...lines,
+				].join("\n"),
+			);
+		} catch {
+			// Unreadable between status and read (deleted, permissions, a
+			// symlink loop) -- skip rather than fail the whole review over it.
+		}
+	}
+	return [trackedDiff, ...untrackedBlocks].filter(Boolean).join("\n\n");
+}
+
 export async function snapshotDiff(pi: ExtensionAPI, cwd: string, baseSha?: string): Promise<DiffSnapshot> {
 	const diffTarget = await resolveDiffTarget(pi, cwd, baseSha);
 	const diffArgs = ["diff", "--binary", diffTarget];

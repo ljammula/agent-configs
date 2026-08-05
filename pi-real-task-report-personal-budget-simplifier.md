@@ -10,13 +10,30 @@ sandboxed environment (`could not create image from display`, no screen-recordin
 the running app's UI was never visually screenshotted — its correctness rests on the widget tests'
 exact-text/icon assertions plus the clean runtime log, not a pixel-level check.
 
-**Post-build correction, same day**: two "confirmed" harness bugs reported below
-(`cross-model-review.ts` and `quality-gate.ts`'s corrective follow-up allegedly not working under
-`pi -p`) were retracted after direct instrumentation — both actually work correctly. The
-black-box observations that produced them were most likely artifacts of running heavy concurrent
-processes on the same machine. One real, reproducible bug (`.zshrc` values not reaching
-non-interactive shells) was fixed for real via `~/.zshenv`. See "Correction notice" below for the
-full account — it's kept as a methodology lesson, not just a fixed conclusion.
+**Post-build corrections, same day, two rounds** — read in order, each supersedes the one before
+it on the point it addresses:
+
+1. Two "confirmed" harness bugs (`cross-model-review.ts` and `quality-gate.ts`'s corrective
+   follow-up allegedly not working under `pi -p`) were retracted after direct instrumentation,
+   concluding both actually work correctly and the original black-box observations were artifacts
+   of concurrent heavy processes on the machine. **This retraction was itself wrong about
+   `cross-model-review.ts`** — see round 2.
+2. An independent Opus review of round 1's retraction, asked to check it against source and
+   against pi's own durable session records (not just the `--mode json` stdout log round 1 relied
+   on), found the reviewer genuinely never completed a single review round anywhere in this real
+   build — confirmed directly from `~/.pi/agent/sessions/`, which round 1 never consulted. Real
+   root cause: a bare `git diff` never shows untracked file content, and this build had exactly one
+   commit, made at the very end. **Fixed for real** (`buildReviewDiff()` in
+   `extensions/lib/verification.ts`, shares `quality-gate.ts`'s untracked-file handling), verified
+   against the exact original bug condition, `npm test` 123/123. `quality-gate.ts`'s corrective
+   follow-up is left **unresolved** — works in an isolated single-file test, did not fire in the
+   real chunk-3 build session; the discrepancy is unexplained.
+
+One real, reproducible environmental bug held up across both rounds and was fixed for real:
+`.zshrc` values not reaching non-interactive shells, fixed via `~/.zshenv` (with `${VAR:-default}`
+defaulting and idempotent `PATH` handling added in round 2 after further review). See "Correction
+notice" below for round 1's account and "Round 2" further down for the reopened finding — both
+kept intact as a methodology record, not just for their final conclusions.
 
 Task: implement a Go + Flutter personal-budgeting app end-to-end, chunked into 7 small
 acceptance-criteria-bounded steps per `~/code/agent-configs/plans/personal-budget-simplifier-build-plan.md`,
@@ -291,6 +308,70 @@ the rendered text, not just the icon. Added as gotcha #5 in `AGENTS.md`. General
 JSON-tag finding: **a bug that's invisible to type-checking/linting and only surfaces in an
 assertion on the actual rendered/wire output, in a test that used a fixture too "nice" (round
 number, valid casing either way) to force the bug to manifest.**
+
+## Round 2: the reviewer finding was reopened, root-caused for real, and fixed
+
+Round 1 (below, "Correction notice" and the `[RETRACTED]` section) concluded `cross-model-review.ts`
+worked fine under `pi -p` and blamed the original silence on concurrent resource contention. Asked
+to review that retraction independently, an Opus subagent checked it against `appendHarnessTrace`'s
+actual implementation and against pi's own session records — evidence round 1 never consulted,
+relying only on a redirected `--mode json` stdout log.
+
+`appendHarnessTrace` calls `pi.appendEntry(...)`, which persists to pi's session JSONL files, not
+stdout — it cannot be lost to a killed process's stdout buffer, the mechanism round 1 proposed.
+Checked directly (`~/.pi/agent/sessions/--Users-kanna-code-personal-budget-simplifier--/*.jsonl`):
+**all 7 real build sessions carry a reviewer `startup` trace and zero carry a `review` trace** —
+including the two sessions that ran after `AI_REVIEW_*` was already correctly configured. The
+reviewer never completed a single review round anywhere in this build. Round 1's "no real bug"
+conclusion was wrong; the original same-day claim was right.
+
+**Root cause, confirmed against source**: `cross-model-review.ts`'s `tool_result` handler built its
+diff with a bare `pi.exec("git", ["diff", target])`. `git diff` never shows untracked file content
+under any target — ordinary git behavior. `personal-budget-simplifier` had exactly one commit,
+made at the very end of the build; every chunk ran against an all-untracked working tree, so every
+diff was empty, `!diff` short-circuited before `requestReview` was ever called, and — the gap that
+made this so hard to see — no trace was emitted on that silent-return path at all.
+`quality-gate.ts`'s own `snapshotDiff` (used for its verification-evidence hash) already merges
+`git diff` with `git status --porcelain --untracked-files=all` and hashes untracked content; the
+two extensions simply hadn't shared that logic.
+
+**Fixed**: added `buildReviewDiff()` to `extensions/lib/verification.ts` — gathers the same
+untracked-path list `snapshotDiff` does and synthesizes a `new file`-style diff block per untracked
+file (reading its content; skips binary/oversized files) instead of `git add -N`, which would
+mutate the index as a side effect of a read-only review pass. `cross-model-review.ts` now calls
+this instead of a bare `git diff`, and now emits a `review`/`blocked` trace on the previously-silent
+early-return paths, so this class of bug is diagnosable from the trace record alone next time.
+
+First attempt at the fix broke one of the 123 deterministic tests: `buildReviewDiff`'s
+`Promise.all` used a blanket `.catch(() => undefined)` on both `git` calls, which silently
+swallowed a simulated stale-context rejection instead of letting it propagate to the caller's
+`isStaleContextError` handling — exactly the class of bug this report's own `AGENTS.md` gotchas
+warn about (a "successful" empty result masking a real failure). Fixed by removing the blanket
+catch; only a *resolved* non-zero exit code is now treated as "nothing to show." `npm run
+typecheck` clean, `npm test` 123/123.
+
+**Live-verified against the exact original bug condition**: a fresh scratch repo, `git init`, zero
+commits, one untracked `.go` file — before the fix this configuration never triggers a review, by
+construction. After the fix, a real unmodified `pi -p` run against it produced a genuine
+`outcome: "clean"` review trace, with `git status` confirmed still showing the file untracked
+(`?? main.go`, no commits) throughout.
+
+**`quality-gate.ts`'s corrective follow-up is left genuinely open, not re-closed a second time.**
+The isolated `/tmp/qg-test` result from round 1 (a second `agent_settled` firing ~1 minute after
+the first, with `correctiveFollowUps=1` carried forward) is real and stands on its own. But the
+actual chunk-3 build session (`2026-08-05T19-36-29…jsonl`) shows the opposite under direct
+inspection: one `quality-gate` `outcome: "fail"` trace, zero occurrences of the follow-up message
+text anywhere in the session, and the file ends immediately after the last assistant turn — no
+second round happened there. The isolated test was a small, single-file, few-turn repo; the real
+session had already run nine assistant turns by the time it failed. What explains the difference —
+turn count, context size, something else — is not established. This stays downgraded to
+**unresolved / context-dependent**, not claimed as fixed or broken either way.
+
+**Standing lesson, learned twice in one day**: `--mode json`'s stdout stream and pi's own session
+JSONL files are not the same record, and neither round 1's original diagnostics nor its retraction
+consulted the session files before drawing a conclusion — the retraction repeated the same
+methodology gap it was trying to correct. What actually caught it was a second, independent reader
+checking primary evidence rather than re-running the same kind of black-box test again.
 
 ## What's working (not a gap, worth keeping)
 
