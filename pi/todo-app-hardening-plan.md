@@ -97,12 +97,33 @@ versus today's nested scan. Must be gated on: no Makefile, no
 Consistent with this harness's own caution norm (`git-safety.ts` blocks
 rather than prompts, specifically because `-p` mode has no UI to confirm
 through), autonomous `git init` on every run risks initializing inside a
-directory the user intended as part of a parent repo. Safer: at
-`agent_start`, if `git rev-parse --show-toplevel` fails, append a
-`before_agent_start` system-prompt line (the `karpathy-guardrail.ts`
-pattern) instructing the model to `git init` + seed `.gitignore` itself.
-Zero autonomous filesystem writes from the extension; existing safety
+directory the user intended as part of a parent repo. Safer: in
+`before_agent_start` — the only hook that can mutate the system prompt
+(the `karpathy-guardrail.ts`/`stack-router.ts` pattern) — check whether
+`git rev-parse --show-toplevel` fails, and if so append a system-prompt
+line instructing the model to `git init` + seed `.gitignore` itself. The
+repo check and the prompt append must happen in the same
+`before_agent_start` handler: an `agent_start` check is too late, since by
+then the prompt has already been built and the model never sees the
+instruction, leaving the gate un-activated exactly as before. Zero
+autonomous filesystem writes from the extension; existing safety
 extensions still cover whatever it does next.
+
+**Unborn-HEAD gap (found in review):** `git init` alone does not make
+`quality-gate.ts` activate for a brand-new project. `quality-gate.ts`
+captures `baseSha` via `git rev-parse HEAD` in its own `agent_start`
+handler, before the model has run any tools; in a freshly initialized repo
+with no commits, `HEAD` is unborn, that `rev-parse` fails, and `baseSha`
+stays `undefined`. `snapshotDiff()` then falls back to
+`git diff --binary HEAD`, which also fails against an unborn HEAD, so the
+snapshot stays `{ material: false }` and the gate never activates — the
+same failure mode as the no-repo case, just one step later. The nudge must
+therefore instruct **`git init` + `.gitignore` + an initial empty-ish
+baseline commit** (not just `git init` and stop), so `HEAD` resolves by
+the time `quality-gate.ts`'s `agent_start` handler runs. As a defense in
+depth, `snapshotDiff()` should also handle unborn HEAD explicitly (e.g.
+diff against the empty-tree hash instead of `HEAD` when `rev-parse HEAD`
+fails) rather than depending solely on the model following the nudge.
 
 ### Missing from the original plan
 - A cheap deterministic artifact check (untracked file >1MB, or a
@@ -116,8 +137,15 @@ extensions still cover whatever it does next.
 
 ## Revised implementation sequence
 
-1. **Prompt nudge for git-init** (no autonomous `git init` from the
-   extension) — makes the existing quality gate and cross-model review
+1. **Prompt nudge for git-init**, implemented in `before_agent_start` (not
+   `agent_start` — that hook runs after the prompt is built and can't
+   change it), instructing `git init` + `.gitignore` + an initial baseline
+   commit so `HEAD` is born before `quality-gate.ts`'s own `agent_start`
+   handler captures `baseSha`. No autonomous `git init` from the extension
+   itself. Defense in depth: `snapshotDiff()` in `verification.ts` should
+   also handle an unborn `HEAD` explicitly (diff against the empty-tree
+   hash) rather than relying solely on the model following the nudge. This
+   is the fix that makes the existing quality gate and cross-model review
    activate at all.
 2. **Artifact/binary-size check** — cheap, deterministic, directly targets
    the committed-binary problem and the `hashUntrackedPath` perf cost.
