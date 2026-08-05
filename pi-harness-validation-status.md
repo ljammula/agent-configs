@@ -1,6 +1,6 @@
 # pi harness — consolidated validation status
 
-**Current as of 2026-08-04.** This file states only what's true right now,
+**Current as of 2026-08-05.** This file states only what's true right now,
 extension by extension. The full dated investigation — what was tried, what
 broke, what got fixed, live-run counts, superseded results — lives in
 `pi-harness-history.md`; nothing here is understandable-only-with-history,
@@ -17,11 +17,12 @@ set in `~/.zshrc`, so `cross-model-review.ts` resolves to genuine
 requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
 cross-model, if it's ever pointed back at the same route. The maintained Pi
 project typechecks
-against pinned 0.83.0 public types and has 78 deterministic tests covering
+against pinned 0.83.0 public types and has 123 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
 exits, reviewer truthfulness, symlink escapes, external-effect policy,
 installer scope, stack routing, extension interactions, nested verification
-manifests, and stale-extension-context handling. Verification-command
+manifests, stale-extension-context handling, and the greenfield-project
+hardening extensions below. Verification-command
 resolution (both `quality-gate.ts`'s settlement check and
 `cross-model-review.ts`'s trigger) recognizes a Makefile `verify`, `test`,
 or `check` target, in that priority order, not just `verify` — see
@@ -81,11 +82,22 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target file #1 of 8) does not meet the paired-adoption threshold. Live (non-retrospective) validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic branch tests pass; the widened empty-content-stop trigger has zero real-trial field evidence. |
 | `cross-model-review.ts` | Adopted, resolves to genuine `independent-review`, but its trigger cannot fire on the current task suite | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` set in `~/.zshrc` to `gemma-4-26b-a4b-it` on `:8082`, distinct from the `:8080` Qwen primary. Deterministic tests pass (74/74); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. A separate 2026-08-04 investigation against a third route (KAT-Coder, `:8083`, not the standing config) found and fixed a process-crashing stale-context bug in the `tool_result` catch handler and a structural gap where `pi -p` exited before any review round could finish; both fixed, tested, and now apply to whichever route is configured — see `pi-harness-history.md`'s "Trying a third reviewer route" section. `REVIEW_TIMEOUT_MS` raised from 120s to 240s (commit `83ca0cb`) after a real production-shaped review request against idle Gemma took 121.4s — 1.4s past the old timeout, which would have silently discarded a correct finding. A full end-to-end rerun (2026-08-04, standing Qwen+Gemma config, pair 4) confirmed the task itself passes cleanly (9/9 go -race, 17/17 dart) but the reviewer never fired: its `tool_result` trigger only reacts to the *model's own* successful broad-verification command, and `local-model-bench` hides real test files until after `pi` exits, so the model never has one to run — it wrote its own smoke test instead, and its one `dart test` call errored on "no test files," which the trigger explicitly excludes. No route, model, or timeout can fix this; it needs a design change (e.g. a settlement-time trigger like `quality-gate.ts`'s). See todo. |
+| `new-project-scaffold.ts` | Adopted, on by default | Git-init nudge plus layered-architecture (`cmd/`/`internal/domain`/`internal/handler`-shaped) nudge for greenfield repos. Live-tested 2026-08-05 against a fresh Go+SQLite todo-app task: both nudges fired and worked exactly as designed (repo initialized, real commit made, the requested layered structure created). Deterministic tests pass. |
+| `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical `verify`/`test`/`check` Makefile target. The original `before_agent_start`-only precondition check was found structurally blind on greenfield repos by the 2026-08-05 live test above — it evaluated once, before any files existed, and was never re-checked after `go mod init` created a manifest mid-session. Redesigned to arm a `tool_result` flag when a manifest file appears and nudge once at the next `turn_end`. Deterministic tests pass (123/123); the revised design has not itself been live-tested — only the superseded version was. |
+| `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Same live test found the original `agent_settled`-only design structurally blind: in `-p` mode `agent_settled` fires once, *after* `agent_end`, by which point the model had already committed, leaving diff-since-`baseSha` empty. Redesigned: primary detection moved to `tool_result` on build-shaped bash commands, `agent_settled` kept only as a cwd-keyed backstop with an empty-tree fallback for the greenfield case (a follow-up review pass also fixed a case where that fallback was permanently dead when the first commit happened mid-session). Deterministic tests pass; revised design not yet live-tested. |
+| `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks (e.g. `err.Error()` written straight into an HTTP response). Same structural blind spot and same fix as `artifact-guard.ts`: primary detection moved to a `tool_result` content scan on write/edit, `agent_settled` kept as a per-cwd, empty-tree-fallback backstop, sharing a dedup map with the `tool_result` path so a committed finding isn't re-flagged every subsequent build command. Deterministic tests pass; revised design not yet live-tested. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Gated on Aider dispatch being in scope; it isn't (`~/.claude/CLAUDE.md`, benchmarked and removed). |
 | KAT-Coder-V2.5-Dev-OptiQ-4bit (`:8083`) | Ruled out, both roles | **As primary model**: spot-checked 2026-08-04 against pair 4 (go-flutter/bookmarks-app) — fixed the `go test -race` bug that stumped Qwen, but introduced 3 new Dart test failures and the task still failed overall; independent review found this is not real signal, since Qwen itself already fixes this same race in 2/5 runs on its own (see `pi-harness-history.md`'s prior five-run investigation), so a single win is statistically indistinguishable from Qwen's known variance. **As reviewer**: ruled out for a structural reason, not a tunable one — a real production-shaped review request (task spec + diff, 22,784 chars, no `max_tokens` cap) against a confirmed-idle `:8083` route ran 220+ seconds and never completed successfully (`upstream_errors` incremented rather than `completed`). Unlike Gemma's near-miss on the timeout, this wasn't close: the route errored out rather than merely running long, so raising `REVIEW_TIMEOUT_MS` would not fix it. Full detail in `pi-harness-history.md`'s "KAT-Coder ruled out" section. |
+| GLM-4.7-Flash-4bit (`:8081`) | Ruled out as reviewer | 0/3 planted-bug catches at default invocation (5-token `NO_ISSUES_FOUND` shortcut every time, no reasoning content) vs. Gemma's 3/3 on the identical prompts. Retried with `chat_template_kwargs: {"enable_thinking": true}` since GLM is hybrid-reasoning and thinking is opt-in per request on most local serving stacks — this unlocked real reasoning exactly once across 10 trials (1/10), reverting to the same shortcut on repeats of the same prompt at `temperature: 0`. Unlike KAT-Coder's reviewer rule-out (a structural request failure), this route responds fine and fast, it just doesn't reliably do the review task on this checkpoint at 4-bit. Community reports corroborate both a Flash-tier reasoning-depth tradeoff and a known 4-bit-quantization weakness on agentic/structured-judgment tasks for this checkpoint. `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` remain pointed at Gemma. Full detail in `pi-harness-history.md`'s "GLM-4.7-Flash-4bit ruled out as reviewer candidate" section. |
 
 ## Todo
 
+- Live-test the revised (`tool_result`/`turn_end`-based) designs of
+  `makefile-scaffold-nudge.ts`, `artifact-guard.ts`, and
+  `error-leak-guard.ts` — the 2026-08-05 live test that motivated their
+  redesign only ran the original, now-superseded versions. See
+  `pi-harness-history.md`'s "Live end-to-end test finds three of four new
+  hardening extensions structurally blind" entry.
 - Give `cross-model-review.ts` a settlement-time trigger (mirroring
   `quality-gate.ts`'s `agent_settled` hook) so it can fire against
   `local-model-bench` tasks at all — its current purely reactive

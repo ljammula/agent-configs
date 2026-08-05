@@ -1111,3 +1111,64 @@ event reads the file, regardless of extension load order. Not a race.
 
 3 new tests added for the fixes above. Full suite: 118/118. Typecheck
 clean. Still no live trial of the revised designs.
+
+## GLM-4.7-Flash-4bit ruled out as reviewer candidate, 2026-08-05
+
+A new local route appeared on `:8081` serving `GLM-4.7-Flash-4bit`
+(`mlx_vlm.server`, `kannasmacstudio.lan`), a candidate to replace or
+supplement Gemma as `cross-model-review.ts`'s reviewer. `resolveReviewerConfig()`
+correctly resolved `independent-review` for it (distinct baseUrl/model from
+the `:8080` Qwen primary) — the config-resolution logic itself needed no
+changes. The question was whether the model behind the route could actually
+review.
+
+**Method**: the same three-planted-bug methodology as the original Gemma
+validation (2026-08-04, above) — a task spec plus a diff with one
+deliberately introduced logic bug each, via `requestReview()`'s real prompt
+shape (`temperature: 0`, ending on `NO_ISSUES_FOUND` if clean): a
+`clampToRange` missing its upper-bound clamp, a `divide` missing its
+required zero-check, and an `add` implemented as subtraction (the last as
+a floor case — no ambiguity possible).
+
+**First pass, default (non-thinking) invocation**: 0/3. Every response was
+`NO_ISSUES_FOUND` in ~5 completion tokens with `reasoning_content: null` —
+consistent with pattern-completing straight to the escape-hatch marker
+rather than engaging the diff at all. Gemma, given the identical prompts
+over the same harness code path, caught 3/3 with 36-91 tokens of visible
+reasoning each.
+
+**Second pass, `chat_template_kwargs: {"enable_thinking": true}`**: GLM is
+a hybrid-reasoning model family where thinking mode is opt-in per request
+on most local serving stacks, so this was the obvious next lever before
+ruling anything out. It changed the picture but did not fix it: across 10
+trials at `temperature: 0` on the same three prompts (`divide` ×4,
+`clampToRange` ×2, `add` ×4), it caught the bug exactly once (`add`, one
+trial, 56 tokens) and reverted to the 5-token `NO_ISSUES_FOUND` shortcut on
+every repeat of the *same* prompt, including immediate re-tries of the one
+case it had just caught. 1/10 overall. This rules out "thinking mode was
+simply off" as the explanation — the flag measurably changes behavior (it
+can produce real reasoning) but does not make it reliable, and reliability
+at `temperature: 0` on a repeated prompt is the bar that matters for a
+review gate, not occasional capability.
+
+**Community corroboration** (not just this harness's own n=1): Reddit
+reports on LiveBench-style reasoning tasks describe GLM-4.7-Flash as
+"disappointing compared to Qwen3 'Thinking' models," matching the
+Flash-tier tradeoff the model family is explicitly built around (fast/cheap
+over reasoning depth). Separately, HuggingFace quantization discussion
+threads for this exact checkpoint's 4-bit quants report degraded
+performance specifically on tool-use/agentic tasks, attributed to the
+calibration set (`nvidia/Nemotron-Post-Training-Dataset-v2`) lacking
+tool-calling/agentic examples — a structured-judgment task like spec-vs-diff
+review sits in the same category the calibration gap would predict is
+weak.
+
+**Verdict: not adopted as reviewer, with or without thinking mode.**
+`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` remain pointed at
+`gemma-4-26b-a4b-it` on `:8082`, unchanged. Unlike the KAT-Coder reviewer
+rule-out (a structural capacity failure — the route errored on a real
+request regardless of content), this is a reliability/capability failure:
+the route responds fine and fast, it just doesn't do the review task
+correctly on this checkpoint at 4-bit. An 8-bit requant is the one
+un-tried lever if this route is revisited, but is not currently planned —
+see todo.
