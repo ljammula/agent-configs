@@ -196,32 +196,52 @@ Written here:
   `internal/handler`) instead of a size threshold that would fire
   mid-project and contradict this harness's own no-speculative-refactor
   rule, and a minimal README once a repo doesn't have one.
-- **`makefile-scaffold-nudge.ts`** — **new, no live-trial evidence yet.**
-  `todo-app-hardening-plan.md` fix 4: when no Makefile and no documented
-  verification command exist, hands the model `verification.ts`'s actual
-  resolved command and asks it to wire `test`/`lint`/`verify` Makefile
-  targets to it -- prompt-only rather than an autonomous write, so a
-  generated `verify` that silently missed one component of a multi-language
-  repo can't shrink coverage versus the nested scan without the model
-  seeing the exact command it's supposed to preserve.
-- **`artifact-guard.ts`** — **new, no live-trial evidence yet.** Fix 2:
-  deterministic `agent_settled` check (not a nudge) for untracked files
-  over 1MB or bearing an ELF/Mach-O magic number, targeting the todo-app
-  finding directly (a 13MB compiled binary left in the working tree). Also
-  a performance fix: `verification.ts`'s `hashUntrackedPath` currently
-  sha256-streams every untracked file, including such a binary, on every
-  settle event.
-- **`error-leak-guard.ts`** — **new, no live-trial evidence yet.** The
-  deterministic slice of plan item E: rather than trying to gate "is the
-  architecture layered" (no observer exists for that), scans added diff
-  lines for `http.Error(w, err.Error(), ...)` -- a raw error string written
-  straight into an HTTP response, leaking internal detail (SQL errors, file
-  paths) to API clients instead of mapping to a stable domain error.
+- **`makefile-scaffold-nudge.ts`** — **new; one live trial, which found and
+  fixed a real bug in this file (see "Hook semantics for extension
+  authors" below).** `todo-app-hardening-plan.md` fix 4: when no Makefile
+  and no documented verification command exist, hands the model
+  `verification.ts`'s actual resolved command and asks it to wire
+  `test`/`lint`/`verify` Makefile targets to it -- prompt-only rather than
+  an autonomous write, so a generated `verify` that silently missed one
+  component of a multi-language repo can't shrink coverage versus the
+  nested scan without the model seeing the exact command it's supposed to
+  preserve. The original design only ever checked this from
+  `before_agent_start`, which fires once before any files exist -- silently
+  unreachable for a genuinely new project, the exact scenario this fix
+  targets. Now arms on `tool_result` when a manifest file appears and
+  nudges once at the next `turn_end` if still eligible.
+- **`artifact-guard.ts`** — **new; one live trial (design revised
+  afterward, not yet re-tested).** Fix 2: checks for untracked, staged, or
+  recently-committed files over 1MB or bearing an ELF/Mach-O magic number,
+  targeting the todo-app finding directly (a 13MB compiled binary left in
+  the working tree). Also a performance fix: `verification.ts`'s
+  `hashUntrackedPath` currently sha256-streams every untracked file,
+  including such a binary, on every settle event. Primary detection moved
+  to `tool_result` on build-shaped bash commands (`go build`, `-o `,
+  `cargo build`, ...), checking in-band the moment the artifact is
+  produced; `agent_settled` (now also checking paths changed since the
+  session's `baseSha`, not just working-tree status) is a backstop, not
+  the primary path -- see below for why.
+- **`error-leak-guard.ts`** — **new; one live trial (design revised
+  afterward, not yet re-tested).** The deterministic slice of plan item E:
+  rather than trying to gate "is the architecture layered" (no observer
+  exists for that), scans for `http.Error(w, err.Error(), ...)` -- a raw
+  error string written straight into an HTTP response, leaking internal
+  detail (SQL errors, file paths) to API clients instead of mapping to a
+  stable domain error. Primary detection moved to `tool_result` on
+  `write`/`edit`, scanning the file the instant it changes, independent of
+  git state entirely; `agent_settled` is a backstop.
 
-All four are unit-tested (`pi/tests/*.test.ts`) but, per this file's own
-validation convention, have not yet accumulated live-trial evidence; see
-`../pi-harness-validation-status.md` for the paired-adoption tracking these
-would need before the "adopted" language above applies to them.
+All four are unit-tested (`pi/tests/*.test.ts`). The first live trial (a
+`pi -p` run building a small Go+SQLite backend from an empty directory)
+found that the original agent_settled/before_agent_start-only designs of
+three of them were structurally blind to the exact scenarios they were
+built for -- see "Hook semantics for extension authors" below for the
+root cause and the fix. Per this file's own validation convention, none of
+the four have accumulated enough live-trial evidence for the "adopted"
+language used elsewhere in this file; see
+`../pi-harness-validation-status.md` for the paired-adoption tracking
+these would need.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 
@@ -251,6 +271,41 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 matching skills. They spell out each step and demand pasted command output,
 because a small model that is told "run the gate" will report success without
 running anything.
+
+### Hook semantics for extension authors
+
+A live end-to-end test (`pi -p` against a fresh empty directory,
+non-interactive mode) caught two extensions — `error-leak-guard.ts` and
+`artifact-guard.ts` — making the same wrong assumption about when
+`agent_settled` fires, and `makefile-scaffold-nudge.ts` assuming
+`before_agent_start`'s one-shot precondition check would somehow still
+apply once the project it was checking for came into existence. Both
+mistakes trace to the same underlying fact: which hook fires *once* versus
+*repeatedly*, and *when* relative to the model's own actions, is not
+obvious from the hook names alone. Confirmed from the `--mode json` event
+log of that test, not assumed:
+
+| Hook | Fires | Notes |
+|---|---|---|
+| `before_agent_start` | Once, before the first tool call | The only hook that can amend the system prompt (`{systemPrompt}`). Anything it checks reflects the *initial* state of the working directory — a brand-new project has no manifest, no Makefile, nothing yet. |
+| `agent_start` | Once, right after | Cannot amend the prompt. Used to capture a session baseline once (e.g. `baseSha` via `git rev-parse HEAD`, as `quality-gate.ts`, `artifact-guard.ts`, and `error-leak-guard.ts` all now do). |
+| `tool_call` / `tool_result` | Once per tool invocation, throughout the session | The only hooks with per-action granularity. `tool_result` can append/replace the tool's own result content in-band (`{content: [...]}`) — no new turn, no `sendUserMessage`, no nudge budget consumed. This is the cheapest and most immediate way to catch something the instant it's written, independent of git state entirely. |
+| `turn_end` | Once per assistant turn | The actual "periodic sweep" hook. Cannot amend anything directly — a nudge from here needs `pi.sendUserMessage(..., {deliverAs: "followUp"})`, which queues a new turn. Fire nudges from here at a turn *boundary*, not mid-turn from `tool_result`, so a nudge reads as normal feedback rather than a non-sequitur interrupting an in-progress edit. |
+| `agent_settled` | **Once per process in `-p` (non-interactive) mode**, and — confirmed by event ordering in the test log — *after* `agent_end`, i.e. after the model has already finished everything, including its own `git commit`. Do not assume this behaves like a per-turn check; in `-p` mode it is a terminal, single, late checkpoint. (Interactive mode has more agent loops per process, so a check here fires more often there — but the semantics per firing are identical; nothing about `agent_settled` itself changes between modes.) | Anything gated here that inspects git state (a diff, `git status`) will not see something the model already committed. Use it as a last-resort backstop for whatever a `tool_result`/`turn_end` hook didn't catch, never as the primary detection point for something you expect to happen mid-session. |
+
+Concretely: `error-leak-guard.ts` and `artifact-guard.ts` now do their real
+work in `tool_result` (scan a file the instant it's written; scan for a
+build artifact the instant a build command runs) and keep their original
+`agent_settled` diff/status scan only as a backstop for whatever bypassed
+the tools they hook (e.g. content from a bash heredoc). Both also capture
+`baseSha` at `agent_start` instead of always diffing from an unresolved
+base, so the backstop itself is less bypassable too.
+`makefile-scaffold-nudge.ts` still nudges immediately in `before_agent_start`
+for an already-populated repo, but for a genuinely empty one it now arms on
+`tool_result` when a manifest file (`go.mod`, `package.json`,
+`pubspec.yaml`, `Cargo.toml`) gets written and nudges once at the next
+`turn_end` — the precondition getting re-checked at all, instead of only
+once before anything existed, was the fix.
 
 ## Dispatching pi for a code change
 

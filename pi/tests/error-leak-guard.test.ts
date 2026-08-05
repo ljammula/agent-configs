@@ -81,6 +81,106 @@ test("nudges once per distinct leak set and stops once resolved", async () => {
 	assert.equal(harness.messages.length, 1);
 });
 
+test("tool_result on write flags a leak immediately, in-band, independent of git state entirely", async () => {
+	// The exact scenario a live test found broken: the model writes the
+	// leak, then commits before agent_settled ever runs. This check must
+	// not depend on git at all to catch it -- no exec mock is provided.
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-write-"));
+	const harness = new ExtensionHarness({ cwd });
+	errorLeakGuard(harness.api);
+	const content = 'package main\n\nfunc handle() {\n\thttp.Error(w, err.Error(), 500)\n}\n';
+	const [outcome] = await harness.emit({
+		type: "tool_result",
+		toolCallId: "w1",
+		toolName: "write",
+		input: { path: join(cwd, "handler.go"), content },
+		content: [{ type: "text", text: "Successfully wrote handler.go" }],
+		isError: false,
+	} as any);
+	const appended = (outcome as { content: { type: string; text: string }[] }).content;
+	assert.equal(appended[0]?.text, "Successfully wrote handler.go");
+	assert.match(appended[1]?.text ?? "", /err\.Error/);
+});
+
+test("tool_result on write stays silent when there is no leak", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-write-clean-"));
+	const harness = new ExtensionHarness({ cwd });
+	errorLeakGuard(harness.api);
+	const [outcome] = await harness.emit({
+		type: "tool_result",
+		toolCallId: "w1",
+		toolName: "write",
+		input: { path: join(cwd, "handler.go"), content: 'http.Error(w, "not found", 404)\n' },
+		content: [],
+		isError: false,
+	} as any);
+	assert.equal(outcome, undefined);
+});
+
+test("tool_result on edit re-reads the file from disk (edits carry only fragments, not full content)", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-edit-"));
+	const filePath = join(cwd, "handler.go");
+	await writeFile(filePath, 'package main\n\nfunc handle() {\n\thttp.Error(w, err.Error(), 500)\n}\n');
+	const harness = new ExtensionHarness({ cwd });
+	errorLeakGuard(harness.api);
+	const [outcome] = await harness.emit({
+		type: "tool_result",
+		toolCallId: "e1",
+		toolName: "edit",
+		input: { path: filePath, edits: [{ oldText: "500", newText: "500" }] },
+		content: [],
+		isError: false,
+	} as any);
+	assert.match(String((outcome as { content: { text: string }[] }).content[0]?.text), /err\.Error/);
+});
+
+test("ignores non-.go files and errored tool calls", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-ignore-"));
+	const harness = new ExtensionHarness({ cwd });
+	errorLeakGuard(harness.api);
+	const [notGo] = await harness.emit({
+		type: "tool_result",
+		toolCallId: "w1",
+		toolName: "write",
+		input: { path: join(cwd, "notes.txt"), content: "http.Error(w, err.Error(), 500)" },
+		content: [],
+		isError: false,
+	} as any);
+	assert.equal(notGo, undefined);
+
+	const [errored] = await harness.emit({
+		type: "tool_result",
+		toolCallId: "w2",
+		toolName: "write",
+		input: { path: join(cwd, "handler.go"), content: "http.Error(w, err.Error(), 500)" },
+		content: [],
+		isError: true,
+	} as any);
+	assert.equal(errored, undefined);
+});
+
+test("agent_start captures baseSha once, and agent_settled diffs against it", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-basesha-"));
+	const diffTargets: string[] = [];
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return result(0, "captured-sha\n");
+			if (command === "git" && args[0] === "diff") {
+				diffTargets.push(args[args.length - 1] ?? "");
+				return result(0, "");
+			}
+			if (command === "git" && args[0] === "status") return result(0, "");
+			return result(1);
+		},
+	});
+	errorLeakGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_settled" } as any);
+	assert.deepEqual(diffTargets, ["captured-sha", "captured-sha"]);
+});
+
 test("re-nudges once a resolved finding reappears", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-reappear-"));
 	let diff = "+++ b/main.go\n+\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n";

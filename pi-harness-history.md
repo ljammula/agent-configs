@@ -985,3 +985,129 @@ space. 4 new tests in `pi/tests/verification.test.ts`
 target`, `...make check when there is no verify or test target`, `...still
 prefers make verify over make test when both exist`). Full deterministic
 suite: 78/78 (was 74/74). Typecheck clean.
+
+## Live end-to-end test finds three of four new hardening extensions structurally blind, 2026-08-05
+
+`pi/todo-app-hardening-plan.md` (PR #8, merged to main) added four new
+extensions -- `new-project-scaffold.ts`, `makefile-scaffold-nudge.ts`,
+`artifact-guard.ts`, `error-leak-guard.ts` -- with unit-test coverage but
+no live trial. Ran one: `pi -p "Create a minimal Go HTTP backend for a
+todo list with SQLite persistence..."` against a fresh empty directory,
+non-interactive `-p` mode, `--mode json` for a full event log.
+
+**What worked exactly as designed:** `new-project-scaffold.ts`'s git-init
+nudge (repo initialized, `.gitignore` seeded, real commit made) and its
+architecture nudge (`cmd/`, `internal/domain/{errors.go,ports.go}`,
+`internal/handler` -- the exact layered shape asked for). Final code:
+`go build ./...`, `go vet ./...`, `go test ./...` all exit 0, 15 tests
+passing.
+
+**What didn't fire, and why, read from the actual `--mode json` event
+log rather than assumed:**
+
+1. `makefile-scaffold-nudge.ts` never fired. Its precondition
+   (`resolveVerificationCommand` resolves to something) was checked only
+   in `before_agent_start`, which fires once, before any files exist. At
+   that instant the directory was empty -- nothing to resolve a command
+   from -- and the precondition is never re-evaluated after `go mod init`
+   creates `go.mod` mid-session.
+2. `error-leak-guard.ts` didn't flag a real instance of its exact
+   motivating pattern: `handler.go` had `http.Error(w, err.Error(), ...)`
+   seven times, verbatim. Event log showed `agent_settled` fires exactly
+   once in `-p` mode, and — confirmed by exact ordering — *after*
+   `agent_end`, i.e. after the model had already run
+   `git add -A && git commit` as its own last action. `git diff` against
+   HEAD was empty and there were zero untracked files by the time the
+   check ran; the regex/logic was correct (unit tests with mocked diffs
+   already proved that), the hook timing was wrong.
+3. `artifact-guard.ts` has the identical structural blind spot for the
+   same reason, for oversized/binary files instead of error-string leaks.
+
+**Root cause, and the general lesson:** `agent_settled` is a terminal,
+once-per-process checkpoint in `-p` mode, not a periodic per-turn sweep —
+its name invites exactly the wrong assumption. `before_agent_start` is
+once-before-anything-exists, also easy to mis-model as "the state I check
+here stays representative." Neither assumption was validated against the
+actual SDK before building on it.
+
+**Fix**, advised by an Opus design-review pass and grounded in two SDK
+facts confirmed from `node_modules/@earendil-works/pi-coding-agent`'s type
+definitions (not guessed): `tool_result` handlers can append into the
+tool's own result content in-band (`{content: [...]}` — no new turn, no
+nudge budget), and `turn_end` fires once per assistant turn, which is the
+actual per-turn sweep hook both guards needed and neither used.
+
+- `error-leak-guard.ts` and `artifact-guard.ts`: primary detection moved
+  to `tool_result` (write/edit content scan for the former; build-shaped
+  bash commands like `go build -o ...` for the latter), independent of
+  git state entirely. `agent_settled` kept only as a backstop, now using
+  `baseSha` captured once at `agent_start` (matching `quality-gate.ts`'s
+  own pattern) instead of always re-deriving an unresolved base.
+  `artifact-guard.ts`'s backstop also now checks paths that changed
+  between `baseSha` and current `HEAD` (the file is still on disk after a
+  commit; only the path *selection* needed to widen), closing the
+  already-committed-artifact case specifically.
+- `makefile-scaffold-nudge.ts`: `before_agent_start` still nudges
+  immediately for an already-populated repo; for a greenfield one it now
+  gives conditional guidance up front and arms a `tool_result` flag when a
+  manifest file (`go.mod`/`package.json`/`pubspec.yaml`/`Cargo.toml`)
+  appears, nudging once at the next `turn_end` if still eligible — a
+  `turn_end` boundary, not immediately on the write, so the nudge lands
+  between coherent steps rather than interrupting one.
+- A real bug surfaced by the *test suite* while implementing this fix, not
+  the live test: collapsing "already covered by an existing Makefile" and
+  "genuinely nothing to resolve yet (greenfield)" into one falsy check
+  re-nudged already-covered repos with greenfield guidance they didn't
+  need. Fixed by making `evaluate()` return a three-state result instead
+  of an optional string.
+- Explicitly rejected: intercepting/blocking `git commit` via `tool_call`
+  to check before it lands. Commits are legitimate; blocking them is
+  disproportionate to catching a lint-shaped finding, and costs a retry
+  loop for something detect-and-correct handles fine.
+- Documented the hook semantics (which fire once vs. per-turn, and what
+  each can/can't return) in `pi/README.md`'s new "Hook semantics for
+  extension authors" section, specifically so the next extension doesn't
+  make the same assumption error twice.
+
+Full deterministic suite: 115/115 (was 104/104). Typecheck clean. The
+*revised* designs have not yet been live-tested — only the original,
+now-superseded versions were. That's the next thing to verify, not this
+write-up.
+
+**Follow-up, same day:** an Opus review pass against the implementation
+diff (not just the design) found three more real issues before push:
+
+1. `committedSincePaths()` in `artifact-guard.ts` was permanently dead in
+   exactly the greenfield case this whole round targets: `agent_start`
+   only captures `baseSha` when `rev-parse HEAD` succeeds, so a repo whose
+   first commit happens mid-session leaves `baseSha` `undefined` for the
+   rest of the session, and the original code's `if (!baseSha) return []`
+   meant the committed-since check silently never ran. Fixed to fall back
+   to the empty-tree hash, same as `resolveDiffTarget` already does
+   elsewhere — `git diff --name-only <empty-tree> HEAD` still lists
+   everything committed since session start.
+2. `BUILD_COMMAND_PATTERN`'s generic `\s-o\s+\S` matched `grep -o`,
+   `curl -o`, `sort -o` — none of them a build command, each triggering an
+   unnecessary full git status+diff scan and risking a false nudge.
+   Narrowed to require `-o` specifically alongside a compiler invocation
+   (`gcc`/`clang`/`cc`/`g++`), on top of the named build commands
+   (`go build`, `cargo build`, `npm run build`, `flutter build`) that don't
+   need the `-o` heuristic at all.
+3. The new `tool_result` build-command path had no dedup, unlike
+   `agent_settled`'s existing `lastFlaggedKeyByCwd`. Once something got
+   committed, `committedSincePaths` kept returning it for the rest of the
+   session, so every subsequent build command re-appended an identical
+   in-band warning. Fixed by sharing the same dedup map across both hooks
+   — as a side effect, `agent_settled` now correctly stays quiet for a
+   finding `tool_result` already surfaced in-band, instead of repeating it
+   as a separate followUp.
+
+Also confirmed, by reading the SDK's actual `ExtensionRunner.emitToolResult`
+dispatch loop, that multiple extensions' `tool_result` handlers for the
+same event run strictly sequentially (`await`ed one at a time, never
+`Promise.all`) — so `format-on-edit.ts`'s `gofmt -w`/`dart format` always
+finishes before `error-leak-guard.ts`'s handler for the same write/edit
+event reads the file, regardless of extension load order. Not a race.
+
+3 new tests added for the fixes above. Full suite: 118/118. Typecheck
+clean. Still no live trial of the revised designs.
