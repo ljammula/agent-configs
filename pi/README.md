@@ -163,20 +163,26 @@ Written here:
 - **`cross-model-review.ts`** — Phase 2 of
   `ai-stack/local-quality-next-steps-plan.md`: the previously-scoped-but-
   never-built blind-reviewer pass (diffs against session base SHA, sends
-  diff + spec to `ai-stack-local` for a second opinion, feeds back a
-  flagged issue). **Current state: disabled unless explicitly and
-  truthfully configured.** An independent endpoint/model is labeled
-  `independent-review`; the primary route/model is rejected unless
-  `AI_REVIEW_ALLOW_SELF=1`, in which case it is labeled `blind-self-review`.
-  A prior configuration (an independently trained Gemma reviewer on a
-  second route) earned adoption on real evidence, but that route is not
-  currently resident, so today's same-model configuration must not claim
-  independent-review status on the strength of that historical evidence.
-  The bounded-loop design (3-round cap, outcome-typed `runReview`,
-  last-non-empty-line marker matching) is validated by 6 deterministic
-  tests (`pi/tests/cross-model-review.test.ts`). Full adoption
-  history, live-run counts, and the marker-matching bug that was found and
-  fixed along the way are in `../pi-harness-history.md`.
+  diff + spec to a second model for a second opinion, feeds back a flagged
+  issue). An independent endpoint/model is labeled `independent-review`;
+  the primary route/model is rejected unless `AI_REVIEW_ALLOW_SELF=1`, in
+  which case it is labeled `blind-self-review`. `AI_REVIEW_BASE_URL`/
+  `AI_REVIEW_MODEL` are currently set in `~/.zshrc` to an independently
+  trained Gemma reviewer on `:8082`, distinct from the `:8080` Qwen
+  primary, so this resolves to genuine `independent-review`. The
+  bounded-loop design (3-round cap, outcome-typed `runReview`,
+  last-non-empty-line marker matching) is validated by 8 deterministic
+  tests (`pi/tests/cross-model-review.test.ts`). A 2026-08-04 investigation
+  against a third candidate reviewer route found and fixed two real bugs
+  that apply regardless of which route is configured: the `tool_result`
+  handler's stale-context catch was unguarded and could crash the whole
+  `pi` process the first time a review actually triggered on a real task,
+  and the review itself was fire-and-forget — `pi -p` routinely exited
+  before a round (60-120s round trip) had time to finish, so it silently
+  never got a chance to flag anything. `agent_settled` now awaits any
+  in-flight review, bounded by the existing `REVIEW_TIMEOUT_MS`. Full
+  adoption history, live-run counts, and both bugs' investigation
+  transcripts are in `../pi-harness-history.md`.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 

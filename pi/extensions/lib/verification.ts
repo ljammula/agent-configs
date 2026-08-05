@@ -5,13 +5,20 @@ import { access, lstat, opendir, readFile, readlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+// go test accepts flags before the package pattern (`go test -race ./...`).
+// Only non-narrowing flags are allowlisted here: unlike -run/-short/-list,
+// none of these can make the command exercise less than the full suite, so
+// matching them still means "the whole suite ran," not "some of it did."
+const GO_TEST_FLAG = /-race|-v|-count=\d+|-timeout(?:=\S+|\s+\S+)|-parallel(?:=\d+|\s+\d+)/;
+
 export const BROAD_VERIFICATION_PATTERNS = [
 	/\bmake verify\b/i,
 	/\bnpm (?:run )?(?:test|verify)\b/i,
 	/\b(?:pnpm|yarn) (?:test|verify)\b/i,
-	/\bgo test \.\/\.\.\.(?:\s|$)/i,
+	new RegExp(`\\bgo test\\b(?:\\s+(?:${GO_TEST_FLAG.source}))*\\s+\\.\\/\\.\\.\\.(?:\\s|$)`, "i"),
 	/\bpytest\b/i,
 	/\bflutter test\b/i,
+	/\bdart test\b/i,
 	/\bcargo test\b/i,
 ];
 
@@ -119,6 +126,15 @@ const NESTED_SCAN_IGNORED_DIRS = new Set([
 	".dart_tool", ".git", ".next", "build", "coverage", "dist", "node_modules", "out", "target", "vendor",
 ]);
 
+// A pubspec.yaml alone doesn't mean Flutter: a plain Dart package (e.g. a
+// client library with no UI) has one too, and `flutter test` on it either
+// fails outright or drags in the Flutter SDK's own pub cache/resolution for
+// no reason. Only the `flutter` SDK dependency stanza actually means Flutter.
+async function isFlutterPackage(dir: string): Promise<boolean> {
+	const pubspec = await readFile(join(dir, "pubspec.yaml"), "utf8").catch(() => "");
+	return /^\s*sdk:\s*flutter\s*$/m.test(pubspec);
+}
+
 async function manifestCommandForDir(dir: string): Promise<string | undefined> {
 	if (await exists(join(dir, "Makefile"))) {
 		const makefile = await readFile(join(dir, "Makefile"), "utf8");
@@ -126,7 +142,7 @@ async function manifestCommandForDir(dir: string): Promise<string | undefined> {
 	}
 	if (await exists(join(dir, "go.mod"))) return "go test ./...";
 	if (await exists(join(dir, "pyproject.toml"))) return "pytest";
-	if (await exists(join(dir, "pubspec.yaml"))) return "flutter test";
+	if (await exists(join(dir, "pubspec.yaml"))) return (await isFlutterPackage(dir)) ? "flutter test" : "dart test";
 	if (await exists(join(dir, "Cargo.toml"))) return "cargo test";
 	if (await exists(join(dir, "package.json"))) return "npm test";
 	return undefined;
@@ -175,7 +191,7 @@ export async function resolveVerificationCommand(cwd: string): Promise<string | 
 	if (documented) return documented;
 	if (await exists(join(cwd, "go.mod"))) return "go test ./...";
 	if (await exists(join(cwd, "pyproject.toml"))) return "pytest";
-	if (await exists(join(cwd, "pubspec.yaml"))) return "flutter test";
+	if (await exists(join(cwd, "pubspec.yaml"))) return (await isFlutterPackage(cwd)) ? "flutter test" : "dart test";
 	if (await exists(join(cwd, "Cargo.toml"))) return "cargo test";
 	if (await exists(join(cwd, "package.json"))) return "npm test";
 	return nestedVerificationCommand(cwd);

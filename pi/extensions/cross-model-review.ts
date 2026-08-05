@@ -8,6 +8,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
+import { isStaleContextError } from "./lib/stale-context.ts";
 import { isBroadVerificationCommand, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
@@ -108,6 +109,13 @@ export default function reviewer(pi: ExtensionAPI): void {
 	let reviewCount = 0;
 	let lastReviewedDiff: string | undefined;
 	let reviewInFlight = false;
+	// A review round (~60-120s network round trip) routinely outlives the
+	// model's own remaining turns: pi settles and -p mode exits without
+	// waiting on this extension's fire-and-forget tool_result chain, so the
+	// round never gets a chance to log or to flag a real issue. agent_settled
+	// awaits this so settlement genuinely blocks on a pending round instead
+	// of abandoning it.
+	let inFlightReview: Promise<void> | undefined;
 	let settled = false;
 	let runId = 0;
 
@@ -132,6 +140,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 		reviewCount = 0;
 		lastReviewedDiff = undefined;
 		reviewInFlight = false;
+		inFlightReview = undefined;
 		settled = false;
 		if (baseSha) return;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
@@ -146,7 +155,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 		const reviewRunId = runId;
 		const startedAt = Date.now();
 		const args = baseSha ? ["diff", baseSha] : ["diff"];
-		pi.exec("git", args, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
+		inFlightReview = pi.exec("git", args, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
 			.then(async (diffResult) => {
 				if (reviewRunId !== runId) return;
 				const diff = diffResult.code === 0 ? diffResult.stdout.trim() : "";
@@ -175,11 +184,32 @@ export default function reviewer(pi: ExtensionAPI): void {
 					{ deliverAs: "followUp" },
 				);
 			})
-			.catch(() => {
-				appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind } });
+			.catch((error) => {
+				// A stale context means a fresh extension instance now owns the
+				// replacement session; there is nothing left here to log against.
+				if (isStaleContextError(error)) return;
+				try {
+					appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind } });
+				} catch (traceError) {
+					if (!isStaleContextError(traceError)) throw traceError;
+				}
 			})
 			.finally(() => {
 				if (reviewRunId === runId) reviewInFlight = false;
 			});
+	});
+
+	// Give a pending review round time to finish before pi decides the run
+	// is done; requestReview's own timeout bounds the wait. The chain above
+	// only re-throws a non-stale error out of its own trace-logging fallback
+	// (a genuine bug, not staleness), so mirror the same stale-context guard
+	// used everywhere else in the harness rather than swallow it here too.
+	pi.on("agent_settled", async () => {
+		if (!inFlightReview) return;
+		try {
+			await inFlightReview;
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
+		}
 	});
 }

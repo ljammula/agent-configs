@@ -17,7 +17,7 @@ set in `~/.zshrc`, so `cross-model-review.ts` resolves to genuine
 requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
 cross-model, if it's ever pointed back at the same route. The maintained Pi
 project typechecks
-against pinned 0.83.0 public types and has 67 deterministic tests covering
+against pinned 0.83.0 public types and has 74 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
 exits, reviewer truthfulness, symlink escapes, external-effect policy,
 installer scope, stack routing, extension interactions, nested verification
@@ -76,7 +76,7 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, and GCP guidance from repository evidence. Deterministic tests for all routes; only Go/Dart routes have battery coverage (see battery result above), the rest are wired and unit-tested but not battery-proven. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target file #1 of 8) does not meet the paired-adoption threshold. Live (non-retrospective) validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic branch tests pass; the widened empty-content-stop trigger has zero real-trial field evidence. |
-| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` set in `~/.zshrc` to `gemma-4-26b-a4b-it` on `:8082`, distinct from the `:8080` Qwen primary. Deterministic tests pass (67/67); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. Not yet battery-proven — see todo. |
+| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` set in `~/.zshrc` to `gemma-4-26b-a4b-it` on `:8082`, distinct from the `:8080` Qwen primary. Deterministic tests pass (74/74); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. A separate 2026-08-04 investigation against a third route (KAT-Coder, `:8083`, not the standing config) found and fixed a process-crashing stale-context bug in the `tool_result` catch handler and a structural gap where `pi -p` exited before any review round could finish; both fixed, tested, and now apply to whichever route is configured — see `pi-harness-history.md`'s "Trying a third reviewer route" section. Still not battery-proven — see todo. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Gated on Aider dispatch being in scope; it isn't (`~/.claude/CLAUDE.md`, benchmarked and removed). |
 
 ## Todo

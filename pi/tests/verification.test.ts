@@ -18,6 +18,26 @@ test("recognizes broad project verification commands", () => {
 	assert.equal(isBroadVerificationCommand("gofmt -w main.go"), false);
 });
 
+test("recognizes go test with allowlisted non-narrowing flags", () => {
+	assert.equal(isBroadVerificationCommand("go test -race ./..."), true);
+	assert.equal(isBroadVerificationCommand("go test -race -v ./..."), true);
+	assert.equal(isBroadVerificationCommand("go test -count=1 ./..."), true);
+	assert.equal(isBroadVerificationCommand("go test -timeout=60s ./..."), true);
+	assert.equal(isBroadVerificationCommand("go test -timeout 60s ./..."), true);
+	assert.equal(isBroadVerificationCommand("go test -parallel=4 ./..."), true);
+});
+
+test("does not recognize go test flags that narrow test scope", () => {
+	assert.equal(isBroadVerificationCommand("go test -run TestFoo ./..."), false);
+	assert.equal(isBroadVerificationCommand("go test -short ./..."), false);
+	assert.equal(isBroadVerificationCommand("go test -list . ./..."), false);
+});
+
+test("recognizes plain dart test alongside flutter test", () => {
+	assert.equal(isBroadVerificationCommand("dart test"), true);
+	assert.equal(isBroadVerificationCommand("flutter test"), true);
+});
+
 test("piped verification is inconclusive unless pipefail is set", () => {
 	assert.equal(verificationPipelineCanMaskFailure("go test ./... | tail -20"), true);
 	assert.equal(verificationPipelineCanMaskFailure("set -o pipefail; go test ./... | tail -20"), false);
@@ -104,10 +124,31 @@ test("verification resolution finds nested manifests when the root has none", as
 	await mkdir(join(cwd, "go"), { recursive: true });
 	await writeFile(join(cwd, "go", "go.mod"), "module example.test\n");
 	await mkdir(join(cwd, "flutter_app"), { recursive: true });
-	await writeFile(join(cwd, "flutter_app", "pubspec.yaml"), "name: app\n");
+	await writeFile(
+		join(cwd, "flutter_app", "pubspec.yaml"),
+		"name: app\ndependencies:\n  flutter:\n    sdk: flutter\n",
+	);
 	assert.equal(
 		await resolveVerificationCommand(cwd),
 		"(cd 'flutter_app' && flutter test ) && (cd 'go' && go test ./... )",
+	);
+});
+
+test("a pubspec.yaml without the flutter SDK dependency resolves to dart test, not flutter test", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-plain-dart-"));
+	await writeFile(join(cwd, "pubspec.yaml"), "name: a_dart_library\ndependencies:\n  http: ^1.2.0\n");
+	assert.equal(await resolveVerificationCommand(cwd), "dart test");
+});
+
+test("nested manifest scan picks dart test for a plain-Dart package next to a Go module", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-nested-plain-dart-"));
+	await mkdir(join(cwd, "server"), { recursive: true });
+	await writeFile(join(cwd, "server", "go.mod"), "module example.test\n");
+	await mkdir(join(cwd, "client"), { recursive: true });
+	await writeFile(join(cwd, "client", "pubspec.yaml"), "name: client\ndependencies:\n  http: ^1.2.0\n");
+	assert.equal(
+		await resolveVerificationCommand(cwd),
+		"(cd 'client' && dart test ) && (cd 'server' && go test ./... )",
 	);
 });
 

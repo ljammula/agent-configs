@@ -655,3 +655,126 @@ addition) with an accurate explanation instead of returning
 `NO_ISSUES_FOUND`. Full deterministic suite still passes 67/67 after the
 change (also corrected the validation-status doc's stale "64 deterministic
 tests" figure to the current 67 while in there).
+
+## Trying a third reviewer route, KAT-Coder on `:8083`, found and fixed three real bugs, 2026-08-04
+
+A third model, `KAT-Coder-V2.5-Dev-OptiQ-4bit`, came up on `:8083` on the
+same LAN box (discovered by port-scanning `kannasmacstudio.lan` after being
+told a new model was up but not given its host/port). Rather than trust it
+as reviewer on faith, ran it through `pi-harness-history.md`'s pair-4 task
+(`go-flutter/bookmarks-app`, the race-condition task) with the full
+installed harness and `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` pointed at
+this new route — `resolveReviewerConfig()` correctly resolved
+`independent-review` (distinct baseUrl/model from the `:8080` Qwen
+primary). Five live `pi -p` runs against that one task surfaced three
+separate, real bugs, in order:
+
+1. **`go test -race ./...` was invisible to both detectors.**
+   `BROAD_VERIFICATION_PATTERNS` in `pi/extensions/lib/verification.ts`
+   matched the literal substring `go test ./...` only — no flags allowed
+   anywhere in between. `go test -race ./...` (this task's actual
+   `meta.json` `run_cmd`, and the flag needed to catch the exact race this
+   task exists to test) never matched, so neither `cross-model-review.ts`'s
+   live-trigger nor `quality-gate.ts`'s evidence-capture ever saw the
+   model's own real verification runs. Separately, `manifestCommandForDir`
+   treated any directory with a `pubspec.yaml` as a Flutter project and
+   resolved `flutter test` — wrong for `client/`, a plain Dart package with
+   no Flutter SDK dependency (checked: no `sdk: flutter` line in its
+   pubspec). This affected far more of the existing nine-pair battery than
+   just pair 4 — checking all seven unique tasks behind the nine pairs
+   found `go/notes-api` (both `-race` pairs) and all three `dart/` tasks
+   (`task-manager`, `sequential-runner`, `notes-app`) were also silently
+   invisible to both detectors before today; only the two `go/lru-cache`
+   pairs (plain `go test ./...`, no flags) and the baseline arm (no
+   quality-gate/reviewer at all) were unaffected. **Fixed**: added a
+   non-narrowing flag allowlist (`-race`, `-v`, `-count=N`,
+   `-timeout[=| ]value`, `-parallel[=| ]value` — deliberately excludes
+   `-run`/`-short`/`-list`, which would make a partial run pass as full
+   evidence) to the `go test` pattern, and added an `isFlutterPackage()`
+   check (looks for `sdk: flutter` in `pubspec.yaml`) so a plain-Dart
+   package resolves to `dart test`, added to
+   `BROAD_VERIFICATION_PATTERNS` alongside `flutter test`. 5 new tests in
+   `pi/tests/verification.test.ts`.
+
+2. **`cross-model-review.ts` crashed the whole `pi` process the first time
+   its trigger actually fired on a real task.** With bug 1 fixed, the model
+   ran `go test -race ./...` itself, `quality-gate.ts` correctly captured
+   it as evidence (it has the `isStaleContextError` guard added
+   2026-08-03), but `cross-model-review.ts` never got that same guard when
+   it was written. Its `tool_result` handler's `.catch()` unconditionally
+   called `appendHarnessTrace(pi, ...)` to log a `transient` outcome — using
+   the same `pi` context whose earlier call had just failed with "stale
+   after session replacement or reload." That second call threw too,
+   uncaught inside a `.catch()` handler, which Node.js treats as a fatal
+   unhandled rejection: `pi` exited with a stack trace rooted at
+   `cross-model-review.ts:179`, mid-task, non-zero exit. This had been
+   latent since the extension was written — it never surfaced before
+   because, per bug 1, the trigger essentially never fired on a real task
+   until today. **Fixed**: imported `isStaleContextError` from
+   `./lib/stale-context.ts` (the same helper `quality-gate.ts` and
+   `stack-router.ts` already use) and made the `.catch()` stale-aware:
+   returns silently on a stale original error (nothing left to log
+   against; a fresh extension instance owns the replacement session), and
+   wraps its own fallback `appendHarnessTrace` call in a nested try/catch
+   so a second stale-context throw during error-path logging can't cascade
+   into another unhandled rejection. 1 new test in
+   `pi/tests/cross-model-review.test.ts`, verified against the reverted
+   code to confirm it actually fails without the fix.
+
+3. **Even after both fixes, the reviewer still never completed a round —
+   because `pi -p` doesn't wait for it.** `cross-model-review.ts`'s review
+   is fire-and-forget: `pi.exec(...).then().catch().finally()`, never
+   returned or awaited by anything. `pi -p` (non-interactive mode) exits as
+   soon as the model's own turns settle. Live timing from one run: the
+   model's qualifying `go test -race ./...` call landed at `02:31:39Z`; the
+   entire session's last event was at `02:32:42Z` — a 63-second window. A
+   deterministic repro built against that run's real session branch, real
+   diff, and real base SHA (driving the actual `reviewer()` export
+   directly, bypassing `pi` entirely) measured a real KAT-Coder round trip
+   at 60.15s even against a healthy, idle route — so there was never
+   enough slack for a review to land before the process exited, regardless
+   of route health. Confirmed this wasn't a fluke of route contention: the
+   Mac Studio was running three large resident models simultaneously
+   (Qwen on `:8080`, Gemma on `:8082`, KAT-Coder on `:8083`); a
+   `/proxy/health` check on `:8083` showed `queue_timeouts: 4`,
+   `upstream_errors: 4`, `queue_wait_seconds: 43`, and a manual probe
+   request got no response in 30s. Restarted all four LaunchAgents
+   (`qwen36`, `kvproxy`, `whisper`, `katcoder` — bootout/bootstrap on
+   `kannasmacstudio.lan`) to rule out a stuck connection; `:8083` came back
+   with clean zeroed counters and answered a probe chat completion in a
+   few seconds. The timing gap persisted anyway — it's structural, not a
+   symptom of an unhealthy route. **Fixed**: `tool_result` now stores the
+   review's promise chain (`inFlightReview`), and a new `agent_settled`
+   handler awaits it (wrapped in the same stale-context guard, matching
+   `quality-gate.ts`'s own `agent_settled` pattern) before letting
+   settlement proceed — bounded by `requestReview`'s existing
+   `REVIEW_TIMEOUT_MS` (120s), so no new unbounded wait was introduced. 1
+   new test in `pi/tests/cross-model-review.test.ts`
+   (`agent_settled blocks until a pending review round finishes`),
+   confirmed to fail against the reverted code.
+
+With all three fixed, a fifth `pi -p` run against pair 4 produced the
+harness's **first-ever recorded `cross-model-review` round on a real live
+task**: `{event: "review", outcome: "transient", durationMs: 120035}` — the
+request ran the full `REVIEW_TIMEOUT_MS` and timed out rather than being
+silently abandoned, which is the honest failure mode now instead of no
+signal at all. No crash across all 5 runs post-fix. Across the 5 runs, the
+underlying pair-4 race condition itself (unrelated to any of the above)
+was fixed by the primary Qwen model in 2 of 5 and still present in 3 of 5
+— consistent with `pi-harness-validation-status.md`'s existing
+characterization of this as a genuine concurrency-reasoning gap at the
+edge of this model's reliability, not something any of today's fixes
+touch.
+
+**Open, not fixed today**: KAT-Coder's real-world response time (60-120s
+per round, sometimes exceeding `REVIEW_TIMEOUT_MS` entirely even on an
+idle route) means it's currently a weak fit for the reviewer role
+specifically, independent of the harness bugs above — worth either raising
+`REVIEW_TIMEOUT_MS`, investigating why a single review call on an idle
+host took the full 120s, or not adopting KAT-Coder as the standing
+reviewer route. This is a capacity/model finding, not a code defect;
+`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc` were left pointed at
+Gemma (`:8082`) throughout — KAT-Coder was only exported ad hoc per-run for
+this investigation, never made the standing configuration. Full
+deterministic suite: 74/74 (was 67/67; +5 verification tests, +2
+cross-model-review tests, net +7).
