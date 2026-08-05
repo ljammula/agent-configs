@@ -45,7 +45,7 @@ test("ignores renamed and deleted entries rather than misreading their paths", a
 		cwd,
 		exec: ({ command, args }: ExecCall) =>
 			command === "git" && args[0] === "status"
-				? { code: 0, stdout: "R  old.txt\0new.txt\0D  gone.txt\0", stderr: "", killed: false }
+				? { code: 0, stdout: "R  new.txt\0old.txt\0D  gone.txt\0", stderr: "", killed: false }
 				: { code: 1, stdout: "", stderr: "", killed: false },
 	});
 	assert.deepEqual(await findLargeOrBinaryArtifacts(harness.api, cwd), []);

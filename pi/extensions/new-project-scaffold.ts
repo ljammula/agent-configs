@@ -12,15 +12,17 @@
  * (personal-assistant vs. a harness-generated project):
  *
  * 1. No git repo, no .gitignore. Beyond hygiene, this is load-bearing: both
- *    quality-gate.ts (via snapshotDiff) and cross-model-review.ts require a
- *    real git history to activate at all. `git init` alone is not enough --
- *    quality-gate.ts captures baseSha via `git rev-parse HEAD` before the
- *    model runs any tool, and an unborn HEAD (no commits) fails that just
- *    like a missing repo does. The nudge therefore asks for an initial
- *    commit too, not just `git init`. (verification.ts's snapshotDiff also
- *    has a defense-in-depth fallback to the empty-tree hash for this same
- *    case, so gate activation doesn't depend solely on the model following
- *    this nudge.)
+ *    quality-gate.ts and cross-model-review.ts need a real git repository
+ *    to activate at all -- neither can diff a directory git doesn't know
+ *    about. `git init` alone is not sufficient for quality-gate.ts
+ *    specifically: it captures baseSha via `git rev-parse HEAD` before the
+ *    model runs any tool, and an unborn HEAD (no commits yet) fails that
+ *    just like a missing repo does. The nudge therefore asks for an
+ *    initial commit too, not just `git init`. (verification.ts's
+ *    snapshotDiff and cross-model-review.ts's diff-target resolution both
+ *    have a defense-in-depth fallback to the empty-tree hash for this same
+ *    case, so gate/review activation doesn't depend solely on the model
+ *    following this nudge.)
  * 2. No layered architecture / centralized errors / DI seams for a real Go
  *    backend. Deliberately scoped to project-init time only: a mid-project
  *    size threshold was considered and rejected (see
@@ -61,7 +63,7 @@ export default function newProjectScaffold(pi: ExtensionAPI): void {
 						".gitignore appropriate to the project's language(s) (compiled binaries, .dart_tool/, " +
 						"build/, IDE directories), and make an initial commit -- even a small one -- so HEAD is " +
 						"not left unborn. This step is load-bearing, not just hygiene: this harness's quality " +
-						"gate and cross-model review both require real git history to activate at all.",
+						"gate and cross-model review both need a real git repository to activate at all.",
 				);
 				notes.push(
 					"If this new project is a Go backend that will do real persistence (a database, files, " +

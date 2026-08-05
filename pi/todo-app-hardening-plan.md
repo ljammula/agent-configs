@@ -366,6 +366,23 @@ stale if a Makefile appears mid-session, and the underlying cost is a few
 cheap `fs.access`/`fs.readFile` calls, not worth the staleness risk to
 save.
 
+### Final sign-off
+
+A third Opus pass reviewed the fixed diff specifically against the five
+items the second pass required and the one it flagged as non-blocking,
+hand-tracing the `|| true` and nested-canonical examples rather than
+trusting the tests existed. Verdict: **sign off, ship it** — all five
+required items RESOLVED, the declined memoization accepted as reasoned.
+Two non-blocking nits were fixed in the same push: the rename-entry test
+fixture in `artifact-guard.test.ts` had the untracked-rename path order
+backwards (git's `-z` format is new-path-then-old-path, not the reverse —
+didn't affect the assertion either way, since both entries are correctly
+excluded regardless of order, but the fixture wasn't a faithful
+reproduction of real git output), and `new-project-scaffold.ts`'s doc
+comment overstated cross-model-review.ts's requirement as needing "real
+git history" when it only needs a git repository to exist (a repo with no
+commits still diffs fine through the same empty-tree fallback).
+
 CI workflow generation remains explicitly out of scope, per the review's
 scope-boundary reasoning (CI touches secrets/external systems; everything
 implemented here is local file conventions).
