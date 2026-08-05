@@ -142,18 +142,21 @@ export async function findLargeOrBinaryArtifacts(pi: ExtensionAPI, cwd: string, 
 }
 
 export default function artifactGuard(pi: ExtensionAPI): void {
-	let baseSha: string | undefined;
 	// Keyed by cwd, not a single closure variable: a long-running pi process
 	// can move across projects (or a test harness across fixtures) within
-	// one lifetime, and a bare shared variable would let a real finding in
-	// project B go unreported if project A happened to flag the same
-	// path:reason pair first.
+	// one lifetime. A bare shared baseSha would let project A's capture
+	// permanently block project B's own `if (baseSha) return` guard,
+	// silently breaking B's committed-since check for the rest of the
+	// process; a bare shared dedup key would let a real finding in project
+	// B go unreported if project A happened to flag the same path:reason
+	// pair first.
+	const baseShaByCwd = new Map<string, string>();
 	const lastFlaggedKeyByCwd = new Map<string, string>();
 
 	pi.on("agent_start", async (_event, ctx) => {
-		if (baseSha) return;
+		if (baseShaByCwd.has(ctx.cwd)) return;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: 5000 }).catch(() => undefined);
-		if (result?.code === 0) baseSha = result.stdout.trim();
+		if (result?.code === 0) baseShaByCwd.set(ctx.cwd, result.stdout.trim());
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
@@ -162,7 +165,7 @@ export default function artifactGuard(pi: ExtensionAPI): void {
 		if (!command || !BUILD_COMMAND_PATTERN.test(command)) return undefined;
 
 		try {
-			const flagged = await findLargeOrBinaryArtifacts(pi, ctx.cwd, baseSha);
+			const flagged = await findLargeOrBinaryArtifacts(pi, ctx.cwd, baseShaByCwd.get(ctx.cwd));
 			if (!flagged.length) return undefined;
 
 			// Shares lastFlaggedKeyByCwd with the agent_settled path below: once
@@ -206,7 +209,7 @@ export default function artifactGuard(pi: ExtensionAPI): void {
 
 	pi.on("agent_settled", async (_event, ctx) => {
 		try {
-			const flagged = await findLargeOrBinaryArtifacts(pi, ctx.cwd, baseSha);
+			const flagged = await findLargeOrBinaryArtifacts(pi, ctx.cwd, baseShaByCwd.get(ctx.cwd));
 			if (!flagged.length) {
 				lastFlaggedKeyByCwd.delete(ctx.cwd);
 				return;

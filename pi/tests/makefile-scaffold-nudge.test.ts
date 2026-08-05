@@ -121,3 +121,42 @@ test("backstop stays silent if a Makefile already exists by the time the manifes
 	await harness.emit({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] } as any);
 	assert.equal(harness.messages.length, 0);
 });
+
+test("backstop also arms on a bash manifest-creating command, not only the write tool", async () => {
+	// The exact real scenario: the model ran `git init && go mod init
+	// todo-go` via bash, never the write tool, to create go.mod.
+	const cwd = await mkdtemp(join(tmpdir(), "pi-makefile-backstop-bash-"));
+	const harness = new ExtensionHarness({ cwd });
+	makefileScaffoldNudge(harness.api);
+	await harness.emit({ type: "before_agent_start", systemPrompt: "base" } as any);
+
+	await writeFile(join(cwd, "go.mod"), "module todo-go\n");
+	await harness.emit({
+		type: "tool_result",
+		toolCallId: "b1",
+		toolName: "bash",
+		input: { command: "git init && go mod init todo-go" },
+		content: [],
+		isError: false,
+	} as any);
+	await harness.emit({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] } as any);
+	assert.equal(harness.messages.length, 1);
+	assert.match(String(harness.messages[0]?.content), /go vet .\/\.\.\. && go test .\/\.\.\./);
+});
+
+test("backstop does not arm on an unrelated bash command", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-makefile-backstop-bash-unrelated-"));
+	const harness = new ExtensionHarness({ cwd });
+	makefileScaffoldNudge(harness.api);
+	await harness.emit({ type: "before_agent_start", systemPrompt: "base" } as any);
+	await harness.emit({
+		type: "tool_result",
+		toolCallId: "b1",
+		toolName: "bash",
+		input: { command: "ls -la" },
+		content: [],
+		isError: false,
+	} as any);
+	await harness.emit({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] } as any);
+	assert.equal(harness.messages.length, 0);
+});

@@ -171,6 +171,41 @@ test("committed-since check still works when baseSha was never captured (unborn 
 	assert.equal(diffTarget, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
 });
 
+test("baseSha capture is keyed per cwd, not shared across projects in one long-running process", async () => {
+	// ExtensionHarness.emit() always uses one fixed context, so this invokes
+	// the registered handlers directly with two different per-call contexts
+	// -- the same shape a real long-running process moving between projects
+	// would produce (one pi instance, cwd varying per agent run). Without
+	// per-cwd keying, project B would silently inherit project A's baseSha
+	// and diff against a commit that doesn't exist in B's history.
+	const cwdA = await mkdtemp(join(tmpdir(), "pi-artifact-cwd-a-"));
+	const cwdB = await mkdtemp(join(tmpdir(), "pi-artifact-cwd-b-"));
+	const shas: Record<string, string> = { [cwdA]: "sha-a", [cwdB]: "sha-b" };
+	const diffTargetsByCwd: Record<string, string[]> = { [cwdA]: [], [cwdB]: [] };
+	const harness = new ExtensionHarness({
+		cwd: cwdA,
+		exec: ({ command, args, options }: ExecCall) => {
+			const cwd = (options as { cwd?: string } | undefined)?.cwd ?? cwdA;
+			if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${shas[cwd]}\n`, stderr: "", killed: false };
+			if (command === "git" && args[0] === "status") return statusResult([]);
+			if (command === "git" && args[0] === "diff") {
+				diffTargetsByCwd[cwd]!.push(args[2] ?? "");
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			}
+			return { code: 1, stdout: "", stderr: "", killed: false };
+		},
+	});
+	artifactGuard(harness.api);
+	const ctxA = { ...harness.context, cwd: cwdA };
+	const ctxB = { ...harness.context, cwd: cwdB };
+	for (const handler of harness.handlers.get("agent_start") ?? []) await handler({ type: "agent_start" }, ctxA);
+	for (const handler of harness.handlers.get("agent_start") ?? []) await handler({ type: "agent_start" }, ctxB);
+	for (const handler of harness.handlers.get("agent_settled") ?? []) await handler({ type: "agent_settled" }, ctxA);
+	for (const handler of harness.handlers.get("agent_settled") ?? []) await handler({ type: "agent_settled" }, ctxB);
+	assert.deepEqual(diffTargetsByCwd[cwdA], ["sha-a"]);
+	assert.deepEqual(diffTargetsByCwd[cwdB], ["sha-b"]);
+});
+
 test("build-command pattern does not fire on grep/curl/sort's unrelated -o flag", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-artifact-falsepositive-"));
 	const harness = new ExtensionHarness({

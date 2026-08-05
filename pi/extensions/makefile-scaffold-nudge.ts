@@ -23,10 +23,14 @@
  *    on its own -- a `pi -p` run against an empty directory never
  *    revisited the precondition after `go mod init` created it mid-session.
  *    The `tool_result`/`turn_end` backstop below closes that gap: it arms
- *    when a manifest file gets written, then re-evaluates at the next
- *    turn boundary (not immediately -- a manifest can appear and change
- *    shape within the same turn, and nudging mid-turn would read as a
- *    non-sequitur) and nudges once per cwd per session if still eligible.
+ *    when a manifest file gets written (via the `write` tool) OR a
+ *    manifest-generating CLI command runs (via `bash` -- `go mod init`,
+ *    `npm init`, `cargo init`, etc.; that same live test's model used
+ *    exactly this path, not the write tool, to create go.mod), then
+ *    re-evaluates at the next turn boundary (not immediately -- a manifest
+ *    can appear and change shape within the same turn, and nudging
+ *    mid-turn would read as a non-sequitur) and nudges once per cwd per
+ *    session if still eligible.
  */
 import { basename } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -34,6 +38,13 @@ import { isStaleContextError } from "./lib/stale-context.ts";
 import { documentedCommand, makefileVerificationCommand, resolveVerificationCommand } from "./lib/verification.ts";
 
 const MANIFEST_BASENAMES = new Set(["go.mod", "package.json", "pubspec.yaml", "Cargo.toml"]);
+// In the real live test this fix is responding to, the model created
+// go.mod via `git init && go mod init todo-go` (bash), never via the
+// write tool -- a manifest-generating CLI command is at least as common
+// as writing the manifest file directly, so the write-tool-only arming
+// trigger below would have missed the exact scenario it exists to catch.
+const MANIFEST_CREATING_BASH_PATTERN =
+	/\bgo mod init\b|\bnpm init\b|\byarn init\b|\bpnpm init\b|\bcargo init\b|\bcargo new\b|\bflutter create\b|\bdart create\b/;
 
 function nudgeText(resolved: string): string {
 	return (
@@ -96,9 +107,16 @@ export default function makefileScaffoldNudge(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_result", (event, ctx) => {
-		if (event.toolName !== "write" || event.isError) return;
-		const path = (event.input as { path?: string }).path;
-		if (path && MANIFEST_BASENAMES.has(basename(path))) armedCwds.add(ctx.cwd);
+		if (event.isError) return;
+		if (event.toolName === "write") {
+			const path = (event.input as { path?: string }).path;
+			if (path && MANIFEST_BASENAMES.has(basename(path))) armedCwds.add(ctx.cwd);
+			return;
+		}
+		if (event.toolName === "bash") {
+			const command = (event.input as { command?: string }).command;
+			if (command && MANIFEST_CREATING_BASH_PATTERN.test(command)) armedCwds.add(ctx.cwd);
+		}
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {

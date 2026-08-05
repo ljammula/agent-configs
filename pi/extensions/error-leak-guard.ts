@@ -32,7 +32,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
-import { resolveDiffTarget } from "./lib/verification.ts";
+import { EMPTY_TREE_HASH, resolveDiffTarget } from "./lib/verification.ts";
 
 const ERROR_LEAK_PATTERN = /\bhttp\.Error\([^,]+,\s*err(?:or)?\.Error\(\)/;
 
@@ -92,9 +92,15 @@ async function untrackedGoPaths(pi: ExtensionAPI, cwd: string): Promise<string[]
 }
 
 export async function collectErrorLeaks(pi: ExtensionAPI, cwd: string, baseSha?: string): Promise<ErrorLeak[]> {
-	// resolveDiffTarget never rejects -- its own internal exec calls are
-	// already .catch()-guarded -- so no fallback is needed here.
-	const target = await resolveDiffTarget(pi, cwd, baseSha);
+	// An undefined baseSha specifically means "HEAD was unborn when
+	// agent_start captured it" (see errorLeakGuard below), not "no opinion
+	// about the base." Passing it straight through to resolveDiffTarget
+	// would make it re-derive the target from *current* HEAD instead --
+	// if the model has committed since, current HEAD exists, so it diffs
+	// against itself and finds nothing. Pin to the empty tree explicitly
+	// so a first-session commit is still scanned, mirroring the fix
+	// already applied to artifact-guard.ts's committedSincePaths.
+	const target = await resolveDiffTarget(pi, cwd, baseSha ?? EMPTY_TREE_HASH);
 	const [diff, untrackedPaths] = await Promise.all([
 		pi.exec("git", ["diff", "--binary", target], { cwd, timeout: 10_000 }).catch(() => undefined),
 		untrackedGoPaths(pi, cwd),
@@ -110,14 +116,18 @@ export async function collectErrorLeaks(pi: ExtensionAPI, cwd: string, baseSha?:
 }
 
 export default function errorLeakGuard(pi: ExtensionAPI): void {
-	let baseSha: string | undefined;
+	// Keyed by cwd, not a single closure variable: a long-running pi process
+	// can move across projects within one lifetime, and a bare shared
+	// baseSha would let project A's capture permanently block project B's
+	// own `if (baseShaByCwd.has(cwd)) return` guard.
+	const baseShaByCwd = new Map<string, string>();
 	// Keyed by cwd, same reasoning as artifact-guard.ts's lastFlaggedKeyByCwd.
 	const lastFlaggedKeyByCwd = new Map<string, string>();
 
 	pi.on("agent_start", async (_event, ctx) => {
-		if (baseSha) return;
+		if (baseShaByCwd.has(ctx.cwd)) return;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: 5000 }).catch(() => undefined);
-		if (result?.code === 0) baseSha = result.stdout.trim();
+		if (result?.code === 0) baseShaByCwd.set(ctx.cwd, result.stdout.trim());
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
@@ -172,7 +182,7 @@ export default function errorLeakGuard(pi: ExtensionAPI): void {
 
 	pi.on("agent_settled", async (_event, ctx) => {
 		try {
-			const leaks = await collectErrorLeaks(pi, ctx.cwd, baseSha);
+			const leaks = await collectErrorLeaks(pi, ctx.cwd, baseShaByCwd.get(ctx.cwd));
 			if (!leaks.length) {
 				lastFlaggedKeyByCwd.delete(ctx.cwd);
 				return;

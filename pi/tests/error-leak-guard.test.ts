@@ -181,6 +181,78 @@ test("agent_start captures baseSha once, and agent_settled diffs against it", as
 	assert.deepEqual(diffTargets, ["captured-sha", "captured-sha"]);
 });
 
+test("agent_settled backstop still finds a leak committed in a session that started with an unborn HEAD", async () => {
+	// The bug a reviewer caught: agent_start's rev-parse HEAD fails (unborn),
+	// so baseSha is never captured. By agent_settled time the model has
+	// committed, so HEAD now exists. Passing the captured (undefined)
+	// baseSha straight through to resolveDiffTarget would make it re-derive
+	// "HEAD" from *current* state and diff HEAD against itself -- finding
+	// nothing. Pinning to the empty tree when baseSha was never captured
+	// must still catch this.
+	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-committed-unborn-"));
+	// rev-parse fails the first time (agent_start, unborn HEAD) and succeeds
+	// after that (the model has since committed). This is what makes the
+	// test actually distinguish the fix from its absence: pre-fix code
+	// passes the captured (undefined) baseSha straight to resolveDiffTarget,
+	// which re-checks rev-parse at settle time, gets a real sha now that
+	// HEAD exists, and diffs against "HEAD" -- self-diff, finds nothing. A
+	// mock that always fails rev-parse can't distinguish that from the fix
+	// (both would fall back to the empty tree either way).
+	let revParseCalls = 0;
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") {
+				revParseCalls += 1;
+				return revParseCalls === 1 ? result(128, "unknown revision") : result(0, "committed-sha\n");
+			}
+			if (command === "git" && args[0] === "diff") {
+				assert.equal(args[2], "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+				return result(0, "+++ b/main.go\n+\thttp.Error(w, err.Error(), 500)\n");
+			}
+			if (command === "git" && args[0] === "status") return result(0, "");
+			return result(1);
+		},
+	});
+	errorLeakGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	await harness.emit({ type: "agent_settled" } as any);
+	assert.equal(harness.messages.length, 1);
+});
+
+test("baseSha capture is keyed per cwd, not shared across projects in one long-running process", async () => {
+	// ExtensionHarness.emit() always uses one fixed context, so this invokes
+	// the registered handlers directly with two different per-call contexts
+	// -- the same shape a real long-running process moving between projects
+	// would produce (one pi instance, cwd varying per agent run).
+	const cwdA = await mkdtemp(join(tmpdir(), "pi-error-leak-cwd-a-"));
+	const cwdB = await mkdtemp(join(tmpdir(), "pi-error-leak-cwd-b-"));
+	const shas: Record<string, string> = { [cwdA]: "sha-a", [cwdB]: "sha-b" };
+	const diffTargetsByCwd: Record<string, string[]> = { [cwdA]: [], [cwdB]: [] };
+	const harness = new ExtensionHarness({
+		cwd: cwdA,
+		exec: ({ command, args, options }: ExecCall) => {
+			const cwd = (options as { cwd?: string } | undefined)?.cwd ?? cwdA;
+			if (command === "git" && args[0] === "rev-parse") return result(0, `${shas[cwd]}\n`);
+			if (command === "git" && args[0] === "diff") {
+				diffTargetsByCwd[cwd]!.push(args[args.length - 1] ?? "");
+				return result(0, "");
+			}
+			if (command === "git" && args[0] === "status") return result(0, "");
+			return result(1, "");
+		},
+	});
+	errorLeakGuard(harness.api);
+	const ctxA = { ...harness.context, cwd: cwdA };
+	const ctxB = { ...harness.context, cwd: cwdB };
+	for (const handler of harness.handlers.get("agent_start") ?? []) await handler({ type: "agent_start" }, ctxA);
+	for (const handler of harness.handlers.get("agent_start") ?? []) await handler({ type: "agent_start" }, ctxB);
+	for (const handler of harness.handlers.get("agent_settled") ?? []) await handler({ type: "agent_settled" }, ctxA);
+	for (const handler of harness.handlers.get("agent_settled") ?? []) await handler({ type: "agent_settled" }, ctxB);
+	assert.deepEqual(diffTargetsByCwd[cwdA], ["sha-a"]);
+	assert.deepEqual(diffTargetsByCwd[cwdB], ["sha-b"]);
+});
+
 test("re-nudges once a resolved finding reappears", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-error-leak-reappear-"));
 	let diff = "+++ b/main.go\n+\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n";
