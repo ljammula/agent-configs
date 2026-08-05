@@ -29,6 +29,58 @@ Use the project's own commands, in this order of preference:
 
 Run the verification command yourself with bash. Do not ask the user to run it.
 
+## Recurring test-correctness gotchas
+
+These are confirmed, not theoretical — each recurred on a real chunked build
+(see `pi-real-task-report-personal-budget-simplifier.md`), passed `gofmt`/
+`go build`/`go vet`/`go test`, and was only caught by a human re-reading the
+diff. `go build` and friends prove the code runs; none of them prove a test
+actually exercises the behavior its own comment claims.
+
+1. **SQLite `:memory:` never shares state across connections.** Each
+   `Open(":memory:")` call gets its own fresh, isolated database. A test that
+   opens `:memory:` twice to check "does a second call avoid re-seeding /
+   duplicating" cannot fail even if the guard it's testing is deleted — the
+   second open never sees the first open's data regardless. To test
+   idempotent reopen/reseed behavior, open a real file path (`t.TempDir()` +
+   a filename) shared across both calls.
+2. **`defer` inside a test helper fires when the helper returns, not when the
+   calling test ends.** `func testStore(t *testing.T) *Store { f := ...; defer
+   os.Remove(f.Name()); db := db.Open(f.Name()); return NewStore(db) }` deletes
+   the backing file the instant `testStore` returns — while the caller's
+   `*sql.DB` handle is still open and about to be used. Every write against it
+   then fails. Use `t.Cleanup(fn)` (registered on the test's own `*testing.T`,
+   runs at actual test end) or `t.TempDir()` (auto-cleaned, no manual removal
+   needed at all) — never a bare `defer` for cleanup inside a helper function.
+3. **A duplicate key across categories in a first-match-wins lookup table is
+   silent dead code.** If a keyword/merchant/rule table maps several inputs to
+   a category and checks categories in priority order, a value repeated in a
+   later category is unreachable — normal "does X classify correctly" tests
+   pass either way, because the *first* category's answer is still right.
+   Before finishing such a table, check your own literals for cross-category
+   duplicates.
+4. **A JSON API contract needs a raw-bytes assertion, not a round-trip decode.**
+   If chunk N's Go/Dart structs lack explicit tags/keys and chunk M's tests
+   decode chunk M's own HTTP responses back into chunk N's same struct type,
+   a wire-format mismatch (Go's default `"ID"`/`"Name"` field-name casing vs.
+   the rest of the API's `snake_case`) is invisible — `encoding/json` matches
+   field names case-insensitively on decode. Verify the actual bytes on the
+   wire (a `curl` smoke test, or an assertion against a literal JSON string),
+   at least once per endpoint, especially at a chunk boundary where the struct
+   and its HTTP handler were written in different sessions.
+5. **An escaped `\$` immediately followed by `{...}` silently disables string
+   interpolation in Dart.** `'\${x}'` interpolates correctly (a literal `$`
+   then the value of `x`) — but `'Budget: \${limit ~/ 100}.00'`, written with
+   the intent of showing a computed dollar amount, instead renders the
+   literal characters `${limit ~/ 100}` on screen: the `\$` escapes to a bare
+   `$`, which is no longer an interpolation trigger, so the following
+   `{...}` is just literal text. This compiles cleanly and `flutter analyze`
+   says nothing about it — only a test asserting the actual rendered string
+   (not a nearby icon or color) catches it. Write `'\$${value}'` (escaped
+   dollar sign immediately followed by *unescaped* interpolation) when a
+   literal `$` and a computed value share a string, and add a test asserting
+   the exact rendered text whenever a widget mixes the two.
+
 ## GitHub accounts
 
 - `ljammula` — owner account. Commits, pushes, PR creation, everything by default.

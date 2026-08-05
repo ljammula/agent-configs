@@ -1232,3 +1232,65 @@ client rules only covered the dynamic-discovery clients; the static ones
 need the same discipline — re-check `/v1/models` against the configured
 id whenever a route's checkpoint changes, don't assume last time's id
 still matches.
+
+## Real-task nudges from the personal-budget-simplifier build, 2026-08-05 (in progress)
+
+A second real (non-fixture) task, structurally different from the DayTrix Daily Briefing
+screen — a Go backend built from scratch rather than a Flutter screen added to an existing
+app — surfaced two bugs that passed `pi`'s own same-model `quality-gate.ts` verification
+(`outcome: "pass"` on both) but did not survive independent review: a false-positive SQLite
+`:memory:` idempotency test (two `Open(":memory:")` calls never share state, so the test
+could not have failed even with the guard removed) and a silently-dead duplicate keyword
+entry in a first-match-wins categorizer table. Full numbers, both bugs, and concrete
+`AGENTS.md`-wording nudges in `pi-real-task-report-personal-budget-simplifier.md` (a living
+document — the build isn't finished). Headline lesson: same-model self-verification is
+recurring evidence *for* the standing unresolved item above (make cross-model review the
+default, not opt-in) rather than a new finding — it's the same gap, from a second task shape.
+
+**Update, same day, chunk 3 (HTTP handlers):** `quality-gate.ts` this time correctly reported
+`outcome: "fail"` on a real `go build` error — the gate itself worked — but the agent settled
+(ended the `-p` run) on that failure instead of self-correcting; worth confirming whether the
+documented three-corrective-follow-up loop is wired for non-interactive `-p` invocations at all,
+since that's the only invocation shape this orchestration pattern uses. After the build was fixed
+by hand, three more real bugs surfaced that `gofmt`/`go build`/`go vet` structurally cannot catch:
+the same defer/lifecycle class of test-fixture bug as chunk 1 (this time `defer os.Remove(...)`
+inside a helper firing at the helper's return, deleting a SQLite file still in use — a recurring
+pattern across two backend chunks now, worth its own named `AGENTS.md` rule), a missing `return`
+after a written error response causing a double-write, and a cross-chunk JSON-tag omission
+(chunk 2's store structs had no `json` tags) that `go test` could not catch because its own
+assertions decode responses back into the same Go structs — `encoding/json` matches field names
+case-insensitively on decode, so a wire-format mismatch is invisible to any round-trip test where
+both ends are the same language's types. Only a raw-bytes `curl` smoke test caught it. Full
+detail in the same report file.
+
+**Update, same day: `cross-model-review.ts` confirmed not to fire under `pi -p`, at all.**
+Checking whether chunks 1–4 actually benefited from the (supposedly fixed) reviewer found two
+stacked problems. Environmental: this orchestrating session's `Bash` tool reported the exact stale
+`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` pair `~/.zshrc` was already corrected away from — because
+`.zshrc` is interactive-shell-only by zsh's own rules, the Bash tool's shell invocation is
+non-interactive (`zsh -c source snapshot...`), and the session's inherited env was frozen before
+the `.zshrc` fix landed; `env -i HOME=$HOME zsh -c 'source ~/.zshrc'` in a clean room reproduces
+the *correct* values, proving the file is right and only live propagation is wrong. General lesson:
+anything an orchestrator needs `pi -p` to see must be exported inline on the invocation itself,
+never assumed to come from dotfiles. But fixing that inline did **not** fix the real problem: a
+controlled diagnostic with correct env exported inline, a real diff, and a real broad verification
+command produced zero reviewer trace output — no `session_start` startup trace (logged
+unconditionally by the extension's own code), no `review` trace — while `stack-router.ts` and
+`quality-gate.ts` both fired correctly in the identical run, the latter on the same
+`agent_start`/`tool_result`/`agent_settled` hooks `cross-model-review.ts` also registers.
+`resolveReviewerConfig()` itself is confirmed correct by direct module import with the identical
+env (`{enabled: true, kind: "independent-review", ...}`). **`cross-model-review.ts` is therefore
+not confirmed to run at all under `pi -p` invocations**, independent of configuration — meaning
+every `pi -p`-based orchestration pattern in this harness, including every chunk of this build, has
+gotten zero benefit from it. `pi-harness-validation-status.md`'s "resolves to genuine
+`independent-review`" framing is downgraded accordingly: true of the config, never demonstrated
+true of the running extension. Root-causing why needs instrumentation inside `pi`'s own extension
+loader — out of scope for black-box orchestration-side investigation. Full detail, including the
+exact diagnostic commands, in `pi-real-task-report-personal-budget-simplifier.md`.
+
+**Update, chunk 5 (Flutter screens):** none of the four `AGENTS.md` gotchas above recurred (weak
+positive signal, one clean chunk). A new class did: an escaped `\$` immediately followed by `{...}`
+in Dart silently disables interpolation, rendering literal template text instead of a computed
+value — compiles clean, `flutter analyze` silent, only caught because the one test touching that
+code path was strengthened to assert the actual rendered string (not just a nearby icon) with a
+non-round-dollar fixture. Added as gotcha #5. Full detail in the report file.

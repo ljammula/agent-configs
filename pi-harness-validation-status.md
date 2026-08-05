@@ -11,16 +11,40 @@ it.
 
 Pi 0.83.0 has two resident inference routes: `ThinkingCap-Qwen3.6-27B-MLX-8bit`
 on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
-`:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are now
-set in `~/.zshrc`, so `cross-model-review.ts` resolves to genuine
-`independent-review` rather than disabling itself; same-primary review still
+`:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are set
+in `~/.zshrc` with values that `resolveReviewerConfig()` resolves correctly
+in isolation (confirmed by direct module import, see
+`pi-real-task-report-personal-budget-simplifier.md`'s reviewer-under--p
+finding) — but this is necessary, not sufficient. **`~/.zshrc` correctness
+does not mean a given `pi -p` invocation actually sees it**: `.zshrc` is
+interactive-shell-only by zsh's own file-sourcing rules, an agent harness's
+non-interactive `bash -c` invocations skip it entirely, and any long-lived
+shell (an already-open terminal, a coding-agent session started before a
+`.zshrc` edit) keeps whatever env it inherited at spawn time regardless of
+later edits to the file — the two-`Bash`-tool env values silently
+disagreeing with a freshly-`source`d `~/.zshrc` is the direct symptom, and it
+is now confirmed the reviewer read the stale pair (see below) across chunks
+1–4 of that build, invisibly. **Separately and more seriously**: a controlled
+diagnostic with the correct pair exported inline on the invocation itself
+(bypassing the above entirely) still produced zero reviewer trace output —
+no `session_start` trace, no `review` trace — while `stack-router.ts` and
+`quality-gate.ts` fired correctly in the identical run, including
+`quality-gate.ts` on the same `agent_start`/`tool_result`/`agent_settled`
+hooks `cross-model-review.ts` also registers. **Status downgraded pending
+investigation: `cross-model-review.ts` is not confirmed to fire at all under
+`pi -p` (non-interactive) invocations, independent of configuration
+correctness.** Every orchestration pattern that dispatches `pi -p` — which is
+all of them documented in this file — gets zero benefit from the reviewer
+until this is root-caused; same-primary review still
 requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
-cross-model, if it's ever pointed back at the same route. `AI_REVIEW_MODEL`
+cross-model, if it's ever pointed back at the same route, when/if the -p gap
+above is closed. `AI_REVIEW_MODEL`
 must be the exact id `GET :8081/v1/models` returns
 (`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`), not the short
 `gemma-4-26b-a4b-it` form — see "Stale `AI_REVIEW_MODEL` silently disabled
 the reviewer" in `pi-harness-history.md` for how this drifted and broke
-silently once already. The maintained Pi
+silently once already, and its 2026-08-05 follow-up entry for the -p finding.
+The maintained Pi
 project typechecks
 against pinned 0.83.0 public types and has 123 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
