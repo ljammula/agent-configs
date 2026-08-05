@@ -12,7 +12,7 @@ import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const GO_TEST_FLAG = /-race|-v|-count=\d+|-timeout(?:=\S+|\s+\S+)|-parallel(?:=\d+|\s+\d+)/;
 
 export const BROAD_VERIFICATION_PATTERNS = [
-	/\bmake verify\b/i,
+	/\bmake (?:verify|test|check)\b/i,
 	/\bnpm (?:run )?(?:test|verify)\b/i,
 	/\b(?:pnpm|yarn) (?:test|verify)\b/i,
 	new RegExp(`\\bgo test\\b(?:\\s+(?:${GO_TEST_FLAG.source}))*\\s+\\.\\/\\.\\.\\.(?:\\s|$)`, "i"),
@@ -135,11 +135,24 @@ async function isFlutterPackage(dir: string): Promise<boolean> {
 	return /^\s*sdk:\s*flutter\s*$/m.test(pubspec);
 }
 
-async function manifestCommandForDir(dir: string): Promise<string | undefined> {
-	if (await exists(join(dir, "Makefile"))) {
-		const makefile = await readFile(join(dir, "Makefile"), "utf8");
-		if (/^verify\s*:/m.test(makefile)) return "make verify";
+// Preferred over `test`/`check` when present: `verify` is the convention
+// this harness documents (pi/AGENTS.md, README.md) for "the complete
+// acceptance gate," not just the test suite, so it's trusted first when a
+// Makefile defines more than one of these targets.
+const MAKEFILE_TARGET_PRIORITY = ["verify", "test", "check"] as const;
+
+async function makefileVerificationCommand(dir: string): Promise<string | undefined> {
+	if (!(await exists(join(dir, "Makefile")))) return undefined;
+	const makefile = await readFile(join(dir, "Makefile"), "utf8");
+	for (const target of MAKEFILE_TARGET_PRIORITY) {
+		if (new RegExp(`^${target}\\s*:`, "m").test(makefile)) return `make ${target}`;
 	}
+	return undefined;
+}
+
+async function manifestCommandForDir(dir: string): Promise<string | undefined> {
+	const makefileCommand = await makefileVerificationCommand(dir);
+	if (makefileCommand) return makefileCommand;
 	if (await exists(join(dir, "go.mod"))) return "go test ./...";
 	if (await exists(join(dir, "pyproject.toml"))) return "pytest";
 	if (await exists(join(dir, "pubspec.yaml"))) return (await isFlutterPackage(dir)) ? "flutter test" : "dart test";
@@ -183,10 +196,8 @@ async function nestedVerificationCommand(cwd: string, maxEntries = 3000): Promis
 }
 
 export async function resolveVerificationCommand(cwd: string): Promise<string | undefined> {
-	if (await exists(join(cwd, "Makefile"))) {
-		const makefile = await readFile(join(cwd, "Makefile"), "utf8");
-		if (/^verify\s*:/m.test(makefile)) return "make verify";
-	}
+	const makefileCommand = await makefileVerificationCommand(cwd);
+	if (makefileCommand) return makefileCommand;
 	const documented = await documentedCommand(cwd);
 	if (documented) return documented;
 	if (await exists(join(cwd, "go.mod"))) return "go test ./...";

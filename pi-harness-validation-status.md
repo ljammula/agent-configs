@@ -17,11 +17,15 @@ set in `~/.zshrc`, so `cross-model-review.ts` resolves to genuine
 requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
 cross-model, if it's ever pointed back at the same route. The maintained Pi
 project typechecks
-against pinned 0.83.0 public types and has 74 deterministic tests covering
+against pinned 0.83.0 public types and has 78 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
 exits, reviewer truthfulness, symlink escapes, external-effect policy,
 installer scope, stack routing, extension interactions, nested verification
-manifests, and stale-extension-context handling.
+manifests, and stale-extension-context handling. Verification-command
+resolution (both `quality-gate.ts`'s settlement check and
+`cross-model-review.ts`'s trigger) recognizes a Makefile `verify`, `test`,
+or `check` target, in that priority order, not just `verify` — see
+`pi-harness-history.md`'s "make test/make check recognized" entry.
 
 Two acceptance boundaries remain intentionally not adopted:
 

@@ -940,3 +940,48 @@ producing review trace data on this task suite without a design change —
 e.g., a settlement-time reactive check mirroring `quality-gate.ts`'s
 `agent_settled` hook, instead of (or alongside) the current `tool_result`
 trigger.
+
+## `make test`/`make check` recognized alongside `make verify`, 2026-08-05
+
+Follow-up from the same conversation: a real target repo expects to expose
+its test entrypoint as `make test`, not `make verify`. Before this fix,
+neither `quality-gate.ts`'s settlement check (`resolveVerificationCommand`)
+nor `cross-model-review.ts`'s trigger (`BROAD_VERIFICATION_PATTERNS`)
+recognized a Makefile `test:` or `check:` target — only `verify:`, a
+convention this project's own docs (`pi/AGENTS.md`, `README.md`) assume but
+that most real-world repos don't follow. The failure mode was silent in
+both directions: quality-gate would quietly bypass the Makefile entirely
+and fall back to a bare `go test ./...`/`dart test`/etc (losing whatever
+setup the real Makefile target does), and cross-model-review's trigger
+would simply never fire on a `make test` invocation, indistinguishable from
+the pair-4 hidden-test timing gap documented above but with a different
+root cause.
+
+Reasoned through the tradeoff before changing anything: recognizing `make
+test` risks accepting a narrower target as if it were the full gate, if a
+repo deliberately splits `test`/`lint`/`build` into separate Makefile
+targets. But the comparison that matters isn't "make test vs make verify in
+the abstract" — it's "make test vs whatever bare fallback command
+quality-gate already silently substitutes today," and a real `make test`
+target (with its own flags, env setup, fixtures) is very unlikely to be
+narrower than that bare fallback. For `cross-model-review.ts`, recognizing
+more real invocations has no downside at all: it's a bonus check, not the
+enforcement gate, so added coverage can't weaken what's accepted as
+"passing."
+
+**Fix**: `BROAD_VERIFICATION_PATTERNS` now matches `make (verify|test|check)`
+as one pattern instead of only `make verify`. A new shared
+`makefileVerificationCommand()` helper (factored out of the previously
+duplicated root/nested-manifest Makefile checks in
+`resolveVerificationCommand` and `manifestCommandForDir`) checks Makefile
+targets in that same priority order — `verify` still wins if a repo defines
+more than one, since it's the more explicit "this is the full gate" signal
+when present. Deliberately kept to this fixed three-name allowlist rather
+than trying to dynamically infer "any target that looks test-like," which
+would be unneeded speculative complexity for the realistic convention
+space. 4 new tests in `pi/tests/verification.test.ts`
+(`recognizes make test and make check alongside make verify`,
+`verification resolution recognizes make test when there is no verify
+target`, `...make check when there is no verify or test target`, `...still
+prefers make verify over make test when both exist`). Full deterministic
+suite: 78/78 (was 74/74). Typecheck clean.

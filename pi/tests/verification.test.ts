@@ -38,6 +38,12 @@ test("recognizes plain dart test alongside flutter test", () => {
 	assert.equal(isBroadVerificationCommand("flutter test"), true);
 });
 
+test("recognizes make test and make check alongside make verify", () => {
+	assert.equal(isBroadVerificationCommand("make test"), true);
+	assert.equal(isBroadVerificationCommand("make check"), true);
+	assert.equal(isBroadVerificationCommand("make build"), false);
+});
+
 test("piped verification is inconclusive unless pipefail is set", () => {
 	assert.equal(verificationPipelineCanMaskFailure("go test ./... | tail -20"), true);
 	assert.equal(verificationPipelineCanMaskFailure("set -o pipefail; go test ./... | tail -20"), false);
@@ -108,6 +114,25 @@ test("verification resolution prefers make verify", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-verify-"));
 	await writeFile(join(cwd, "Makefile"), "verify:\n\tgo test ./...\n");
 	await writeFile(join(cwd, "go.mod"), "module example.test\n");
+	assert.equal(await resolveVerificationCommand(cwd), "make verify");
+});
+
+test("verification resolution recognizes make test when there is no verify target", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-make-test-"));
+	await writeFile(join(cwd, "Makefile"), "test:\n\tgo test ./...\n");
+	await writeFile(join(cwd, "go.mod"), "module example.test\n");
+	assert.equal(await resolveVerificationCommand(cwd), "make test");
+});
+
+test("verification resolution recognizes make check when there is no verify or test target", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-make-check-"));
+	await writeFile(join(cwd, "Makefile"), "check:\n\tgo vet ./... && go test ./...\n");
+	assert.equal(await resolveVerificationCommand(cwd), "make check");
+});
+
+test("verification resolution still prefers make verify over make test when both exist", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-make-both-"));
+	await writeFile(join(cwd, "Makefile"), "test:\n\tgo test ./...\nverify: test\n\tgo vet ./...\n");
 	assert.equal(await resolveVerificationCommand(cwd), "make verify");
 });
 
