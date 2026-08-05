@@ -11,40 +11,36 @@ it.
 
 Pi 0.83.0 has two resident inference routes: `ThinkingCap-Qwen3.6-27B-MLX-8bit`
 on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
-`:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are set
-in `~/.zshrc` with values that `resolveReviewerConfig()` resolves correctly
-in isolation (confirmed by direct module import, see
-`pi-real-task-report-personal-budget-simplifier.md`'s reviewer-under--p
-finding) — but this is necessary, not sufficient. **`~/.zshrc` correctness
-does not mean a given `pi -p` invocation actually sees it**: `.zshrc` is
-interactive-shell-only by zsh's own file-sourcing rules, an agent harness's
-non-interactive `bash -c` invocations skip it entirely, and any long-lived
-shell (an already-open terminal, a coding-agent session started before a
-`.zshrc` edit) keeps whatever env it inherited at spawn time regardless of
-later edits to the file — the two-`Bash`-tool env values silently
-disagreeing with a freshly-`source`d `~/.zshrc` is the direct symptom, and it
-is now confirmed the reviewer read the stale pair (see below) across chunks
-1–4 of that build, invisibly. **Separately and more seriously**: a controlled
-diagnostic with the correct pair exported inline on the invocation itself
-(bypassing the above entirely) still produced zero reviewer trace output —
-no `session_start` trace, no `review` trace — while `stack-router.ts` and
-`quality-gate.ts` fired correctly in the identical run, including
-`quality-gate.ts` on the same `agent_start`/`tool_result`/`agent_settled`
-hooks `cross-model-review.ts` also registers. **Status downgraded pending
-investigation: `cross-model-review.ts` is not confirmed to fire at all under
-`pi -p` (non-interactive) invocations, independent of configuration
-correctness.** Every orchestration pattern that dispatches `pi -p` — which is
-all of them documented in this file — gets zero benefit from the reviewer
-until this is root-caused; same-primary review still
-requires `AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never
-cross-model, if it's ever pointed back at the same route, when/if the -p gap
-above is closed. `AI_REVIEW_MODEL`
+`:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` are now
+in `~/.zshenv` (moved from `~/.zshrc` on 2026-08-05 — `.zshenv` is sourced by
+*every* zsh invocation, interactive or not, unlike `.zshrc`; verified against
+a fully isolated `env -i` non-interactive shell, no inherited environment at
+all, resolving correctly), so `cross-model-review.ts` resolves to genuine
+`independent-review` and — this part is now instrumentation-confirmed, not
+just config-confirmed — **actually fires and completes real review rounds
+under `pi -p`**: `session_start`, `tool_result`, and a full ~1.5–5.7s network
+round-trip to `:8081` all observed firing correctly in isolated diagnostic
+runs. An earlier same-day pass through this file claimed the opposite
+(`cross-model-review.ts` "not confirmed to fire at all under `pi -p`") and
+was wrong — retracted; see `pi-harness-history.md`'s "Corrected: two false
+harness-bug findings" entry for the full retraction and what actually caused
+the false negative (heavy concurrent processes — a second `pi -p` chunk and,
+separately, an Xcode build — most likely got a backgrounded diagnostic
+process killed before it flushed buffered stdout, producing a log that
+looked like total silence but wasn't a real absence of activity). Same-
+primary review still requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
+`blind-self-review`, never cross-model, if it's ever pointed back at the same
+route. `AI_REVIEW_MODEL`
 must be the exact id `GET :8081/v1/models` returns
 (`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`), not the short
 `gemma-4-26b-a4b-it` form — see "Stale `AI_REVIEW_MODEL` silently disabled
 the reviewer" in `pi-harness-history.md` for how this drifted and broke
-silently once already, and its 2026-08-05 follow-up entry for the -p finding.
-The maintained Pi
+silently once already. `quality-gate.ts`'s corrective-follow-up loop is
+likewise now instrumentation-confirmed to work under `pi -p` — a `sendUserMessage(..., {deliverAs: "followUp"})`
+call was observed producing a genuine second `agent_settled` turn roughly a
+minute later in an isolated forced-failure test; an earlier claim that this
+"delivered nothing" in `-p` mode is retracted for the same reason (see the
+same history entry). The maintained Pi
 project typechecks
 against pinned 0.83.0 public types and has 123 deterministic tests covering
 loading, event ordering, retry caps, current-diff verification, shell-masked
@@ -106,11 +102,11 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. |
 | `git-safety.ts` | Adopted | Blocks destructive git commands (`reset --hard`, `push --force` w/o lease, `clean -f`, `branch -D`, `checkout/restore -- .`). 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check (including nested manifests) at settlement, caps corrective follow-ups at three. Proven in the completed nine-pair battery above. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check (including nested manifests) at settlement, caps corrective follow-ups at three. Proven in the completed nine-pair battery above. Corrective follow-up under `pi -p` specifically confirmed 2026-08-05 via an isolated instrumented forced-failure test: `sendUserMessage(..., {deliverAs: "followUp"})` produced a genuine second `agent_settled` turn (`correctiveFollowUps=1`) roughly a minute later — retracts a same-day false claim that this "delivered nothing" in `-p` mode, see `pi-harness-history.md`. |
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, and GCP guidance from repository evidence. Deterministic tests for all routes; only Go/Dart routes have battery coverage (see battery result above), the rest are wired and unit-tested but not battery-proven. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target file #1 of 8) does not meet the paired-adoption threshold. Live (non-retrospective) validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic branch tests pass; the widened empty-content-stop trigger has zero real-trial field evidence. |
-| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review`, but its trigger cannot fire on the current task suite | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` set in `~/.zshrc` to `gemma-4-26b-a4b-it` on `:8081`, distinct from the `:8080` Qwen primary. Deterministic tests pass (74/74); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. A separate 2026-08-04 investigation against a third route (KAT-Coder, `:8083`, not the standing config) found and fixed a process-crashing stale-context bug in the `tool_result` catch handler and a structural gap where `pi -p` exited before any review round could finish; both fixed, tested, and now apply to whichever route is configured — see `pi-harness-history.md`'s "Trying a third reviewer route" section. `REVIEW_TIMEOUT_MS` raised from 120s to 240s (commit `83ca0cb`) after a real production-shaped review request against idle Gemma took 121.4s — 1.4s past the old timeout, which would have silently discarded a correct finding. A full end-to-end rerun (2026-08-04, standing Qwen+Gemma config, pair 4) confirmed the task itself passes cleanly (9/9 go -race, 17/17 dart) but the reviewer never fired: its `tool_result` trigger only reacts to the *model's own* successful broad-verification command, and `local-model-bench` hides real test files until after `pi` exits, so the model never has one to run — it wrote its own smoke test instead, and its one `dart test` call errored on "no test files," which the trigger explicitly excludes. No route, model, or timeout can fix this; it needs a design change (e.g. a settlement-time trigger like `quality-gate.ts`'s). Discovered 2026-08-05: after the `:8082`→`:8081` route move, `AI_REVIEW_MODEL` held the short id `gemma-4-26b-a4b-it` while the route now serves `/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`; every real request 400'd `model_mismatch`, which `requestReview()` silently downgrades to `{outcome: "transient"}` — the reviewer had been reviewing nothing since the move, with no error surfaced anywhere. Fixed by exporting the full served id. With the id corrected, a 15-trial reviewer-reliability battery (three planted bugs — `clampToRange` missing its upper-bound clamp, `divide` missing its zero-check, `add` implemented as subtraction — 5 trials each at `temperature: 0`, via the real `requestReview()` path) caught 15/15, deterministic across repeats (identical response length per bug on every trial). A 9-trial false-positive control (3 trials each of the correct implementation of the same three functions) returned `NO_ISSUES_FOUND` 9/9. See todo. |
+| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review`, confirmed firing and completing real review rounds under `pi -p` on tasks that run a genuine broad verification command; still structurally blind on task suites that don't (e.g. `local-model-bench`, see below) | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` moved to `~/.zshenv` 2026-08-05 (was `~/.zshrc`, interactive-shell-only — see `pi-harness-history.md`'s env-propagation entries) set to `gemma-4-26b-a4b-it` on `:8081`, distinct from the `:8080` Qwen primary. Deterministic tests pass (74/74); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. A separate 2026-08-04 investigation against a third route (KAT-Coder, `:8083`, not the standing config) found and fixed a process-crashing stale-context bug in the `tool_result` catch handler and a structural gap where `pi -p` exited before any review round could finish; both fixed, tested, and now apply to whichever route is configured — see `pi-harness-history.md`'s "Trying a third reviewer route" section. `REVIEW_TIMEOUT_MS` raised from 120s to 240s (commit `83ca0cb`) after a real production-shaped review request against idle Gemma took 121.4s — 1.4s past the old timeout, which would have silently discarded a correct finding. A full end-to-end rerun (2026-08-04, standing Qwen+Gemma config, pair 4) confirmed the task itself passes cleanly (9/9 go -race, 17/17 dart) but the reviewer never fired on that suite specifically: its `tool_result` trigger only reacts to the *model's own* successful broad-verification command, and `local-model-bench` hides real test files until after `pi` exits, so the model never has one to run there — it wrote its own smoke test instead, and its one `dart test` call errored on "no test files," which the trigger explicitly excludes. Discovered 2026-08-05: after the `:8082`→`:8081` route move, `AI_REVIEW_MODEL` held the short id `gemma-4-26b-a4b-it` while the route now serves `/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`; every real request 400'd `model_mismatch`, which `requestReview()` silently downgrades to `{outcome: "transient"}` — the reviewer had been reviewing nothing since the move, with no error surfaced anywhere. Fixed by exporting the full served id. With the id corrected, a 15-trial reviewer-reliability battery (three planted bugs — `clampToRange` missing its upper-bound clamp, `divide` missing its zero-check, `add` implemented as subtraction — 5 trials each at `temperature: 0`, via the real `requestReview()` path) caught 15/15, deterministic across repeats (identical response length per bug on every trial). A 9-trial false-positive control (3 trials each of the correct implementation of the same three functions) returned `NO_ISSUES_FOUND` 9/9. Same day, on the personal-budget-simplifier build: instrumented diagnostics (debug logging inserted directly into `session_start`/`tool_result` handlers, then reverted) confirmed `session_start`, `tool_result`, and a full network round-trip to `:8081` (1.6–5.7s, `outcome: "clean"`) all fire correctly under `pi -p` on tasks that run real `go build`/`go test` commands — the settlement-time-trigger gap below is specific to suites like `local-model-bench` that hide tests, not a general `-p`-mode limitation. See todo. |
 | `new-project-scaffold.ts` | Adopted, on by default | Git-init nudge plus layered-architecture (`cmd/`/`internal/domain`/`internal/handler`-shaped) nudge for greenfield repos. Live-tested 2026-08-05 against a fresh Go+SQLite todo-app task: both nudges fired and worked exactly as designed (repo initialized, real commit made, the requested layered structure created). Deterministic tests pass. |
 | `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical `verify`/`test`/`check` Makefile target. The original `before_agent_start`-only precondition check was found structurally blind on greenfield repos by the 2026-08-05 live test above — it evaluated once, before any files existed, and was never re-checked after `go mod init` created a manifest mid-session. Redesigned to arm a `tool_result` flag when a manifest file appears and nudge once at the next `turn_end`. Deterministic tests pass (123/123); the revised design has not itself been live-tested — only the superseded version was. |
 | `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Same live test found the original `agent_settled`-only design structurally blind: in `-p` mode `agent_settled` fires once, *after* `agent_end`, by which point the model had already committed, leaving diff-since-`baseSha` empty. Redesigned: primary detection moved to `tool_result` on build-shaped bash commands, `agent_settled` kept only as a cwd-keyed backstop with an empty-tree fallback for the greenfield case (a follow-up review pass also fixed a case where that fallback was permanently dead when the first commit happened mid-session). Deterministic tests pass; revised design not yet live-tested. |

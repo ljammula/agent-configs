@@ -10,6 +10,14 @@ sandboxed environment (`could not create image from display`, no screen-recordin
 the running app's UI was never visually screenshotted — its correctness rests on the widget tests'
 exact-text/icon assertions plus the clean runtime log, not a pixel-level check.
 
+**Post-build correction, same day**: two "confirmed" harness bugs reported below
+(`cross-model-review.ts` and `quality-gate.ts`'s corrective follow-up allegedly not working under
+`pi -p`) were retracted after direct instrumentation — both actually work correctly. The
+black-box observations that produced them were most likely artifacts of running heavy concurrent
+processes on the same machine. One real, reproducible bug (`.zshrc` values not reaching
+non-interactive shells) was fixed for real via `~/.zshenv`. See "Correction notice" below for the
+full account — it's kept as a methodology lesson, not just a fixed conclusion.
+
 Task: implement a Go + Flutter personal-budgeting app end-to-end, chunked into 7 small
 acceptance-criteria-bounded steps per `~/code/agent-configs/plans/personal-budget-simplifier-build-plan.md`,
 delegated to `pi` (`ai-stack-local`, ThinkingCap-Qwen3.6-27B-MLX-8bit, :8080) via `pi -p` per
@@ -142,7 +150,23 @@ skipping, monthly summary sorted correctly, the 3-budget free-tier limit returni
 LIMIT_REACHED`, and `over_budget` computed correctly — all confirmed via real HTTP requests, not
 just `go test`.
 
-## `cross-model-review.ts` does not fire under `pi -p`, confirmed by direct diagnostic
+## Correction notice
+
+The section below ("`cross-model-review.ts` does not fire under `pi -p`") was written same-day and
+is **wrong** — retracted after direct instrumentation (debug logging inserted into the actual
+extension handlers, not further black-box inference). Both `cross-model-review.ts` and
+`quality-gate.ts`'s corrective follow-up are confirmed working correctly under `pi -p`. The
+original black-box observations (zero trace output in two backgrounded, redirected logs) were most
+likely caused by running heavy concurrent processes on the same machine — a second `pi -p` chunk in
+one case, a `flutter run -d macos` Xcode build in the other — that plausibly got a backgrounded `pi`
+process killed before its fully-buffered (non-TTY) stdout ever reached disk, producing a log that
+*looked* like total silence without actually proving the extension was silent. The section is kept
+below, struck through in spirit but left intact, because the methodology mistake (treating a quiet
+redirected log as proof of absence, without ruling out concurrent resource contention or a killed
+process) is itself a useful lesson — see the correction detail and the real fix (env propagation via
+`~/.zshenv`) in `pi-harness-history.md`'s "Corrected: two false harness-bug findings" entry.
+
+## [RETRACTED] `cross-model-review.ts` does not fire under `pi -p`, confirmed by direct diagnostic
 
 `pi-harness-validation-status.md` states the reviewer "resolves to genuine `independent-review`"
 now that `~/.zshrc` sets correct `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` values. Checking whether
@@ -195,6 +219,52 @@ zero benefit from the reviewer**, contradicting `pi-harness-validation-status.md
 "resolves to genuine `independent-review`" framing — which was true of the config, never
 demonstrated true of the running extension. Downgraded there accordingly; needs a `pi` maintainer
 or a deeper instrumented investigation to close.
+
+*(All of the above is retracted — see "Correction notice" above. Actual instrumented result
+follows.)*
+
+## `cross-model-review.ts` and `quality-gate.ts` under `pi -p`: instrumentation-confirmed working
+
+Direct instrumentation — debug logging added straight into the extension source, run in isolation
+with no other heavy process competing for the machine, reverted immediately after — settled this
+cleanly, in contrast to the black-box guessing above.
+
+**Reviewer**: two isolated `pi -p` runs against the real backend (a small doc-comment edit plus a
+real `go build && go test`) both produced the complete expected sequence —
+`REVIEWER_FN_CALLED enabled=true kind=independent-review` → `SESSION_START_FIRED` →
+`TOOL_RESULT_FIRED` on each tool call → `TOOL_RESULT_TRIGGERING_REVIEW` once the matching bash
+command ran — and both completed a real round-trip to the `:8081` Gemma endpoint (1.6s and 5.7s)
+logging `outcome: "clean"` through the normal `pi-harness-trace` channel. Reproducible twice, not
+a fluke.
+
+**Quality-gate corrective follow-up**: an isolated scratch repo with a forced, intentionally
+unfixed build failure showed `AGENT_SETTLED_FIRED` → `RAN_VERIFICATION passed=false` →
+`SENDING_FOLLOWUP attempt=1`, then a **second** `AGENT_SETTLED_FIRED` roughly a minute later with
+`correctiveFollowUps=1` carried forward from the first — the `sendUserMessage(..., {deliverAs:
+"followUp"})` call was genuinely delivered and produced another agent turn under `pi -p`.
+
+**So what actually caused the original "zero trace output" observations?** Best explanation given
+the evidence: both were run while a second heavy process was competing for the machine — a second
+`pi -p` chunk still in flight in one case, a `flutter run -d macos` Xcode build in the other (the
+retried README chunk that died mid-response with `stopReason: "pending"` and zero live process
+afterward is the clearest smoking gun of an outright kill, not a clean exit). `--mode json` output
+redirected to a file is fully buffered rather than line-buffered; a process killed rather than
+exited cleanly can lose everything sitting in that buffer — including a `session_start` trace that,
+per this correction's evidence, actually does fire within the first tens of milliseconds. **A quiet
+log from a backgrounded, redirected process is not proof an extension stayed silent** — it can
+equally mean the process died before flushing. That methodology gap, not any real harness defect,
+produced both retracted findings.
+
+**What was real, and what got fixed**: the `.zshrc`-to-non-interactive-shell propagation gap held
+up under the same clean-room test (`env -i HOME=$HOME zsh -c 'source ~/.zshrc'` reproduced the
+*correct* values while every other check in this session showed the stale pair — not explainable by
+resource contention). Fixed for real, not just documented: the relevant exports moved from
+`~/.zshrc` to `~/.zshenv`, which zsh sources for every invocation regardless of interactive/login
+status. Verified against a fully isolated `env -i` shell resolving correctly, and confirmed to take
+effect immediately in this same session (each `Bash` tool call turns out to spawn a fresh
+non-interactive shell each time rather than reusing one frozen at session start — no restart
+needed). `~/.zshrc` now points to `~/.zshenv` in a comment instead of duplicating the exports,
+removing the drift risk that caused the original "Stale `AI_REVIEW_MODEL`" incident.
 
 ## Chunk 5 (onboarding/import/dashboard screens) — a new bug class, `AGENTS.md` gotchas held
 

@@ -1294,3 +1294,65 @@ in Dart silently disables interpolation, rendering literal template text instead
 value — compiles clean, `flutter analyze` silent, only caught because the one test touching that
 code path was strengthened to assert the actual rendered string (not just a nearby icon) with a
 non-round-dollar fixture. Added as gotcha #5. Full detail in the report file.
+
+## Corrected: two false harness-bug findings, root cause, and the one real fix, 2026-08-05
+
+The two "confirmed" harness bugs above — `cross-model-review.ts` never firing under `pi -p`, and
+by implication `quality-gate.ts`'s corrective follow-up doing nothing there either — were **wrong**.
+Both retracted after direct instrumentation, not further black-box inference.
+
+**How the retraction was done.** Debug logging (`node:fs.appendFileSync` to a fixed path) was
+inserted directly into `cross-model-review.ts`'s `session_start`/`tool_result` handlers and
+`quality-gate.ts`'s `agent_settled` handler — temporarily, reverted to a clean `diff`-verified
+state immediately after — then two categories of test were rerun in isolation, with no other heavy
+process running concurrently:
+
+- **Reviewer**: two separate isolated `pi -p` runs (small, real doc-comment edit + real `go build
+  && go test`, on the actual `personal-budget-simplifier/backend`) both showed the full expected
+  sequence — `MODULE_LOADED` → `REVIEWER_FN_CALLED enabled=true kind=independent-review` →
+  `SESSION_START_FIRED` → several `TOOL_RESULT_FIRED` events → `TOOL_RESULT_TRIGGERING_REVIEW` on
+  the matching bash command — and both completed a real network round-trip to `:8081`
+  (1.6s and 5.7s) with `outcome: "clean"` logged via the normal `pi-harness-trace` channel.
+  Reproducible, not a fluke.
+- **Quality-gate**: an isolated scratch repo, one forced-failure task (add an intentionally
+  broken line, explicitly instructed *not* to fix it, run `go build`), showed
+  `AGENT_SETTLED_FIRED` → `RAN_VERIFICATION passed=false` → `SENDING_FOLLOWUP attempt=1`,
+  followed roughly a minute later by a **second** `AGENT_SETTLED_FIRED` with
+  `correctiveFollowUps=1` carried forward — proof the `sendUserMessage(..., {deliverAs:
+  "followUp"})` call was actually delivered and the agent resumed for another turn under `pi -p`,
+  contradicting the earlier claim outright.
+
+**What actually caused the false negative**, best explanation given the evidence: both original
+"zero trace output" observations happened while a second heavy process was running concurrently on
+this machine — a second `pi -p` chunk still in flight for one, a `flutter run -d macos` Xcode build
+for the other (the retried README chunk that silently died mid-response, `stopReason: "pending"`,
+zero live process afterward, is the clearest smoking gun — a `pi -p` process was killed outright,
+not gracefully exited). `--mode json` output redirected to a file is fully buffered, not
+line-buffered; a killed-rather-than-exited process can lose everything sitting in that buffer,
+including a `session_start` trace that in reality fired in the first few milliseconds. A log file
+with zero mentions of an extension is not proof the extension was silent — it can just as easily
+mean *the process died before its output reached disk*. Lesson for future harness diagnostics:
+never run a black-box "did X fire" test concurrently with another heavy `pi`/build process on the
+same machine, and treat total silence in a backgrounded/redirected log as inconclusive, not
+conclusive, unless the process's own exit code and a completion marker are both confirmed — a
+"finished" `kill -0` poll does not distinguish a clean exit from a kill.
+
+**The one finding that held up and got fixed for real**: `.zshrc`'s `AI_REVIEW_*` values genuinely
+did not reach the Bash tool's non-interactive shell — confirmed via a clean-room `env -i HOME=$HOME
+zsh -c 'source ~/.zshrc; ...'` reproducing the *correct* values while every other test in this
+session showed the stale pair, which isn't explainable by resource contention. **Fixed**, not just
+documented: `AI_STACK_HOST`/`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`/`PATH` moved from `~/.zshrc` to
+`~/.zshenv`, which zsh sources for every invocation regardless of interactive/login status.
+Verified against a fully isolated `env -i` shell (no inherited environment at all) resolving
+correctly, and confirmed the fix took effect immediately within the same session — each `Bash`
+tool call turned out to spawn a genuinely fresh non-interactive shell rather than reusing one
+frozen at session start, so there was no stale-session-env problem to wait out, just the wrong file.
+`~/.zshrc` now carries a pointer comment instead of the duplicated exports, removing the drift risk
+that caused the original (real) "Stale `AI_REVIEW_MODEL`" incident in the first place.
+
+Net effect on `pi-harness-validation-status.md`: the "downgraded" framing from the same-day entries
+above is reverted; `cross-model-review.ts` and `quality-gate.ts`'s `-p`-mode behavior are both
+instrumentation-confirmed working, and the only genuinely open item from this build's investigation
+is the pre-existing, narrower, already-documented one — the reviewer's purely reactive `tool_result`
+trigger structurally cannot fire on task suites (like `local-model-bench`) that hide tests until
+after `pi` exits, which is a design gap, not a `-p`-mode bug.
