@@ -1425,3 +1425,23 @@ second reviewer catching that failure via `git show`/`git diff` on the retractio
 re-running anything) is direct evidence for treating "a second independent read" as more valuable
 than another self-directed instrumented test. Full detail, the exact `buildReviewDiff` diff, and
 the live-fire confirmation transcript in `pi-real-task-report-personal-budget-simplifier.md`.
+
+## A `.zshenv` defaulting nuance found while reviewing the CSV sign-flip fix, 2026-08-05
+
+Invoking `requestReview()` directly (to get the real reviewer's opinion on the committed
+`personal-budget-simplifier` CSV sign-flip fix, via `HEAD~1..HEAD`) resolved the *stale* `:8082`
+config on the first attempt, despite `~/.zshenv` having been fixed and verified hours earlier in
+this same session. Cause: `~/.zshenv` uses `${VAR:-default}` specifically so an inline override
+still wins over the file's default — but that same mechanism means it can only fill in a variable
+that is currently *unset*. This one long-running session's root environment had `AI_REVIEW_BASE_URL`
+set to the stale pair from before `~/.zshenv` existed at all, inherited into every subprocess since;
+`${VAR:-default}` cannot distinguish "the user deliberately set this and it should win" from "this
+is a leftover stale value from an ancestor process," so it correctly leaves the former alone and
+therefore also leaves the latter alone. This does not contradict the earlier `env -i`/fresh-shell
+verification — those tests started from a genuinely clean environment, which is exactly the case
+`${VAR:-default}` is designed for, and exactly the case every *new* terminal/session will be in.
+It only affects a session whose environment was already poisoned before the fix landed. Practical
+implication for the remainder of this session specifically: keep exporting `AI_REVIEW_BASE_URL`/
+`AI_REVIEW_MODEL` inline on every direct invocation here, same as throughout the rest of this
+build — the `~/.zshenv` fix is real and will hold for the next fresh session, just not retroactively
+for this one's already-running root environment.
