@@ -12,7 +12,7 @@ import { isStaleContextError } from "./lib/stale-context.ts";
 import { isBroadVerificationCommand, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
-const REVIEW_TIMEOUT_MS = 120_000;
+const REVIEW_TIMEOUT_MS = 240_000;
 const EXEC_TIMEOUT_MS = 5000;
 const MAX_REVIEW_ROUNDS = 3;
 
