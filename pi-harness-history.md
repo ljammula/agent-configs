@@ -886,3 +886,57 @@ under it.
 headroom above the measured idle-route baseline instead of a margin smaller
 than the noise. No test hardcoded the old value; full deterministic suite
 still passes 74/74 after the change.
+
+## Full-harness rerun of pair 4 with Gemma configured as reviewer: task passes, but the reviewer's reactive trigger cannot fire against this benchmark's hidden-test methodology, 2026-08-04
+
+With `REVIEW_TIMEOUT_MS` fixed, ran the actual standing configuration — Qwen
+primary, `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` explicitly set to Gemma on
+`:8082` — through the fully installed harness against pair 4
+(go-flutter/bookmarks-app) end to end, not a bypass probe this time. `pi
+--print` exit 0, 3 files changed (374 insertions/29 deletions).
+
+Result, verified afterward with the real hidden tests copied in (matching
+`run_screening.py`'s own methodology): **`go test -race ./...` 9/9 pass,
+`dart test` 17/17 pass — a full task pass.** Cost: 31 assistant messages, 38
+tool calls, ~430s wall time, 25.2K fresh input / 517K cache-read / 10.5K
+output tokens. This is Qwen fixing the pair-4 race on its own (recall its
+established base rate on this bug is 2/5), not new evidence about Gemma or
+the harness.
+
+**The reviewer never fired, and this time the cause is structural, not a
+missing env var.** The prior KAT-Coder-primary run's missing review trace
+was traced to a test-launcher gap (a detached shell not sourcing
+`~/.zshrc`); this run explicitly exported `AI_REVIEW_BASE_URL`/
+`AI_REVIEW_MODEL` into the process, ruling that out. Instead: tracing the
+model's own bash calls in the session shows it never ran a command matching
+`BROAD_VERIFICATION_PATTERNS`. `local-model-bench` deliberately copies its
+hidden test files into the work directory only *after* `pi` exits (so the
+model can't read or game them), so during its own session there is no
+`server/bookmarksapi_test.go` and no `client/test/` directory to run
+against. The model correctly adapted — it wrote its own hand-rolled Go
+`httptest` smoke-test program instead of `go test`, which doesn't match the
+broad pattern — and its one literal `dart test` invocation returned "No
+test files were passed and the default 'test/' directory doesn't exist,"
+a nonzero-exit usage error. `cross-model-review.ts`'s `tool_result` handler
+explicitly skips on `event.isError`, so that invocation could never have
+triggered a review regardless of route health or timeout value.
+`quality-gate.ts`'s two "fail" trace events during this same session are
+the same artifact from the other side: unlike the reviewer, quality-gate
+runs its *own* settlement-time check rather than waiting on the model, so
+it did fire — but against the same tests-not-yet-present repo state, so its
+"fail" outcome reflects the same benign timing gap, not a real defect in
+the final tree (which passed cleanly once real tests existed to run).
+
+**Conclusion: `cross-model-review.ts`'s purely reactive trigger design (fire
+only when the model itself runs a matching, successful verification
+command) is structurally incompatible with `local-model-bench`'s
+hidden-test-until-after-exit methodology.** No route, model, or timeout
+value can fix this — the trigger's precondition never becomes true during
+the session on any of these tasks. This is a real, newly identified gap in
+the paired-battery evidence path for `independent-review`, separate from
+today's KAT-Coder/timeout findings, and blocks the existing todo item
+("rerun the seeded battery with `cross-model-review.ts` live") from ever
+producing review trace data on this task suite without a design change —
+e.g., a settlement-time reactive check mirroring `quality-gate.ts`'s
+`agent_settled` hook, instead of (or alongside) the current `tool_result`
+trigger.
