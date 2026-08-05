@@ -1,6 +1,6 @@
 # Local ai-stack model endpoints
 
-Operational snapshot: 2026-08-02. The owning runtime repository is
+Operational snapshot: 2026-08-05. The owning runtime repository is
 `~/code/ai-stack`; its `PLAN.md`, launchers, exact package locks, and
 `mlx-vlm-rollback.md` remain the source of truth. This file records only the
 facts agent configurations need when choosing or calling a local route.
@@ -10,10 +10,13 @@ facts agent configurations need when choosing or calling a local route.
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
 | `:8080/v1` | `ThinkingCap-Qwen3.6-27B-MLX-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | 51.9 tok/s median |
+| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc`, previously `:8082`) | — | smoke-tested 2026-08-05 only |
 
-The rate came from sequential live requests using 256 generated tokens per
-sample. The 27B samples were 51.76-51.95 tok/s. This is a workload-specific
-observation, not a throughput SLA.
+The `:8080` rate came from sequential live requests using 256 generated tokens
+per sample. The 27B samples were 51.76-51.95 tok/s. This is a
+workload-specific observation, not a throughput SLA. `:8081` has one live
+smoke test (correctly flagged a seeded bug) and no throughput measurement
+yet.
 
 ## Client rules
 
@@ -41,14 +44,16 @@ cost and latency benchmark.
 
 ## Review topology
 
-There is currently one resident inference model. Pi's primary provider and
-`cross-model-review.ts` both call the same ThinkingCap Qwen3.6-27B model on
-`:8080`; the review is blind to the primary model's reasoning but is not
-cross-model or differently trained. The extension's successful adoption
-evidence came from a Gemma reviewer on the former `:8081` route, after an
-earlier reviewer missed the seeded bug twice. That historical evidence does
-not validate today's same-model route, so current reviewer output is an
-unvalidated secondary signal, never independent proof.
+There are now two resident inference models. Pi's primary provider calls
+ThinkingCap Qwen3.6-27B on `:8080`; `cross-model-review.ts` is configured
+(via `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc`) to call the
+distinct, independently-trained Gemma reviewer on `:8081` instead, so it
+resolves to genuine `independent-review` rather than same-model
+`blind-self-review`. See `pi-harness-validation-status.md` for the current
+adoption status and `pi-harness-history.md` for how that route moved from
+`:8082` to `:8081`. If `AI_REVIEW_BASE_URL` is ever pointed back at `:8080`,
+review reverts to same-model and must be labeled `blind-self-review`, not
+cross-model.
 
 The local-review scripts used by Claude and Codex are still cross-model in the
 ordinary sense because their primary agent is a cloud model. When the same

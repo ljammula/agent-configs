@@ -168,7 +168,7 @@ Written here:
   the primary route/model is rejected unless `AI_REVIEW_ALLOW_SELF=1`, in
   which case it is labeled `blind-self-review`. `AI_REVIEW_BASE_URL`/
   `AI_REVIEW_MODEL` are currently set in `~/.zshrc` to an independently
-  trained Gemma reviewer on `:8082`, distinct from the `:8080` Qwen
+  trained Gemma reviewer on `:8081`, distinct from the `:8080` Qwen
   primary, so this resolves to genuine `independent-review`. The
   bounded-loop design (3-round cap, outcome-typed `runReview`,
   last-non-empty-line marker matching) is validated by 8 deterministic
