@@ -778,3 +778,111 @@ Gemma (`:8082`) throughout — KAT-Coder was only exported ad hoc per-run for
 this investigation, never made the standing configuration. Full
 deterministic suite: 74/74 (was 67/67; +5 verification tests, +2
 cross-model-review tests, net +7).
+
+## KAT-Coder ruled out as primary model and as reviewer; Gemma's reviewer timeout raised to 240s, 2026-08-04
+
+Two follow-up spot-checks, prompted by the open KAT-Coder questions above,
+closed both out — one as primary coding model, one as reviewer — and the
+second directly motivated a real config change.
+
+### As primary coding model: not adopted, n=1 result is statistically empty
+
+Ran the fully installed harness (protected-paths, format-on-edit,
+quality-gate, stack-router, cross-model-review, etc., all on) with
+KAT-Coder-V2.5-Dev-OptiQ-4bit substituted as the *primary* model in place of
+Qwen, against pair 4 (`go-flutter/bookmarks-app`) — the task both battery
+arms failed on the shared `go test -race` visit-counter data race. `pi
+--print` exited 0, no extension errors, 3 files changed (327
+insertions/30 deletions).
+
+Result: `go test -race ./...` passed 9/9 — the exact race condition Qwen
+missed was fixed. But `dart test` then failed 3/17, and quality-gate
+correctly caught it: an early diffHash recorded two passing verification
+events (an earlier `go vet`/analyze-only pass), then a later diffHash
+recorded two failing events at settlement, the second showing `exitCode:
+65, diffChanged: false` — the harness attempted a corrective follow-up, the
+model produced no new diff, and quality-gate correctly refused to bind the
+diff as passing evidence. Overall task result: **fail**.
+
+Independent Opus review of the actual diffs (not just the pass/fail
+summary) found the win is not real signal: this project's own prior
+five-run investigation (the section above) already showed Qwen fixes this
+exact race in 2 of 5 runs on its own — roughly a 40% base rate — so a
+single KAT-Coder success is statistically indistinguishable from Qwen's own
+variance, not evidence of a capability edge. It also cuts the other way on
+net: the task failed here on the Dart side, which the original Qwen battery
+arms did not fail on. The Go fix itself was verified correct where applied
+(snapshots `bm` under the lock before encoding in `visitBookmark`) but
+incomplete: `getBookmark` and `createBookmark` still release the mutex and
+hand the live map pointer to the JSON encoder unsynchronized, the same bug
+class, just not exercised concurrently by this task's hidden test. The
+Dart failures traced to one root cause: the model added a `_loaded` gate to
+satisfy a spec sentence ("before load(), returns an empty list") that was
+already true for free from the empty initial list, and the three failing
+tests all skip calling `load()` first.
+
+`cross-model-review.ts` produced no trace event during this run — not a
+code defect; the run was launched via a detached `nohup bash -c '...'`
+subshell that doesn't source `~/.zshrc`, so `AI_REVIEW_BASE_URL`/
+`AI_REVIEW_MODEL` were absent and the extension correctly self-disabled.
+This is a test-launcher gap, not a harness bug, but it means the earlier
+five-run KAT-Coder-as-reviewer investigation remains the only real evidence
+on that path — this run didn't add to it.
+
+**Verdict: KAT-Coder is not adopted as an alternate or additional primary
+model.** Distinguishing a real edge from Qwen's own ~40% base rate on this
+task would need on the order of 8-10 paired runs, not one; this stays a
+todo, not a conclusion.
+
+### As reviewer: ruled out — structurally cannot complete a real review request, timeout tuning does not fix it
+
+The section above left KAT-Coder's reviewer viability as an open question:
+was the 60-120s round trip (sometimes exceeding `REVIEW_TIMEOUT_MS`) a
+symptom of route contention (three resident models competing for the same
+Mac Studio GPU/unified memory) or a real capacity limit of the model/route
+itself? Remeasured directly, bypassing `pi` entirely: sent the exact prompt
+shape `requestReview()` builds (task spec + a real diff — the 327-line
+KAT-Coder-as-primary diff above — 22,784 prompt characters, no `max_tokens`
+cap, `temperature: 0`) straight to `:8083/v1/chat/completions`, confirming
+via `/proxy/health` beforehand that the route was fully idle
+(`active: 0`, no other resident model running a concurrent request).
+
+Result: the request ran for **220+ seconds** and never returned a
+successful response. A 130s client-side timeout was hit first; polling
+`/proxy/health` afterward showed the route still marked `active: 1` for
+another ~91 seconds before finally settling — and `upstream_errors`
+incremented (8 → 9) rather than `completed`, meaning it failed server-side
+rather than merely running long. This rules out contention as the
+explanation (the route was idle for the entire request) and rules out
+`REVIEW_TIMEOUT_MS` tuning as a fix (raising the timeout only waits longer
+for a request that errors out, not one that would have succeeded given more
+time).
+
+**Verdict: KAT-Coder is not adopted as the reviewer route.** This is a
+structural capacity finding about the route/model, not a config problem —
+`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` remain pointed at Gemma.
+
+### Gemma's own reviewer timeout was too tight — fixed
+
+The same real-prompt methodology was then run against Gemma on `:8082`
+(also confirmed idle beforehand) as a sanity check on the standing
+reviewer route, since it had only previously been live-checked with a
+small deliberately-planted-bug diff, not a full production-shaped prompt.
+
+Result: **HTTP 200 in 121.4 seconds** (7,187 prompt tokens, 1,063
+completion tokens), producing a real, correct finding (a partial-mutation
+bug in `patchBookmark`: if tag validation fails after `title` has already
+been written to the shared map entry, a failed `PATCH` still leaves a
+partial update applied). But the prior `REVIEW_TIMEOUT_MS` was 120,000ms —
+this request would have been aborted by `requestReview()`'s own
+`AbortSignal.timeout` about 1.4 seconds before the model finished, silently
+downgrading a correct, useful finding to `{ outcome: "transient" }`. On an
+idle route with zero contention; any real contention (as seen in the
+KAT-Coder investigation above) would push this further over the line, not
+under it.
+
+**Fix applied**: raised `REVIEW_TIMEOUT_MS` from `120_000` to `240_000` in
+`pi/extensions/cross-model-review.ts` (commit `83ca0cb`), giving real
+headroom above the measured idle-route baseline instead of a margin smaller
+than the noise. No test hardcoded the old value; full deterministic suite
+still passes 74/74 after the change.
