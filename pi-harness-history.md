@@ -1172,3 +1172,63 @@ the route responds fine and fast, it just doesn't do the review task
 correctly on this checkpoint at 4-bit. An 8-bit requant is the one
 un-tried lever if this route is revisited, but is not currently planned —
 see todo.
+
+## Stale `AI_REVIEW_MODEL` silently disabled the reviewer, found and fixed, 2026-08-05
+
+Asked to run a fuller reviewer-reliability battery on `gemma-4-26b-a4b-it`
+now that it lives on `:8081` (only smoke-tested at that point, per
+`local-ai-stack.md`), the first sanity check before spending trials on the
+battery itself was a direct request against the configured
+`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`. It came back **HTTP 400
+`model_mismatch`**: `GET :8081/v1/models` reports the served id as
+`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit` — a full path
+plus a `-4bit` suffix — while `~/.zshrc` still exported the short form,
+`gemma-4-26b-a4b-it`, unchanged since the model was wired in on `:8082`
+back on 2026-08-04 (see "`cross-model-review.ts` wired to a live Gemma
+route" above, where that short id was correct for the route at the time).
+
+The failure mode is silent by design, not by bug: `requestReview()` checks
+`response.ok` and returns `{outcome: "transient"}` on anything else, the
+same path used for genuine transient failures (timeouts, network blips) so
+a flaky route doesn't block the harness. That means every real review
+request since the `:8082`→`:8081` move 400'd and was swallowed as
+"transient" — no crash, no error surfaced to the model or the user, no
+harness-trace entry distinguishable from an ordinary timeout. The reviewer
+looked configured (`resolveReviewerConfig()` still correctly resolves
+`independent-review`, since that check never talks to the route) and
+looked adopted in the status doc, while doing nothing.
+
+**Fixed** by exporting the full served id in `~/.zshrc`. Verified live:
+the identical request that 400'd now returns 200.
+
+**Battery, run against the corrected id** using the same three-planted-bug
+methodology as the Gemma/GLM validations above, via the real
+`requestReview()` export for fidelity with production behavior (not a
+reimplemented prompt):
+
+- `clampToRange` missing its upper-bound clamp — 5/5 trials flagged.
+- `divide` missing its zero-check — 5/5 trials flagged.
+- `add` implemented as subtraction — 5/5 trials flagged.
+- False-positive control: the correct implementation of all three
+  functions, 3 trials each — 9/9 returned `NO_ISSUES_FOUND`.
+
+15/15 catches, 9/9 clean controls, all at `temperature: 0` via the real
+endpoint. Response length was identical across every repeat trial within
+a given bug, consistent with genuine deterministic reasoning rather than
+sampling noise. This is a stronger and broader result than the earlier
+2026-08-04 single-trial spot-check on the same route, and stands in
+contrast to GLM-4.7-Flash-4bit's 1/10 on the identical methodology (see
+above). It remains synthetic single-diff fixtures, not the
+production-shaped long-diff case that motivated raising
+`REVIEW_TIMEOUT_MS` (the 22K-character, 121s request in "Gemma's own
+reviewer timeout was too tight" above), and not a real paired-battery
+task — see todo in `pi-harness-validation-status.md`.
+
+**Lesson for future route moves**: a served-model-id change is a silent
+failure mode for any static client declaration (Pi's provider config,
+`cross-model-review.ts`'s env vars, `ai-stack-local.ts`), not just a
+`/v1/models`-discovering shell script's problem. `local-ai-stack.md`'s
+client rules only covered the dynamic-discovery clients; the static ones
+need the same discipline — re-check `/v1/models` against the configured
+id whenever a route's checkpoint changes, don't assume last time's id
+still matches.

@@ -10,13 +10,24 @@ facts agent configurations need when choosing or calling a local route.
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
 | `:8080/v1` | `ThinkingCap-Qwen3.6-27B-MLX-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | 51.9 tok/s median |
-| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc`, previously `:8082`) | — | smoke-tested 2026-08-05 only |
+| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc`, previously `:8082`) | — | battery-tested 2026-08-05 |
 
 The `:8080` rate came from sequential live requests using 256 generated tokens
 per sample. The 27B samples were 51.76-51.95 tok/s. This is a
-workload-specific observation, not a throughput SLA. `:8081` has one live
-smoke test (correctly flagged a seeded bug) and no throughput measurement
-yet.
+workload-specific observation, not a throughput SLA. `:8081` has 15/15
+planted-bug catches plus 9/9 correct-code controls (see
+`pi-harness-validation-status.md`) and no throughput measurement yet.
+
+`AI_REVIEW_MODEL` briefly went stale after the `:8082`→`:8081` move: the
+route's served model id gained a `-4bit` suffix and a full path
+(`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`), but
+`~/.zshrc` still exported the short form. Every real review request 400'd
+with `model_mismatch`, which `requestReview()` silently downgrades to
+`{outcome: "transient"}` — no crash, no error, just a reviewer that never
+actually reviewed anything. Fixed 2026-08-05 by exporting the full served
+id. Client rules above (discover the model id from `/v1/models`) apply to
+this static declaration too: whenever this route's checkpoint changes,
+re-check `/v1/models` before assuming the configured id still matches.
 
 ## Client rules
 
