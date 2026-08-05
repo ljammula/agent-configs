@@ -9,7 +9,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
-import { isBroadVerificationCommand, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
+import { isBroadVerificationCommand, resolveDiffTarget, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
 const REVIEW_TIMEOUT_MS = 240_000;
@@ -154,8 +154,12 @@ export default function reviewer(pi: ExtensionAPI): void {
 		reviewInFlight = true;
 		const reviewRunId = runId;
 		const startedAt = Date.now();
-		const args = baseSha ? ["diff", baseSha] : ["diff"];
-		inFlightReview = pi.exec("git", args, { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
+		// A bare `git diff` (no baseSha yet) compares the working tree to the
+		// index, which is silently empty if the model staged everything with
+		// `git add` before this fires -- resolveDiffTarget's empty-tree
+		// fallback for an unborn HEAD gives a real, non-empty target instead.
+		inFlightReview = resolveDiffTarget(pi, ctx.cwd, baseSha)
+			.then((target) => pi.exec("git", ["diff", target], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }))
 			.then(async (diffResult) => {
 				if (reviewRunId !== runId) return;
 				const diff = diffResult.code === 0 ? diffResult.stdout.trim() : "";

@@ -96,6 +96,37 @@ export function isBroadVerificationCommand(command: string): boolean {
 	return BROAD_VERIFICATION_PATTERNS.some((pattern) => pattern.test(command));
 }
 
+// A command "looking broad" (matching BROAD_VERIFICATION_PATTERNS) is not
+// the same as satisfying the project's actual canonical command: e.g. once
+// the Go fallback becomes "go vet ./... && go test ./...", a bare
+// `go test ./...` still matches the broad pattern but silently skips vet.
+// Require every `&&`-joined segment of the canonical command to appear in
+// what was actually run, so a partial command can no longer pass the gate.
+function normalizeCommand(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+export function commandSatisfiesCanonical(observed: string, canonical: string): boolean {
+	const normalizedCanonical = normalizeCommand(canonical);
+	const normalizedObserved = normalizeCommand(observed);
+	const segments = normalizedCanonical.split("&&").map(normalizeCommand).filter(Boolean);
+	if (!segments.length) return false;
+	// A single-segment canonical (e.g. "make verify") only needs to appear
+	// in what was run -- extra flags are fine, and verificationPipelineCan-
+	// MaskFailure already catches a trailing `|| true`-style neutralizer for
+	// commands matching BROAD_VERIFICATION_PATTERNS.
+	if (segments.length === 1) return normalizedObserved.includes(segments[0]!);
+	// A compound canonical (the Go "go vet ./... && go test ./..." fallback,
+	// or a monorepo's nested "(cd 'x' && ...) && (cd 'y' && ...)") must
+	// match exactly. Segment-wise containment would let something like
+	// "go vet ./... || true && go test ./..." satisfy every segment while
+	// neutralizing vet's exit code -- exactly the bypass this function
+	// exists to close -- and no single command a model would plausibly run
+	// directly can satisfy a nested multi-component canonical anyway, so
+	// falling back to a full rerun at settle is the correct, safe outcome.
+	return normalizedObserved === normalizedCanonical;
+}
+
 async function exists(path: string): Promise<boolean> {
 	return access(path).then(() => true, () => false);
 }
@@ -113,7 +144,7 @@ async function hashUntrackedPath(path: string): Promise<string> {
 	}
 }
 
-async function documentedCommand(cwd: string): Promise<string | undefined> {
+export async function documentedCommand(cwd: string): Promise<string | undefined> {
 	for (const name of ["AGENTS.md", "README.md"]) {
 		const body = await readFile(join(cwd, name), "utf8").catch(() => "");
 		const match = body.match(/(?:verification|verify|test)(?: command)?[^\n`]*`([^`]+)`/i);
@@ -141,7 +172,7 @@ async function isFlutterPackage(dir: string): Promise<boolean> {
 // Makefile defines more than one of these targets.
 const MAKEFILE_TARGET_PRIORITY = ["verify", "test", "check"] as const;
 
-async function makefileVerificationCommand(dir: string): Promise<string | undefined> {
+export async function makefileVerificationCommand(dir: string): Promise<string | undefined> {
 	if (!(await exists(join(dir, "Makefile")))) return undefined;
 	const makefile = await readFile(join(dir, "Makefile"), "utf8");
 	for (const target of MAKEFILE_TARGET_PRIORITY) {
@@ -150,10 +181,15 @@ async function makefileVerificationCommand(dir: string): Promise<string | undefi
 	return undefined;
 }
 
+// No Makefile means nothing bundles lint with tests, so the bare-go.mod
+// fallback must do it itself -- go vet catches real defects (nil derefs,
+// unreachable code, bad printf verbs) that `go test` alone won't surface.
+const GO_FALLBACK_COMMAND = "go vet ./... && go test ./...";
+
 async function manifestCommandForDir(dir: string): Promise<string | undefined> {
 	const makefileCommand = await makefileVerificationCommand(dir);
 	if (makefileCommand) return makefileCommand;
-	if (await exists(join(dir, "go.mod"))) return "go test ./...";
+	if (await exists(join(dir, "go.mod"))) return GO_FALLBACK_COMMAND;
 	if (await exists(join(dir, "pyproject.toml"))) return "pytest";
 	if (await exists(join(dir, "pubspec.yaml"))) return (await isFlutterPackage(dir)) ? "flutter test" : "dart test";
 	if (await exists(join(dir, "Cargo.toml"))) return "cargo test";
@@ -200,7 +236,7 @@ export async function resolveVerificationCommand(cwd: string): Promise<string | 
 	if (makefileCommand) return makefileCommand;
 	const documented = await documentedCommand(cwd);
 	if (documented) return documented;
-	if (await exists(join(cwd, "go.mod"))) return "go test ./...";
+	if (await exists(join(cwd, "go.mod"))) return GO_FALLBACK_COMMAND;
 	if (await exists(join(cwd, "pyproject.toml"))) return "pytest";
 	if (await exists(join(cwd, "pubspec.yaml"))) return (await isFlutterPackage(cwd)) ? "flutter test" : "dart test";
 	if (await exists(join(cwd, "Cargo.toml"))) return "cargo test";
@@ -208,8 +244,22 @@ export async function resolveVerificationCommand(cwd: string): Promise<string | 
 	return nestedVerificationCommand(cwd);
 }
 
+// The canonical hash of an empty tree, valid in any git repository. Used as
+// the diff base for a freshly `git init`'d repo, where HEAD is unborn (no
+// commits yet) and `git diff --binary HEAD` fails outright -- without this,
+// a brand-new project stays snapshot-unavailable/non-material forever, and
+// quality-gate.ts's gate (and cross-model-review.ts) never activates.
+export const EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, baseSha?: string): Promise<string> {
+	if (baseSha) return baseSha;
+	const head = await pi.exec("git", ["rev-parse", "--verify", "HEAD"], { cwd, timeout: 5000 }).catch(() => undefined);
+	return head && head.code === 0 ? "HEAD" : EMPTY_TREE_HASH;
+}
+
 export async function snapshotDiff(pi: ExtensionAPI, cwd: string, baseSha?: string): Promise<DiffSnapshot> {
-	const diffArgs = baseSha ? ["diff", "--binary", baseSha] : ["diff", "--binary", "HEAD"];
+	const diffTarget = await resolveDiffTarget(pi, cwd, baseSha);
+	const diffArgs = ["diff", "--binary", diffTarget];
 	const [diff, status] = await Promise.all([
 		pi.exec("git", diffArgs, { cwd, timeout: 10_000 }).catch(() => undefined),
 		pi.exec(

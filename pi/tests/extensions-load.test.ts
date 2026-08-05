@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import aiStack from "../extensions/ai-stack-local.ts";
+import artifactGuard from "../extensions/artifact-guard.ts";
 import coChange from "../extensions/co-change-suggest.ts";
 import continuation from "../extensions/continuation-nudge.ts";
 import reviewer from "../extensions/cross-model-review.ts";
+import errorLeakGuard from "../extensions/error-leak-guard.ts";
 import externalEffects from "../extensions/external-effects.ts";
 import format from "../extensions/format-on-edit.ts";
 import fullStack from "../extensions/full-stack-dev.ts";
 import checkpoint from "../extensions/git-checkpoint.ts";
 import gitSafety from "../extensions/git-safety.ts";
 import guardrail from "../extensions/karpathy-guardrail.ts";
+import makefileScaffoldNudge from "../extensions/makefile-scaffold-nudge.ts";
+import newProjectScaffold from "../extensions/new-project-scaffold.ts";
 import notify from "../extensions/notify.ts";
 import planMode from "../extensions/plan-mode/index.ts";
 import projectOverlay from "../extensions/project-skill-overlay.ts";
@@ -22,7 +26,7 @@ import todo from "../extensions/todo.ts";
 import { ExtensionHarness } from "./extension-api-harness.ts";
 
 test("every installed extension registers against the pinned public API", () => {
-	const factories = [aiStack, coChange, continuation, reviewer, externalEffects, format, fullStack, checkpoint, gitSafety, guardrail, notify, planMode, projectOverlay, protectedPaths, qualityGate, rtkRewrite, search, stackRouter, todo];
+	const factories = [aiStack, artifactGuard, coChange, continuation, reviewer, errorLeakGuard, externalEffects, format, fullStack, checkpoint, gitSafety, guardrail, makefileScaffoldNudge, newProjectScaffold, notify, planMode, projectOverlay, protectedPaths, qualityGate, rtkRewrite, search, stackRouter, todo];
 	for (const factory of factories) {
 		const harness = new ExtensionHarness();
 		assert.doesNotThrow(() => factory(harness.api), factory.name);

@@ -160,6 +160,35 @@ test("a stale extension context during agent_settled does not crash the turn", a
 	await assert.doesNotReject(harness.emit({ type: "agent_settled" } as any));
 });
 
+test("a bare go test cannot satisfy a canonical command that also requires go vet", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-govet-"));
+	await writeFile(join(cwd, "go.mod"), "module example.test\n");
+	let bashCalls = 0;
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+			if (command === "git" && args[0] === "diff") return result(0, "diff");
+			if (command === "git" && args[0] === "status") return result(0, " M main.go\n");
+			if (command === "bash") {
+				bashCalls += 1;
+				return result(0);
+			}
+			return result(1);
+		},
+	});
+	qualityGate(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	// The model ran only `go test ./...` directly; the resolved canonical
+	// command for a bare go.mod project is `go vet ./... && go test ./...`,
+	// so this must not be accepted as passing evidence on its own.
+	await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "go test ./..." }, content: [], details: {}, isError: false } as any);
+	await harness.emit({ type: "agent_settled" } as any);
+	// Evidence from the partial command was rejected, so settle had to run
+	// the full canonical command itself.
+	assert.equal(bashCalls, 1);
+});
+
 test("an unconfigured repository records evidence instead of guessing success", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-empty-"));
 	const harness = new ExtensionHarness({
