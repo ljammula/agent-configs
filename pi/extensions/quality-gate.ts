@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
 import {
+	commandSatisfiesCanonical,
 	evidencePassesCurrentDiff,
 	isBroadVerificationCommand,
 	resolveVerificationCommand,
@@ -59,6 +60,14 @@ export default function qualityGate(pi: ExtensionAPI): void {
 		const command = event.input.command;
 		if (typeof command !== "string" || !isBroadVerificationCommand(command)) return;
 		try {
+			// A command can look broad (e.g. a bare `go test ./...`) without
+			// actually being the project's canonical check (e.g. once the Go
+			// fallback requires `go vet ./... && go test ./...`). Only accept it
+			// as evidence when it satisfies every segment of the resolved
+			// canonical command; an unresolved canonical falls back to the old
+			// loose match rather than blocking evidence entirely.
+			const canonical = await resolveVerificationCommand(ctx.cwd).catch(() => undefined);
+			if (canonical && !commandSatisfiesCanonical(command, canonical)) return;
 			const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
 			const inconclusive = verificationPipelineCanMaskFailure(command) || truncated(event.details);
 			evidence = {

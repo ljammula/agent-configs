@@ -183,6 +183,45 @@ Written here:
   in-flight review, bounded by the existing `REVIEW_TIMEOUT_MS`. Full
   adoption history, live-run counts, and both bugs' investigation
   transcripts are in `../pi-harness-history.md`.
+- **`new-project-scaffold.ts`** — **new, no live-trial evidence yet.**
+  `todo-app-hardening-plan.md` fix 1 plus items D/F/G: a `before_agent_start`
+  nudge, not an autonomous write, since an extension running `git init` on
+  every launch risks doing so inside a directory meant to be part of a
+  parent repo. When no repo exists yet, tells the model to `git init`, seed
+  a `.gitignore`, and make an initial commit -- the commit matters as much
+  as the `git init`, since an unborn `HEAD` leaves `quality-gate.ts` and
+  `cross-model-review.ts` inert the same way a missing repo does. Bundles
+  two more nudges gated on the same "no repo yet" signal: up-front layered
+  Go structure (`cmd/`, `internal/domain/{errors.go,ports.go}`,
+  `internal/handler`) instead of a size threshold that would fire
+  mid-project and contradict this harness's own no-speculative-refactor
+  rule, and a minimal README once a repo doesn't have one.
+- **`makefile-scaffold-nudge.ts`** — **new, no live-trial evidence yet.**
+  `todo-app-hardening-plan.md` fix 4: when no Makefile and no documented
+  verification command exist, hands the model `verification.ts`'s actual
+  resolved command and asks it to wire `test`/`lint`/`verify` Makefile
+  targets to it -- prompt-only rather than an autonomous write, so a
+  generated `verify` that silently missed one component of a multi-language
+  repo can't shrink coverage versus the nested scan without the model
+  seeing the exact command it's supposed to preserve.
+- **`artifact-guard.ts`** — **new, no live-trial evidence yet.** Fix 2:
+  deterministic `agent_settled` check (not a nudge) for untracked files
+  over 1MB or bearing an ELF/Mach-O magic number, targeting the todo-app
+  finding directly (a 13MB compiled binary left in the working tree). Also
+  a performance fix: `verification.ts`'s `hashUntrackedPath` currently
+  sha256-streams every untracked file, including such a binary, on every
+  settle event.
+- **`error-leak-guard.ts`** — **new, no live-trial evidence yet.** The
+  deterministic slice of plan item E: rather than trying to gate "is the
+  architecture layered" (no observer exists for that), scans added diff
+  lines for `http.Error(w, err.Error(), ...)` -- a raw error string written
+  straight into an HTTP response, leaking internal detail (SQL errors, file
+  paths) to API clients instead of mapping to a stable domain error.
+
+All four are unit-tested (`pi/tests/*.test.ts`) but, per this file's own
+validation convention, have not yet accumulated live-trial evidence; see
+`../pi-harness-validation-status.md` for the paired-adoption tracking these
+would need before the "adopted" language above applies to them.
 
 Vendored from pi's `examples/extensions/`, with changes noted in each file:
 

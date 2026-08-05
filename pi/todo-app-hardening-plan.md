@@ -1,6 +1,7 @@
 # Pi harness hardening: gaps found via todo-app vs. personal-assistant
 
-Status: **plan only, not yet implemented.** Reviewed by Opus (see verdict below).
+Status: **implemented** (see the Status section at the end for what
+landed and how). Reviewed by Opus at each stage (see verdicts below).
 Source comparison: `~/code/test-bed/todo-app` (harness-generated) vs.
 `~/code/personal-assistant` (target engineering discipline).
 
@@ -273,12 +274,98 @@ to have any enforcement teeth via `cross-model-review.ts`.
 
 ## Status
 
-Plan only. No extension code has been changed yet. Next steps, pending
-approval:
-1. Implement Tier 1 fixes 1-2 (git-init prompt nudge, artifact/binary-size
-   check).
-2. Implement Tier 1 fixes 3-4 (vet-only fallback with evidence-pattern
-   sync, Makefile scaffold).
-3. Implement the D/F init-time architecture-scaffold nudge, the E
-   error-leak Tier 1 check, and the G new-project-gated README scaffold.
-4. CI workflow generation remains explicitly out of scope.
+Implemented. All four Tier 1 fixes and Tier 2 items D-G landed in this
+branch (`pi/todo-app-hardening-plan.md`'s own PR):
+
+1. **Fix 1 (git-init nudge).** `new-project-scaffold.ts`, a
+   `before_agent_start` nudge, instructs `git init` + `.gitignore` + an
+   initial commit when no repo exists. `verification.ts`'s `snapshotDiff`
+   also falls back to the empty-tree hash when `HEAD` is unborn, as
+   defense in depth independent of the nudge.
+2. **Fix 2 (artifact/binary-size check).** `artifact-guard.ts`, a
+   deterministic `agent_settled` check, flags untracked files >1MB or
+   bearing an ELF/Mach-O magic number and sends a corrective nudge.
+3. **Fix 3 (vet-only fallback).** The bare-`go.mod` fallback in
+   `verification.ts` is now `go vet ./... && go test ./...`. The bypass
+   hole flagged in review is closed: `quality-gate.ts`'s `tool_result`
+   handler now requires the observed command to satisfy every `&&`-joined
+   segment of the resolved canonical command (`commandSatisfiesCanonical`)
+   before accepting it as evidence, so a bare `go test ./...` can no longer
+   silently skip vet. `gofmt -l` was not added, per review (redundant with
+   `format-on-edit.ts`).
+4. **Fix 4 (Makefile scaffold).** `makefile-scaffold-nudge.ts`, a
+   `before_agent_start` nudge (not an autonomous write, for the same
+   coverage-shrink reason the review flagged), hands the model the
+   resolved verification command and asks it to wire `test`/`lint`/
+   `verify` Makefile targets to it. Fires only when no Makefile and no
+   documented command exist.
+5. **D/F (architecture scaffold) + G (README scaffold).** Folded into
+   `new-project-scaffold.ts`, gated on the same "no repo yet" signal as
+   fix 1 (init-time, not a mid-project size threshold) plus a separate
+   "no README yet" check.
+6. **E (error taxonomy), deterministic slice.** `error-leak-guard.ts`
+   scans added diff lines for `http.Error(w, err.Error(), ...)` and flags
+   it. The prose half of E (sentinel errors in `domain/errors.go`) is
+   folded into the D/F architecture-scaffold nudge as guidance, per the
+   review's Tier 1/Tier 2 split.
+
+All new/changed behavior is covered by `pi/tests/*.test.ts` (104 tests
+passing, up from 78 before this branch) and `npm run typecheck` is clean.
+None of it has live-trial evidence yet — see the README's validation-status
+note added alongside these extensions.
+
+### Implementation-review fixes (Opus reviewed the diff before push)
+
+A second Opus pass, against the actual diff rather than the plan prose,
+found and this branch fixed:
+
+- **`commandSatisfiesCanonical` had its own bypass.** Segment-wise
+  containment let `go vet ./... || true && go test ./...` satisfy a
+  `go vet ./... && go test ./...` canonical while neutralizing vet's exit
+  code — the exact class of hole fix 3 exists to close. Fixed: a compound
+  (multi-`&&`-segment) canonical now requires an exact normalized match;
+  only a single-segment canonical (e.g. `make verify`) still uses
+  containment, protected from the same trick by the pre-existing
+  `verificationPipelineCanMaskFailure` masking check. This also fixes a
+  correctness gap the same change would otherwise have introduced for
+  monorepo nested canonicals and multi-target Makefiles (`make test` is
+  not actually equivalent to `make verify` when `verify` depends on `test`
+  and adds more, per the harness's own test fixtures).
+- **`error-leak-guard.ts` missed its own motivating case.** `git diff`
+  never shows untracked files, so in the exact todo-app scenario (fresh
+  project, files never `git add`ed) the guard was silent forever. Fixed:
+  it now also reads untracked `.go` files' full content, not just the
+  tracked diff, and attributes each finding to its file (parsed from the
+  diff's `+++ b/<path>` header for tracked changes) instead of keying
+  dedup on line text alone.
+- **`artifact-guard.ts` only checked untracked entries.** A staged-but-
+  uncommitted binary was invisible. Fixed: now also checks staged/modified
+  (`A`/`M`) `git status` entries. A fully-committed-and-clean binary
+  remains out of scope — that needs a tracked-tree history scan, a
+  materially bigger feature than this fix; documented as a known
+  limitation in the file's header comment rather than silently claimed as
+  covered.
+- **Both guards' dedup state was a single closure variable**, not
+  namespaced by `cwd` — a long-running process touching a second project
+  could suppress a real finding there if it happened to match a key
+  already flagged elsewhere. Fixed: both now key dedup by `ctx.cwd`.
+- **`cross-model-review.ts` drifted from the plan's own claim.**
+  `new-project-scaffold.ts`'s nudge text says cross-model-review requires
+  real git history to activate, but the reviewer's diff-fetch still used a
+  bare `git diff`/`git diff <baseSha>` with no unborn-HEAD handling. Fixed:
+  it now goes through the same `resolveDiffTarget` fallback
+  `snapshotDiff()` uses, making the claim in the nudge text accurate and
+  closing a real edge case (a bare `git diff` shows nothing if the model
+  staged everything with `git add` before the reviewer's first tool_result
+  fires).
+
+Not changed, by deliberate choice: the review's suggestion to memoize
+`resolveVerificationCommand(ctx.cwd)` in `quality-gate.ts`'s hot
+`tool_result` path was not applied — a cache keyed by `cwd` risks staying
+stale if a Makefile appears mid-session, and the underlying cost is a few
+cheap `fs.access`/`fs.readFile` calls, not worth the staleness risk to
+save.
+
+CI workflow generation remains explicitly out of scope, per the review's
+scope-boundary reasoning (CI touches secrets/external systems; everything
+implemented here is local file conventions).

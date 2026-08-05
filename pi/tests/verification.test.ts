@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+	commandSatisfiesCanonical,
 	evidencePassesCurrentDiff,
 	isBroadVerificationCommand,
 	resolveVerificationCommand,
@@ -139,7 +140,7 @@ test("verification resolution still prefers make verify over make test when both
 test("verification resolution falls back to manifests and can stay unconfigured", async () => {
 	const go = await mkdtemp(join(tmpdir(), "pi-go-"));
 	await writeFile(join(go, "go.mod"), "module example.test\n");
-	assert.equal(await resolveVerificationCommand(go), "go test ./...");
+	assert.equal(await resolveVerificationCommand(go), "go vet ./... && go test ./...");
 	const empty = await mkdtemp(join(tmpdir(), "pi-empty-"));
 	assert.equal(await resolveVerificationCommand(empty), undefined);
 });
@@ -155,7 +156,7 @@ test("verification resolution finds nested manifests when the root has none", as
 	);
 	assert.equal(
 		await resolveVerificationCommand(cwd),
-		"(cd 'flutter_app' && flutter test ) && (cd 'go' && go test ./... )",
+		"(cd 'flutter_app' && flutter test ) && (cd 'go' && go vet ./... && go test ./... )",
 	);
 });
 
@@ -173,7 +174,7 @@ test("nested manifest scan picks dart test for a plain-Dart package next to a Go
 	await writeFile(join(cwd, "client", "pubspec.yaml"), "name: client\ndependencies:\n  http: ^1.2.0\n");
 	assert.equal(
 		await resolveVerificationCommand(cwd),
-		"(cd 'client' && dart test ) && (cd 'server' && go test ./... )",
+		"(cd 'client' && dart test ) && (cd 'server' && go vet ./... && go test ./... )",
 	);
 });
 
@@ -182,4 +183,63 @@ test("verification resolution ignores build and dependency trees while scanning 
 	await mkdir(join(cwd, "node_modules", "pkg"), { recursive: true });
 	await writeFile(join(cwd, "node_modules", "pkg", "package.json"), "{}\n");
 	assert.equal(await resolveVerificationCommand(cwd), undefined);
+});
+
+test("snapshot falls back to the empty tree when HEAD is unborn, instead of going unavailable", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-unborn-"));
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ args }) => {
+			if (args[0] === "rev-parse") return { code: 128, stdout: "", stderr: "unknown revision", killed: false };
+			if (args[0] === "diff") {
+				assert.equal(args[2], "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+				return { code: 0, stdout: "diff against empty tree", stderr: "", killed: false };
+			}
+			return { code: 0, stdout: "?? new_file.go\0", stderr: "", killed: false };
+		},
+	});
+	const snapshot = await snapshotDiff(harness.api, cwd, undefined);
+	assert.equal(snapshot.material, true);
+	assert.notEqual(snapshot.hash, "unavailable");
+});
+
+test("snapshot uses HEAD directly once a commit exists, without probing rev-parse unnecessarily when baseSha is known", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-born-"));
+	const revParseCalls: string[][] = [];
+	const harness = new ExtensionHarness({
+		cwd,
+		exec: ({ args }) => {
+			if (args[0] === "rev-parse") revParseCalls.push(args);
+			if (args[0] === "diff") {
+				assert.equal(args[2], "committed-base-sha");
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			}
+			return { code: 0, stdout: "", stderr: "", killed: false };
+		},
+	});
+	await snapshotDiff(harness.api, cwd, "committed-base-sha");
+	assert.equal(revParseCalls.length, 0);
+});
+
+test("commandSatisfiesCanonical requires an exact match for a compound canonical", () => {
+	assert.equal(commandSatisfiesCanonical("go vet ./... && go test ./...", "go vet ./... && go test ./..."), true);
+	assert.equal(commandSatisfiesCanonical("go test ./...", "go vet ./... && go test ./..."), false);
+	assert.equal(commandSatisfiesCanonical("make verify", "make verify"), true);
+	assert.equal(commandSatisfiesCanonical("npm test; echo EXIT=$?", "make verify"), false);
+});
+
+test("commandSatisfiesCanonical rejects an operator that could neutralize an earlier segment's exit code", () => {
+	// Segment-wise containment alone would accept this: both "go vet ./..."
+	// and "go test ./..." appear, but "|| true" makes the overall exit code
+	// 0 even if vet fails -- the exact bypass this check exists to close.
+	assert.equal(
+		commandSatisfiesCanonical("go vet ./... || true && go test ./...", "go vet ./... && go test ./..."),
+		false,
+	);
+});
+
+test("commandSatisfiesCanonical requires a nested monorepo canonical to match exactly, not fragment-by-fragment", () => {
+	const canonical = "(cd 'client' && dart test ) && (cd 'server' && go vet ./... && go test ./... )";
+	assert.equal(commandSatisfiesCanonical(canonical, canonical), true);
+	assert.equal(commandSatisfiesCanonical("go test ./...", canonical), false);
 });
