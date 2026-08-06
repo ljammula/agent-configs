@@ -144,6 +144,22 @@ is the blocker for both this and the containment work
   **default-disabled**. This is directional `n=1` evidence; the original 3-5
   task battery and no-tool baseline remain unrun.
 
+### 2026-08-06 Go-specific follow-up
+
+The narrowed follow-up ran three Go architecture tasks with memory-directed,
+ordinary-repository-tools, and no-tools arms, using an eight-minute per-arm and
+60-minute matrix cap. The seven new arms completed in 20m49.2s. Memory and
+ordinary tools each scored 8/12; no-tools scored 0/12. Both tool-enabled arms
+timed out on the MCP authorization task at the fixed cap and were not retried.
+
+Across the two tasks that completed in both tool-enabled arms, memory used
+2.88% more comparison tokens, took 7.91% longer, used 75% more turns, and made
+59.09% more tool calls. Blinded Gemma 4 reviews agreed with every deterministic
+score. Verdict remains **default-disabled**; this does not support global
+wiring. The runner now drains `:8080` after a timeout before starting another
+arm, preventing orphaned upstream generations from contaminating results.
+Full metrics: `local-model-bench/codebase-memory/go-followup-result-2026-08-06.json`.
+
 ### Why
 
 The Agentic Harness Engineering finding (`arxiv.org/abs/2604.25850`,
@@ -204,7 +220,7 @@ pattern of self-reported tool metrics not surviving a paired check (RTK's
 
 ### Definition of done
 
-- One repo indexed, MCP wired, 3-5 tasks run paired (with/without) plus a
+- One repo indexed, MCP wired, three Go tasks run paired (with/without) plus a
   no-tool baseline.
 - A written verdict in `pi-harness-validation-status.md`: adopted,
   default-disabled-pending-more-evidence, or ruled out — with the actual
