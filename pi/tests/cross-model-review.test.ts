@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	default as reviewer,
-	extractLastNonEmptyLine,
-	normalizeForMarkerMatch,
+	parseVerdict,
+	renderFindings,
 	requestReview,
 	resolveReviewerConfig,
 } from "../extensions/cross-model-review.ts";
@@ -29,17 +29,29 @@ test("a different route or model is an independent reviewer", () => {
 	assert.equal(config.kind, "independent-review");
 });
 
-test("clean marker tolerates reasoning and markdown fences only on the final line", () => {
-	assert.equal(normalizeForMarkerMatch("**NO_ISSUES_FOUND**"), "NO_ISSUES_FOUND");
-	assert.equal(extractLastNonEmptyLine("reasoning\n```\nNO_ISSUES_FOUND\n```"), "NO_ISSUES_FOUND");
-	assert.notEqual(extractLastNonEmptyLine("NO_ISSUES_FOUND\nbut there is a bug"), "NO_ISSUES_FOUND");
+test("a verdict is accepted only as a well-formed schema response", () => {
+	assert.equal(parseVerdict('{"verdict":"clean","findings":[]}')?.verdict, "clean");
+	assert.equal(parseVerdict('{"verdict":"flagged","findings":[{"file":"a.ts","severity":"bug","issue":"off by one"}]}')?.findings.length, 1);
+	assert.equal(parseVerdict("NO_ISSUES_FOUND"), undefined);
+	assert.equal(parseVerdict('{"verdict":"maybe","findings":[]}'), undefined);
+	assert.equal(parseVerdict('{"verdict":"clean"}'), undefined);
+});
+
+test("findings render into the follow-up message the agent receives", () => {
+	assert.equal(
+		renderFindings([{ file: "a.ts", severity: "bug", issue: "missing upper clamp" }]),
+		"- [bug] a.ts: missing upper clamp",
+	);
 });
 
 test("review request classifies clean, flagged, malformed, and unreachable responses", async () => {
 	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
 	const response = (content?: string, ok = true) => async () => ({ ok, json: async () => ({ choices: content === undefined ? [] : [{ message: { content } }] }) }) as Response;
-	assert.equal((await requestReview(config, "spec", "diff", undefined, response("NO_ISSUES_FOUND"))).outcome, "clean");
-	assert.equal((await requestReview(config, "spec", "diff", undefined, response("bug in app.ts"))).outcome, "flagged");
+	assert.equal((await requestReview(config, "spec", "diff", undefined, response('{"verdict":"clean","findings":[]}'))).outcome, "clean");
+	assert.equal((await requestReview(config, "spec", "diff", undefined, response('{"verdict":"flagged","findings":[{"file":"app.ts","severity":"bug","issue":"off by one"}]}'))).outcome, "flagged");
+	// Prose where a schema response is required means the route is misconfigured,
+	// not that the diff is clean.
+	assert.equal((await requestReview(config, "spec", "diff", undefined, response("NO_ISSUES_FOUND"))).reason, "malformed-verdict");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response(undefined))).outcome, "transient");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).outcome, "transient");
 });
@@ -65,7 +77,7 @@ test("every unavailable reviewer carries a distinguishable reason", async () => 
 	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).reason, "request-failed");
 
 	// A real verdict must not carry an unavailability reason.
-	assert.equal((await requestReview(config, "spec", "diff", undefined, respond({ ok: true, content: "NO_ISSUES_FOUND" }))).reason, undefined);
+	assert.equal((await requestReview(config, "spec", "diff", undefined, respond({ ok: true, content: '{"verdict":"clean","findings":[]}' }))).reason, undefined);
 });
 
 test("a stale extension context during review does not crash the turn", async () => {
@@ -129,7 +141,7 @@ test("agent_settled blocks until a pending review round finishes", async () => {
 		await new Promise((resolve) => setImmediate(resolve));
 		assert.equal(settledFirst, false, "agent_settled must not resolve while the review is still pending");
 
-		resolveFetch!({ ok: true, json: async () => ({ choices: [{ message: { content: "NO_ISSUES_FOUND" } }] }) });
+		resolveFetch!({ ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' } }] }) });
 		await settling;
 		assert.equal(settledFirst, true);
 		assert.equal(
@@ -154,7 +166,7 @@ test("a new agent run resets a settled reviewer", async () => {
 	let reviewRequests = 0;
 	globalThis.fetch = async () => {
 		reviewRequests += 1;
-		return { ok: true, json: async () => ({ choices: [{ message: { content: "NO_ISSUES_FOUND" } }] }) } as Response;
+		return { ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' } }] }) } as Response;
 	};
 	try {
 		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];

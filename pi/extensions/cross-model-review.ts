@@ -11,7 +11,6 @@ import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
 import { buildReviewDiff, isBroadVerificationCommand, resolveDiffTarget, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
-export const NO_ISSUE_MARKER = "NO_ISSUES_FOUND";
 const REVIEW_TIMEOUT_MS = 240_000;
 const EXEC_TIMEOUT_MS = 5000;
 const MAX_REVIEW_ROUNDS = 3;
@@ -52,14 +51,67 @@ export function resolveReviewerConfig(env: NodeJS.ProcessEnv = process.env): Rev
 	return { enabled: true, kind: samePrimary ? "blind-self-review" : "independent-review", baseUrl, model };
 }
 
-export function normalizeForMarkerMatch(text: string): string {
-	return text.trim().replace(/^[`*_]+/, "").replace(/[`*_]+$/, "").trim();
+/**
+ * The reviewer's verdict is enforced by the serving route rather than parsed
+ * out of prose. Verified against gemma-4-26b-a4b-it-4bit on :8081, which
+ * honors response_format and returns exactly this shape.
+ *
+ * Note the coupling: structured output and speculative decoding are mutually
+ * exclusive on this stack -- :8080 rejects a schema request outright with
+ * "Structured response_format is not supported with speculative decoding".
+ * If the reviewer route is ever moved onto a draft/MTP launcher, every request
+ * here starts failing. That now surfaces as a `model-rejected` trace instead
+ * of a silent no-op, but the route itself must stay non-speculative.
+ */
+const VERDICT_SCHEMA = {
+	type: "object",
+	properties: {
+		// `analysis` is first on purpose, and is not decoration. Constrained
+		// decoding emits properties in schema order, so a verdict-first schema
+		// forces the model to commit before it has reasoned at all. Measured on
+		// this route: verdict-first missed the planted `divide` zero-check bug 5/5
+		// at temperature 0, while the prose protocol it replaced caught it 5/5.
+		// Restoring an analysis field ahead of the verdict recovers the catch.
+		analysis: { type: "string" },
+		verdict: { type: "string", enum: ["clean", "flagged"] },
+		findings: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					file: { type: "string" },
+					severity: { type: "string", enum: ["bug", "nit"] },
+					issue: { type: "string" },
+				},
+				required: ["file", "severity", "issue"],
+				additionalProperties: false,
+			},
+		},
+	},
+	required: ["analysis", "verdict", "findings"],
+	additionalProperties: false,
+} as const;
+
+interface ReviewVerdict {
+	analysis?: string;
+	verdict: "clean" | "flagged";
+	findings: { file: string; severity: "bug" | "nit"; issue: string }[];
 }
 
-export function extractLastNonEmptyLine(text: string): string {
-	const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-	while (lines.length > 0 && /^```\S*$/.test(lines.at(-1)!)) lines.pop();
-	return lines.at(-1) ?? "";
+export function parseVerdict(text: string): ReviewVerdict | undefined {
+	try {
+		const parsed = JSON.parse(text) as ReviewVerdict;
+		if (parsed?.verdict !== "clean" && parsed?.verdict !== "flagged") return undefined;
+		if (!Array.isArray(parsed.findings)) return undefined;
+		return parsed;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Renders findings into the follow-up message the agent already receives. */
+export function renderFindings(findings: ReviewVerdict["findings"]): string {
+	return findings.map((finding) => `- [${finding.severity}] ${finding.file}: ${finding.issue}`).join("\n");
 }
 
 /**
@@ -72,7 +124,8 @@ export type ReviewUnavailableReason =
 	| "not-configured"
 	| "model-rejected"
 	| "empty-response"
-	| "request-failed";
+	| "request-failed"
+	| "malformed-verdict";
 
 export async function requestReview(
 	config: ReviewerConfig,
@@ -84,23 +137,32 @@ export async function requestReview(
 	if (!config.enabled || !config.baseUrl || !config.model) return { outcome: "transient", reason: "not-configured" };
 	const prompt = [
 		"Review this code diff only against its task spec. Focus on concrete logic bugs that passing tests may miss.",
-		`If there is no concrete issue, end with exactly ${NO_ISSUE_MARKER}.`,
+		"First write your analysis, then the verdict. Report a finding only for a concrete defect; return an empty findings list when the diff satisfies the spec.",
 		"## Task spec", spec, "## Diff", "```diff", diff, "```",
 	].join("\n");
 	try {
 		const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], temperature: 0 }),
+			body: JSON.stringify({
+				model: config.model,
+				messages: [{ role: "user", content: prompt }],
+				temperature: 0,
+				response_format: { type: "json_schema", json_schema: { name: "review_verdict", strict: true, schema: VERDICT_SCHEMA } },
+			}),
 			signal: AbortSignal.any([AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(signal ? [signal] : [])]),
 		});
 		if (!response.ok) return { outcome: "transient", reason: "model-rejected", status: response.status };
 		const body = (await response.json()) as { choices?: { message?: { content?: string } }[] };
 		const text = body.choices?.[0]?.message?.content?.trim();
 		if (!text) return { outcome: "transient", reason: "empty-response" };
-		return normalizeForMarkerMatch(extractLastNonEmptyLine(text)) === NO_ISSUE_MARKER
+		const parsed = parseVerdict(text);
+		// The route enforces the schema, so this is a route/config problem rather
+		// than a review verdict -- treating it as `clean` would pass unreviewed code.
+		if (!parsed) return { outcome: "transient", reason: "malformed-verdict", text };
+		return parsed.verdict === "clean" && parsed.findings.length === 0
 			? { outcome: "clean", text }
-			: { outcome: "flagged", text };
+			: { outcome: "flagged", text: renderFindings(parsed.findings) || text };
 	} catch {
 		return { outcome: "transient", reason: "request-failed" };
 	}
