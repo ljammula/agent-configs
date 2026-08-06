@@ -5,9 +5,10 @@ complete: Docker/Colima and Harbor work, the native-arm64 oracle passes, the
 active customized Pi harness and Terminus 2 both passed the same task on the
 same Qwen model, and the containment matrix passes 17/17. The result is
 directional only (`n=1`), so the verdict is **inconclusive-needs-more-n**.
-#4 is installed, reviewed, indexed, and trial-wired read-only, but its paired
-run was stopped when a separate heavy local-model inference began; it has no
-adoption verdict and is not enabled globally. This is #3 and #4 from the
+#4 is installed, reviewed, indexed, and trial-wired read-only. Its lightweight
+pair completed on 2026-08-06 with equal 4/4 accuracy, only 2.91% token savings,
+and more turns/tools; its verdict is **default-disabled**, not globally enabled.
+The original 3-5 task/no-tool scope remains unrun. This is #3 and #4 from the
 open-source-repos recommendation thread (2026-08-05); #1 (RTK) was settled as
 "leave as is"
 and #2 (reviewer transient-split + schema verdict) shipped in `c94fa60`,
@@ -121,7 +122,7 @@ is the blocker for both this and the containment work
 
 ## #4 — codebase-memory-mcp trial
 
-### 2026-08-05 partial result
+### 2026-08-06 lightweight result
 
 - Version 0.9.0 was checksum-verified, source-reviewed, and installed as a
   standalone binary. A disposable clone of `personal-assistant` indexed
@@ -132,11 +133,16 @@ is the blocker for both this and the containment work
   normal Pi configuration.
 - The first attempted arm exposed and fixed an adapter-schema bug (`pattern`
   was accepted where the server requires `query`, causing an unbounded graph
-  response). The corrected arm made focused graph calls, then was interrupted
-  before completion to avoid contention with a separate inference scheduled
-  through 04:00. The control arm never ran.
-- Therefore the vendor token-reduction claim remains untested and there is no
-  adopt/default-disabled/rule-out verdict yet.
+  response). A later attempt was interrupted to avoid contention with a
+  separate inference; neither failed attempt was counted.
+- The completed pair used one predeclared architecture question. Both answers
+  scored 4/4 deterministically and 4/4 from separately blinded Gemma 4 reviews.
+  Memory used 2.91% fewer uncached-input-plus-output tokens, but took 0.94%
+  longer, 50% more turns, and 41.18% more tool calls. It fell back to ordinary
+  repo tools for 21/24 calls.
+- The vendor's 99.2% token-reduction claim was not confirmed. Verdict:
+  **default-disabled**. This is directional `n=1` evidence; the original 3-5
+  task battery and no-tool baseline remain unrun.
 
 ### Why
 
