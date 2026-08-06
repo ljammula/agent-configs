@@ -71,6 +71,17 @@ ordinary sense because their primary agent is a cloud model. When the same
 script is invoked by Pi, it is a second pass by Pi's own model family and must
 be described that way.
 
+`cross-model-review.ts` enforces its verdict via `response_format` JSON
+Schema against `:8081` (verified live to honor it correctly). Structured
+output and speculative decoding are mutually exclusive on this stack —
+`:8080` rejects a schema request outright with "Structured response_format
+is not supported with speculative decoding" when serving with a draft
+model. Gemma is therefore deliberately never run with `GEMMA_MTP=1`
+(`serve_gemma.sh`'s MTP branch): doing so would make every reviewer request
+fail as `model-rejected`, silently disabling the reviewer the same way the
+stale `AI_REVIEW_MODEL` id once did. See `pi-harness-validation-status.md`'s
+`cross-model-review.ts` entry for the full account.
+
 ## Runtime and rollback boundary
 
 The resident Qwen launcher uses the exactly locked `mlx-vlm-venv` on 0.6.8.
