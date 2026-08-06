@@ -20,10 +20,22 @@ network namespace:
 pi/containment/run-contained.sh /absolute/task/workspace -p "task"
 ```
 
+Run the live escape matrix after building the image:
+
+```bash
+pi/containment/verify-live.sh
+```
+
+The verifier checks that only the mounted workspace is writable; root-filesystem,
+redirection, symlink, subprocess, alias, and host-path escapes fail; host
+credentials and the Docker socket are absent; direct-IP and DNS network access
+fail; `/tmp` is non-executable; and the process is unprivileged with no Linux
+capabilities or privilege escalation.
+
 The network-denied profile is the safe default and cannot call this machine's
 LAN inference service or package registries, so it is not yet a usable coding
 path with the current remote model. Create a separately reviewed narrow relay
 or use Gondolin/OpenShell before enabling inference; do not replace
 `--network=none` with unrestricted bridge networking for untrusted unattended
-work. The image and launcher are an implemented containment base, not evidence
-that R-5's live escape matrix passed.
+work. The image and launcher are an implemented containment base. Run the live
+verifier on each Docker host before treating R-5 as proven there.

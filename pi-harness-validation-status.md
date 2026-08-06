@@ -74,14 +74,17 @@ resolution (both `quality-gate.ts`'s settlement check and
 or `check` target, in that priority order, not just `verify` — see
 `pi-harness-history.md`'s "make test/make check recognized" entry.
 
-Two acceptance boundaries remain intentionally not adopted:
+One acceptance boundary remains intentionally not adopted:
 
-- Docker is unavailable on this Mac. The containment Dockerfile and
-  launcher pass static shell/install checks, but the live escape matrix is
-  not proven.
 - `continuation-nudge.ts` and `co-change-suggest.ts` remain source-tested
   but are removed from the installed runtime until randomized paired
   evidence meets the current adoption threshold.
+
+Docker containment is now live-proven on this host via Colima: the image and
+launcher build and run with Pi 0.83.0, the persistent agent volume is writable
+by UID 10001, and `pi/containment/verify-live.sh` passes 17/17 checks covering
+workspace-only writes, escape attempts, host credentials/socket absence,
+network denial, `/tmp` noexec, capabilities, and no-new-privileges.
 
 ## Current battery result
 

@@ -1,7 +1,15 @@
 # Terminal-Bench/mini-swe-agent + codebase-memory-mcp — plan
 
-**Status: not started.** This is #3 and #4 from the open-source-repos
-recommendation thread (2026-08-05); #1 (RTK) was settled as "leave as is"
+**Status: partially complete (2026-08-05).** The five-minute #3 smoke is
+complete: Docker/Colima and Harbor work, the native-arm64 oracle passes, the
+active customized Pi harness and Terminus 2 both passed the same task on the
+same Qwen model, and the containment matrix passes 17/17. The result is
+directional only (`n=1`), so the verdict is **inconclusive-needs-more-n**.
+#4 is installed, reviewed, indexed, and trial-wired read-only, but its paired
+run was stopped when a separate heavy local-model inference began; it has no
+adoption verdict and is not enabled globally. This is #3 and #4 from the
+open-source-repos recommendation thread (2026-08-05); #1 (RTK) was settled as
+"leave as is"
 and #2 (reviewer transient-split + schema verdict) shipped in `c94fa60`,
 `125f2b2`, `395d247`. Reviewer background for anyone reading this cold: see
 `pi-harness-validation-status.md`'s `cross-model-review.ts` entry.
@@ -14,6 +22,23 @@ single tool.
 ---
 
 ## #3 — Docker + Terminal-Bench 2 / mini-swe-agent
+
+### 2026-08-05 lightweight result
+
+- Colima 0.10.3 provides Docker 29.7.1; `hello-world` passed.
+- Harbor 0.20.0's bundled oracle passed `openssl-selfsigned-cert` in a
+  force-built native-arm64 image.
+- The custom Harbor adapter snapshots the active host Pi configuration
+  (extensions, skills, prompts, edited `AGENTS.md`, settings, and RTK) while
+  excluding credentials, sessions, and caches.
+- On the same task and ThinkingCap-Qwen3.6-27B model, custom Pi 0.83.0 and
+  Terminus 2.0.0 both scored 1.0. End-to-end runtime was 2m33s vs. 4m35s;
+  uncached-input-plus-output tokens were 12,845 vs. 15,778; tool calls were
+  22 vs. 34. At `n=1`, this proves compatibility but not a general harness
+  advantage.
+- `pi/containment/verify-live.sh` passes all 17 checks on this Docker host.
+- The cloud-model, mini-swe-agent, and broader task-set runs were intentionally
+  omitted from the user-requested five-minute version.
 
 ### Why
 
@@ -95,6 +120,23 @@ is the blocker for both this and the containment work
 ---
 
 ## #4 — codebase-memory-mcp trial
+
+### 2026-08-05 partial result
+
+- Version 0.9.0 was checksum-verified, source-reviewed, and installed as a
+  standalone binary. A disposable clone of `personal-assistant` indexed
+  successfully (10,658 nodes, 48,988 edges), and focused graph searches
+  returned the expected Go handlers and tests.
+- A trial-only Pi adapter exposes only typed, read-only `search_graph`,
+  `get_code_snippet`, and `trace_path` operations. It is not installed in the
+  normal Pi configuration.
+- The first attempted arm exposed and fixed an adapter-schema bug (`pattern`
+  was accepted where the server requires `query`, causing an unbounded graph
+  response). The corrected arm made focused graph calls, then was interrupted
+  before completion to avoid contention with a separate inference scheduled
+  through 04:00. The control arm never ran.
+- Therefore the vendor token-reduction claim remains untested and there is no
+  adopt/default-disabled/rule-out verdict yet.
 
 ### Why
 

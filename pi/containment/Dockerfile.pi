@@ -6,7 +6,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}"
 
-RUN useradd --create-home --uid 10001 pi
+RUN useradd --create-home --uid 10001 pi \
+  && mkdir -p /home/pi/.pi/agent \
+  && chown -R pi:pi /home/pi/.pi
 COPY AGENTS.md /opt/pi-harness/AGENTS.md
 COPY extensions/ /opt/pi-harness/extensions/
 COPY prompts/ /opt/pi-harness/prompts/

@@ -18,6 +18,6 @@ exec docker run --rm -i \
   --pids-limit=512 \
   --tmpfs /tmp:rw,noexec,nosuid,size=512m \
   --network=none \
-  --mount "type=bind,src=$workspace,dst=/workspace,rw" \
-  --mount "type=volume,src=$agent_volume,dst=/home/pi/.pi/agent,rw" \
+  --mount "type=bind,src=$workspace,dst=/workspace" \
+  --mount "type=volume,src=$agent_volume,dst=/home/pi/.pi/agent" \
   "$image" "$@"
