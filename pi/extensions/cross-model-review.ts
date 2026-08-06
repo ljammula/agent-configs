@@ -62,14 +62,26 @@ export function extractLastNonEmptyLine(text: string): string {
 	return lines.at(-1) ?? "";
 }
 
+/**
+ * Why a configured reviewer produced no verdict. Every one of these used to
+ * collapse into a bare `transient` that the caller drops silently -- the same
+ * shape as the stale AI_REVIEW_MODEL incident, where every request 400'd for
+ * days and the harness recorded nothing distinguishable from "reviewer off".
+ */
+export type ReviewUnavailableReason =
+	| "not-configured"
+	| "model-rejected"
+	| "empty-response"
+	| "request-failed";
+
 export async function requestReview(
 	config: ReviewerConfig,
 	spec: string,
 	diff: string,
 	signal?: AbortSignal,
 	fetchImpl: typeof fetch = fetch,
-): Promise<{ outcome: "clean" | "flagged" | "transient"; text?: string }> {
-	if (!config.enabled || !config.baseUrl || !config.model) return { outcome: "transient" };
+): Promise<{ outcome: "clean" | "flagged" | "transient"; text?: string; reason?: ReviewUnavailableReason; status?: number }> {
+	if (!config.enabled || !config.baseUrl || !config.model) return { outcome: "transient", reason: "not-configured" };
 	const prompt = [
 		"Review this code diff only against its task spec. Focus on concrete logic bugs that passing tests may miss.",
 		`If there is no concrete issue, end with exactly ${NO_ISSUE_MARKER}.`,
@@ -82,15 +94,15 @@ export async function requestReview(
 			body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], temperature: 0 }),
 			signal: AbortSignal.any([AbortSignal.timeout(REVIEW_TIMEOUT_MS), ...(signal ? [signal] : [])]),
 		});
-		if (!response.ok) return { outcome: "transient" };
+		if (!response.ok) return { outcome: "transient", reason: "model-rejected", status: response.status };
 		const body = (await response.json()) as { choices?: { message?: { content?: string } }[] };
 		const text = body.choices?.[0]?.message?.content?.trim();
-		if (!text) return { outcome: "transient" };
+		if (!text) return { outcome: "transient", reason: "empty-response" };
 		return normalizeForMarkerMatch(extractLastNonEmptyLine(text)) === NO_ISSUE_MARKER
 			? { outcome: "clean", text }
 			: { outcome: "flagged", text };
 	} catch {
-		return { outcome: "transient" };
+		return { outcome: "transient", reason: "request-failed" };
 	}
 }
 
@@ -190,7 +202,12 @@ export default function reviewer(pi: ExtensionAPI): void {
 					event: "review",
 					outcome: result.outcome,
 					durationMs: Date.now() - startedAt,
-					metadata: { kind: config.kind, round: reviewCount + 1 },
+					metadata: {
+						kind: config.kind,
+						round: reviewCount + 1,
+						...(result.reason ? { reason: result.reason } : {}),
+						...(result.status ? { status: result.status } : {}),
+					},
 				});
 				if (result.outcome === "transient") return;
 				lastReviewedDiff = diff;
@@ -210,7 +227,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 				// replacement session; there is nothing left here to log against.
 				if (isStaleContextError(error)) return;
 				try {
-					appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind } });
+					appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind, reason: "review-pipeline-error" } });
 				} catch (traceError) {
 					if (!isStaleContextError(traceError)) throw traceError;
 				}

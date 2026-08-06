@@ -44,6 +44,30 @@ test("review request classifies clean, flagged, malformed, and unreachable respo
 	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).outcome, "transient");
 });
 
+test("every unavailable reviewer carries a distinguishable reason", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	const respond = (init: { ok: boolean; status?: number; content?: string }) => async () => ({
+		ok: init.ok,
+		status: init.status ?? 200,
+		json: async () => ({ choices: init.content === undefined ? [] : [{ message: { content: init.content } }] }),
+	}) as Response;
+
+	const disabled = await requestReview({ enabled: false, kind: "disabled" }, "spec", "diff");
+	assert.equal(disabled.reason, "not-configured");
+
+	// The exact shape of the stale-AI_REVIEW_MODEL incident: a 400 that used to
+	// be indistinguishable from a reviewer that was never configured at all.
+	const rejected = await requestReview(config, "spec", "diff", undefined, respond({ ok: false, status: 400 }));
+	assert.equal(rejected.reason, "model-rejected");
+	assert.equal(rejected.status, 400);
+
+	assert.equal((await requestReview(config, "spec", "diff", undefined, respond({ ok: true }))).reason, "empty-response");
+	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).reason, "request-failed");
+
+	// A real verdict must not carry an unavailability reason.
+	assert.equal((await requestReview(config, "spec", "diff", undefined, respond({ ok: true, content: "NO_ISSUES_FOUND" }))).reason, undefined);
+});
+
 test("a stale extension context during review does not crash the turn", async () => {
 	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
 	const previousModel = process.env.AI_REVIEW_MODEL;
