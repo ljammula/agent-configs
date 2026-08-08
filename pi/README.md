@@ -33,11 +33,16 @@ The committed `package.json`, pinned Pi API dependency, and `tests/` directory
 provide repeatable type and behavior checks. `quality-gate.ts` binds passing
 evidence to the current diff hash, rejects truncated or shell-masked results,
 runs the repository's canonical broad check directly at settlement, and caps
-automatic corrective follow-ups at three. `stack-router.ts` selects only
-portable Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka,
-Temporal, and GCP guidance from repository evidence. Versioned trace entries
-support later evaluation without recording prompts, source, secrets, or full
-command output.
+automatic corrective follow-ups at three. `stack-router.ts` names, in an
+explicit `before_agent_start` nudge, which of the Go, Python, Flutter,
+TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, or GCP skills the repo's
+evidence matches; `stack-skill-overlay.ts` is what actually makes only those
+matching skills discoverable, via `resources_discover`, instead of the 8
+stack skills shipping into every session's system prompt globally regardless
+of repo (the old behavior cost ~1,790 of the harness's measured ~7,036-token
+startup tax — see `../pi-harness-validation-status.md`). Versioned trace
+entries support later evaluation without recording prompts, source, secrets,
+or full command output.
 
 ## Launching pi
 

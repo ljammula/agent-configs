@@ -9,22 +9,27 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 const repo = resolve(import.meta.dirname, "../..");
 
-test("installer removes managed DayTrix globals and installs portable Pi skills", async () => {
+test("installer removes managed DayTrix and stack-skill globals, installs portable Pi skills", async () => {
 	const home = await mkdtemp(join(tmpdir(), "pi-install-"));
 	const skills = join(home, ".pi/agent/skills");
 	const extensions = join(home, ".pi/agent/extensions");
 	await mkdir(skills, { recursive: true });
 	await mkdir(extensions, { recursive: true });
 	await symlink(join(repo, "pi/skills/backend-dev"), join(skills, "backend-dev"));
+	// Simulates a machine still holding the old-style global stack-skill link
+	// (pre stack-skill-overlay.ts); install.sh must clean this up too.
+	await symlink(join(repo, "pi/skills/go-service"), join(skills, "go-service"));
 	await symlink(join(repo, "pi/extensions/continuation-nudge.ts"), join(extensions, "continuation-nudge.ts"));
 	await symlink(join(repo, "pi/extensions/co-change-suggest.ts"), join(extensions, "co-change-suggest.ts"));
 	await execFileAsync("bash", [join(repo, "install.sh"), "--force"], { env: { ...process.env, HOME: home } });
 	await assert.rejects(readlink(join(skills, "backend-dev")));
+	await assert.rejects(readlink(join(skills, "go-service")));
 	await assert.rejects(readlink(join(extensions, "continuation-nudge.ts")));
 	await assert.rejects(readlink(join(extensions, "co-change-suggest.ts")));
-	assert.equal(await readlink(join(skills, "go-service")), join(repo, "pi/skills/go-service"));
+	assert.equal(await readlink(join(skills, "tdd")), join(repo, "pi/skills/tdd"));
 	assert.equal(await readlink(join(skills, "before-done")), join(repo, "pi/skills/before-done"));
 	assert.equal(await readlink(join(extensions, "quality-gate.ts")), join(repo, "pi/extensions/quality-gate.ts"));
+	assert.equal(await readlink(join(extensions, "stack-skill-overlay.ts")), join(repo, "pi/extensions/stack-skill-overlay.ts"));
 });
 
 test("ordinary upgrades replace known legacy core skill links", async () => {

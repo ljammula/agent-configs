@@ -3,10 +3,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // Pi has no equivalent of Claude Code's CLAUDE.md "always invoke this skill"
 // instruction (that phrasing names a "Skill tool" that doesn't exist here),
 // and its own skill system surfaces skills by relevance-matching rather than
-// unconditionally. This guarantees the karpathy-guidelines behavior fires on
-// every coding turn regardless of matching -- the full guideline text stays
-// in skills/karpathy-guidelines/SKILL.md as the single source of truth; this
-// is just the trigger.
+// unconditionally. `before_agent_start` fires once per session, before the
+// first tool call (not per turn) -- that single firing is enough to
+// guarantee the karpathy-guidelines behavior applies for the whole session
+// regardless of matching. The full guideline text stays in
+// skills/karpathy-guidelines/SKILL.md as the single source of truth; this is
+// just the trigger. AGENTS.md intentionally does not restate this text --
+// see its "Working rules" section.
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event) => {
     return {
