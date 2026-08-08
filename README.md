@@ -160,6 +160,12 @@ scope:
   architecture and operations—Go/Flutter layout, Firebase conventions,
   localization files, deployment, and GitHub accounts. These belong in the
   `personal-assistant` repository, not in a global skill installation.
+- **Spec-driven-development skills** (`setup-matt-pocock-skills`, `to-spec`,
+  `to-tickets`, `implement`, and the rest of the engineering/productivity set)
+  come from the `mattpocock-skills@claude-plugins-official` Claude Code
+  plugin (`claude plugins install mattpocock-skills` /
+  `/plugin install mattpocock-skills`), not from this repo — do not vendor a
+  copy here; that plugin already tracks upstream and updates itself.
 
 The intended ownership is:
 
