@@ -33,6 +33,19 @@ test("routes Flutter and advertises GCP without invoking it", async () => {
 	assert.deepEqual(await routeStackSkills(cwd), ["flutter-app", "gcp-deploy"]);
 });
 
+test("finds manifests inside a monorepo's subdirectories, not just the root", async () => {
+	// The exact shape of the real personal-assistant repo: a root package.json
+	// that's only e2e-test tooling, a Go backend and a Flutter frontend one
+	// level down. A root-only manifest check finds typescript-service and
+	// misses both real stacks.
+	const cwd = await fixture({
+		"package.json": "{\"name\": \"daytrix-e2e\", \"devDependencies\": {\"@playwright/test\": \"^1.0.0\"}}\n",
+		"backend/go.mod": "module github.com/example/backend\n",
+		"frontend/pubspec.yaml": "name: app\n",
+	});
+	assert.deepEqual(await routeStackSkills(cwd), ["go-service", "flutter-app", "typescript-service"]);
+});
+
 test("an unrelated backend directory receives no DayTrix or stack instruction", async () => {
 	const cwd = await fixture({ "backend/readme.txt": "household feature-grant localization release account" });
 	assert.deepEqual(await routeStackSkills(cwd), []);

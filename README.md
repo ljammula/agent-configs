@@ -96,7 +96,8 @@ agent-configs/
     │   ├── protected-paths.ts      # write/edit guard with realpath/symlink containment
     │   ├── external-effects.ts     # blocks deploy/publish/prod mutation without opt-in
     │   ├── quality-gate.ts         # final-diff canonical verification, bounded correction
-    │   ├── stack-router.ts         # evidence-based portable stack skill routing
+    │   ├── stack-router.ts         # names the matching stack skill(s) in an explicit nudge
+    │   ├── stack-skill-overlay.ts  # loads only the matching stack skill(s), not all 8 globally
     │   ├── project-skill-overlay.ts # DayTrix workflows only for its exact Git remote
     │   ├── continuation-nudge.ts   # Evidence-gated source; not installed by default
     │   ├── cross-model-review.ts   # Explicit independent route or labeled self-review
@@ -159,6 +160,12 @@ scope:
   architecture and operations—Go/Flutter layout, Firebase conventions,
   localization files, deployment, and GitHub accounts. These belong in the
   `personal-assistant` repository, not in a global skill installation.
+- **Spec-driven-development skills** (`setup-matt-pocock-skills`, `to-spec`,
+  `to-tickets`, `implement`, and the rest of the engineering/productivity set)
+  come from the `mattpocock-skills@claude-plugins-official` Claude Code
+  plugin (`claude plugins install mattpocock-skills` /
+  `/plugin install mattpocock-skills`), not from this repo — do not vendor a
+  copy here; that plugin already tracks upstream and updates itself.
 
 The intended ownership is:
 

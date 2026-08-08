@@ -22,11 +22,12 @@ import qualityGate from "../extensions/quality-gate.ts";
 import rtkRewrite from "../extensions/rtk-rewrite.ts";
 import search from "../extensions/searxng-search.ts";
 import stackRouter from "../extensions/stack-router.ts";
+import stackSkillOverlay from "../extensions/stack-skill-overlay.ts";
 import todo from "../extensions/todo.ts";
 import { ExtensionHarness } from "./extension-api-harness.ts";
 
 test("every installed extension registers against the pinned public API", () => {
-	const factories = [aiStack, artifactGuard, coChange, continuation, reviewer, errorLeakGuard, externalEffects, format, fullStack, checkpoint, gitSafety, guardrail, makefileScaffoldNudge, newProjectScaffold, notify, planMode, projectOverlay, protectedPaths, qualityGate, rtkRewrite, search, stackRouter, todo];
+	const factories = [aiStack, artifactGuard, coChange, continuation, reviewer, errorLeakGuard, externalEffects, format, fullStack, checkpoint, gitSafety, guardrail, makefileScaffoldNudge, newProjectScaffold, notify, planMode, projectOverlay, protectedPaths, qualityGate, rtkRewrite, search, stackRouter, stackSkillOverlay, todo];
 	for (const factory of factories) {
 		const harness = new ExtensionHarness();
 		assert.doesNotThrow(() => factory(harness.api), factory.name);

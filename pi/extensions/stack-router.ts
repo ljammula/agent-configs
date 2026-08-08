@@ -37,21 +37,33 @@ async function fileNames(cwd: string): Promise<string[]> {
 	return names;
 }
 
+// Reads every manifest of `manifestName` found anywhere in `names` (not just
+// the repo root), so a monorepo's `backend/go.mod` / `frontend/pubspec.yaml`
+// are found the same way a root-level one would be. Concatenates all matches
+// -- a monorepo can have more than one Go module, and a false-negative here
+// (missing the skill) is worse than the false-positive of reading a couple
+// of harmless extra manifests.
+async function manifestBodies(cwd: string, names: string[], manifestName: string): Promise<string[]> {
+	const paths = names.filter((name) => name === manifestName || name.endsWith(`/${manifestName}`)).slice(0, 20);
+	return Promise.all(paths.map((path) => body(cwd, path)));
+}
+
 export async function routeStackSkills(cwd: string): Promise<StackSkill[]> {
-	const [goMod, pyproject, pubspec, packageJson, names] = await Promise.all([
-		body(cwd, "go.mod"),
-		body(cwd, "pyproject.toml"),
-		body(cwd, "pubspec.yaml"),
-		body(cwd, "package.json"),
-		fileNames(cwd),
+	const names = await fileNames(cwd);
+	const [goModBodies, pyprojectBodies, pubspecBodies, packageJsonBodies] = await Promise.all([
+		manifestBodies(cwd, names, "go.mod"),
+		manifestBodies(cwd, names, "pyproject.toml"),
+		manifestBodies(cwd, names, "pubspec.yaml"),
+		manifestBodies(cwd, names, "package.json"),
 	]);
-	const dependencyText = `${goMod}\n${pyproject}\n${packageJson}`.toLowerCase();
+	const goMod = goModBodies.join("\n");
+	const dependencyText = `${goMod}\n${pyprojectBodies.join("\n")}\n${packageJsonBodies.join("\n")}`.toLowerCase();
 	const skills: StackSkill[] = [];
-	if (goMod) skills.push("go-service");
-	if (pyproject) skills.push("python-service");
-	if (pubspec) skills.push("flutter-app");
-	if (packageJson) skills.push("typescript-service");
-	if (goMod && /go\.temporal\.io\/sdk/.test(goMod)) skills.push("temporal-go");
+	if (goModBodies.some(Boolean)) skills.push("go-service");
+	if (pyprojectBodies.some(Boolean)) skills.push("python-service");
+	if (pubspecBodies.some(Boolean)) skills.push("flutter-app");
+	if (packageJsonBodies.some(Boolean)) skills.push("typescript-service");
+	if (/go\.temporal\.io\/sdk/.test(goMod)) skills.push("temporal-go");
 	if (/kafka|confluent/.test(dependencyText)) skills.push("kafka-processing");
 	const hasMigrations = names.some((name) => /(^|\/)(migrations?|schema)(\/|$)/i.test(name));
 	const hasPostgresDriver = /postgres|postgresql|pgx|psycopg|asyncpg|lib\/pq|\"pg\"/.test(dependencyText);

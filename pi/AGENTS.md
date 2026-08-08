@@ -7,17 +7,14 @@ directives far more reliably than they infer intent from prose.
 ## Working rules
 
 1. Read before you write. Never edit a file you have not read in this session.
-2. Make the smallest change that solves the stated problem. No refactors, no
-   renames, no "while I was here" cleanups, no speculative abstractions.
-3. State assumptions out loud before coding. If two readings of the request
-   lead to different code, ask instead of picking silently.
-4. Every task ends with a verification command that actually ran — a test, a
-   build, a lint. "It should work" is not a result. Paste the real output.
-5. If a check fails, say so plainly with the failing output. Never report
+2. If a check fails, say so plainly with the failing output. Never report
    success you did not observe.
 
-These mirror the `karpathy-guidelines` skill; apply it by default on any
-coding task.
+Surgical changes, minimum code, surfacing assumptions, and a verifiable
+success criterion are `karpathy-guidelines` territory, not restated here —
+`karpathy-guardrail.ts` enforces that skill unconditionally every session
+(see its own header comment for why), so it's the single source of truth.
+Don't duplicate its wording in this file.
 
 ## Verification commands
 
