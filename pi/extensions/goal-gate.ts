@@ -43,6 +43,14 @@ export function resolveMaxRounds(env: NodeJS.ProcessEnv = process.env): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_ROUNDS;
 }
 
+const DEFAULT_KICKOFF_TIMEOUT_MS = 10_000;
+
+export function resolveKickoffTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env.PI_GOAL_KICKOFF_TIMEOUT_MS;
+	const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_KICKOFF_TIMEOUT_MS;
+}
+
 interface GoalState {
 	condition: string;
 	rounds: number;
@@ -74,11 +82,39 @@ function kickoffMessage(condition: string): string {
 
 export default function goalGate(pi: ExtensionAPI): void {
 	let goal: GoalState | undefined;
-	// Reflects only the *most recent* broad verification command's outcome,
-	// reset to "none" after every nudge -- each new round needs its own
-	// fresh evidence, so a pass from three rounds ago can't be recycled to
-	// back a completion claim made after further, unverified edits.
+	// Reflects only the *most recent* broad verification command's outcome.
+	// Reset to "none" specifically when a GOAL COMPLETE claim is rejected
+	// (see the turn_end handler below for why only that path resets it, not
+	// every nudge). Known, accepted gap: unlike quality-gate.ts, this is not
+	// bound to the current diff hash, so a pass followed by further
+	// unverified edits and an immediate completion claim can still slip
+	// through. goal-gate deliberately trades that precision for simplicity;
+	// tighten it if this gap is ever hit live.
 	let lastVerification: "pass" | "fail" | "none" = "none";
+
+	// `ctx.waitForIdle()` returns immediately if the agent is idle *right
+	// now* (confirmed by reading agent-session.js: `if (this.isIdle) return`).
+	// `pi.sendUserMessage()` only queues a turn -- it doesn't return a
+	// promise, and the turn it triggers hasn't started by the time the
+	// command handler's next line runs, so calling waitForIdle() straight
+	// after sendUserMessage races the turn and returns instantly, doing
+	// nothing. Confirmed live: under `pi -p`, without this, the process
+	// exited with zero agent events at all -- not even `agent_start`.
+	// Wait for the turn to actually *start* first (bounded, in case it
+	// never does), then wait for it to finish.
+	const agentStartWaiters: (() => void)[] = [];
+	pi.on("agent_start", () => {
+		for (const resolve of agentStartWaiters.splice(0)) resolve();
+	});
+	function waitForNextAgentStart(timeoutMs = resolveKickoffTimeoutMs()): Promise<void> {
+		return new Promise((resolve) => {
+			const timer = setTimeout(resolve, timeoutMs);
+			agentStartWaiters.push(() => {
+				clearTimeout(timer);
+				resolve();
+			});
+		});
+	}
 
 	pi.registerCommand("goal", {
 		description: "Set a goal pi keeps working toward across turns until it's verifiably met",
@@ -108,6 +144,13 @@ export default function goalGate(pi: ExtensionAPI): void {
 			lastVerification = "none";
 			ctx.ui.notify(`Goal set: ${args}`, "info");
 			pi.sendUserMessage(kickoffMessage(args), { deliverAs: "followUp" });
+			// Under `pi -p`, the process exits once this command handler's
+			// promise resolves. Wait for the kicked-off turn to start, then
+			// for the agent to go idle again, so the process stays alive
+			// through it. Interactive sessions don't need this (the process
+			// outlives the command either way), but waiting is harmless there.
+			await waitForNextAgentStart();
+			await ctx.waitForIdle();
 		},
 	});
 
@@ -142,7 +185,17 @@ export default function goalGate(pi: ExtensionAPI): void {
 			? "You wrote GOAL COMPLETE but the most recent verification command did not pass (or none has " +
 				"run since). Run the project's real verification command and only claim complete once it actually passes."
 			: `Goal not yet met: "${goal.condition}". Keep working -- make the next concrete edit, then verify it.`;
-		lastVerification = "none";
+		// Only discard the current pass/fail signal on a *rejected completion
+		// claim* -- that's the one case where reusing it would be wrong (the
+		// model must re-verify before claiming again). A plain "not yet met"
+		// nudge fires on every stopReason:"stop" turn, including ordinary
+		// mid-task narrative with no tool call attached (exactly what
+		// continuation-nudge.ts calls an abandoned turn) -- live-confirmed
+		// 2026-08-09: resetting on *every* nudge wiped out a genuine pass
+		// long before the model's next real GOAL COMPLETE attempt, so a
+		// truthful claim kept getting rejected as unverified. See
+		// pi-harness-validation-status.md's goal-gate entry.
+		if (declaredComplete) lastVerification = "none";
 		pi.sendUserMessage(`${nudge}\n\n(round ${goal.rounds}/${goal.maxRounds})`, { deliverAs: "followUp" });
 	});
 }

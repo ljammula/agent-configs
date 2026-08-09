@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import goalGate, { resolveMaxRounds } from "../extensions/goal-gate.ts";
+import goalGate, { resolveKickoffTimeoutMs, resolveMaxRounds } from "../extensions/goal-gate.ts";
 import { ExtensionHarness } from "./extension-api-harness.ts";
 
 function stopTurn(text: string) {
@@ -36,11 +36,42 @@ function failingVerify(harness: ExtensionHarness) {
 	} as any);
 }
 
+// Setting a goal awaits `waitForNextAgentStart()` inside the command
+// handler before it resolves (see goal-gate.ts's header comment on why:
+// under `pi -p`, the process would otherwise exit before the kicked-off
+// turn ever started). The handler registers its waiter synchronously
+// before its first await, so starting the invocation, then emitting
+// agent_start, then awaiting the invocation, resolves it without relying
+// on the real (10s) timeout fallback.
+function setGoal(harness: ExtensionHarness, condition: string): Promise<void> {
+	const invocation = harness.invokeCommand("goal", condition);
+	harness.emit({ type: "agent_start" } as any);
+	return invocation;
+}
+
 test("resolveMaxRounds falls back to the default on missing/invalid env", () => {
 	assert.equal(resolveMaxRounds({}), 15);
 	assert.equal(resolveMaxRounds({ PI_GOAL_MAX_ROUNDS: "not-a-number" }), 15);
 	assert.equal(resolveMaxRounds({ PI_GOAL_MAX_ROUNDS: "0" }), 15);
 	assert.equal(resolveMaxRounds({ PI_GOAL_MAX_ROUNDS: "3" }), 3);
+});
+
+test("resolveKickoffTimeoutMs falls back to the default on missing/invalid env", () => {
+	assert.equal(resolveKickoffTimeoutMs({}), 10_000);
+	assert.equal(resolveKickoffTimeoutMs({ PI_GOAL_KICKOFF_TIMEOUT_MS: "nope" }), 10_000);
+	assert.equal(resolveKickoffTimeoutMs({ PI_GOAL_KICKOFF_TIMEOUT_MS: "25" }), 25);
+});
+
+test("the kickoff wait falls back to its timeout instead of hanging when agent_start never fires", async () => {
+	process.env.PI_GOAL_KICKOFF_TIMEOUT_MS = "20";
+	try {
+		const harness = new ExtensionHarness();
+		goalGate(harness.api);
+		await harness.invokeCommand("goal", "orphaned kickoff"); // no agent_start emitted
+		assert.equal(harness.messages.length, 1); // the kickoff message was still sent
+	} finally {
+		delete process.env.PI_GOAL_KICKOFF_TIMEOUT_MS;
+	}
 });
 
 test("/goal with no args prints usage and does not set a goal", async () => {
@@ -55,7 +86,7 @@ test("/goal with no args prints usage and does not set a goal", async () => {
 test("/goal <condition> sets a goal and kicks off a follow-up turn", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "make the app full-stack");
+	await setGoal(harness, "make the app full-stack");
 	assert.match(harness.notifications[0]?.message ?? "", /Goal set: make the app full-stack/);
 	assert.equal(harness.messages.length, 1);
 	assert.match(String(harness.messages[0].content), /Goal set: make the app full-stack/);
@@ -73,7 +104,7 @@ test("/goal clear with no active goal is a no-op notification", async () => {
 test("/goal clear ends an active goal and further stop turns are ignored", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "ship it");
+	await setGoal(harness, "ship it");
 	await harness.invokeCommand("goal", "clear");
 	assert.match(harness.notifications[1]?.message ?? "", /Goal cleared \(was: "ship it", 0 round\(s\) used\)/);
 	await harness.emit(stopTurn("all done"));
@@ -83,7 +114,7 @@ test("/goal clear ends an active goal and further stop turns are ignored", async
 test("a stop turn with no completion marker is nudged and rounds increment", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "add a dashboard");
+	await setGoal(harness, "add a dashboard");
 	await harness.emit(stopTurn("I think that covers it."));
 	assert.equal(harness.messages.length, 2);
 	assert.match(String(harness.messages[1].content), /Goal not yet met: "add a dashboard"/);
@@ -93,7 +124,7 @@ test("a stop turn with no completion marker is nudged and rounds increment", asy
 test("GOAL COMPLETE without a passing verification is rejected and nudged", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "add a dashboard");
+	await setGoal(harness, "add a dashboard");
 	await harness.emit(stopTurn("GOAL COMPLETE: dashboard renders."));
 	assert.equal(harness.messages.length, 2);
 	assert.match(String(harness.messages[1].content), /did not pass \(or none has/);
@@ -102,7 +133,7 @@ test("GOAL COMPLETE without a passing verification is rejected and nudged", asyn
 test("GOAL COMPLETE with a failing verification is rejected", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "add a dashboard");
+	await setGoal(harness, "add a dashboard");
 	await failingVerify(harness);
 	await harness.emit(stopTurn("GOAL COMPLETE: dashboard renders."));
 	assert.equal(harness.messages.length, 2);
@@ -111,7 +142,7 @@ test("GOAL COMPLETE with a failing verification is rejected", async () => {
 test("GOAL COMPLETE backed by a passing verification clears the goal", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "add a dashboard");
+	await setGoal(harness, "add a dashboard");
 	await passingVerify(harness);
 	await harness.emit(stopTurn("GOAL COMPLETE: make verify passes, dashboard is live."));
 	assert.equal(harness.messages.length, 1); // no further nudge
@@ -123,20 +154,36 @@ test("GOAL COMPLETE backed by a passing verification clears the goal", async () 
 	assert.equal(harness.messages.length, 1);
 });
 
-test("a stale pass does not carry over to back a later, unverified completion claim", async () => {
+test("an ordinary not-yet-met nudge does not discard a genuine pass -- a later claim still succeeds", async () => {
+	// Live-confirmed 2026-08-09 (see goal-gate.ts's turn_end comment): a
+	// stopReason:"stop" turn fires on ordinary mid-task narrative with no
+	// tool call too, not just genuine stopping points. Wiping the pass
+	// signal on *every* such nudge meant a real pass right before a real
+	// GOAL COMPLETE kept getting rejected as unverified.
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "add a dashboard");
+	await setGoal(harness, "add a dashboard");
 	await passingVerify(harness);
-	await harness.emit(stopTurn("still working, more to do")); // nudge resets lastVerification to "none"
+	await harness.emit(stopTurn("still working, more to do")); // plain nudge, no claim -- pass must survive
 	await harness.emit(stopTurn("GOAL COMPLETE: done now."));
-	assert.equal(harness.messages.length, 3); // kickoff + 2 nudges, never cleared
+	assert.equal(harness.messages.length, 2); // kickoff + the one "not yet met" nudge, then cleared
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "complete"), true);
+});
+
+test("a rejected completion claim resets the signal -- immediately repeating the claim still fails", async () => {
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit(stopTurn("GOAL COMPLETE: done now.")); // no verification ever ran -- rejected
+	await harness.emit(stopTurn("GOAL COMPLETE: done now.")); // repeated verbatim, still no fresh evidence
+	assert.equal(harness.messages.length, 3); // kickoff + 2 rejections
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "complete"), false);
 });
 
 test("round budget is exhausted and the goal is dropped without an unbounded nudge loop", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "keep trying");
+	await setGoal(harness, "keep trying");
 	for (let i = 0; i < 20; i += 1) await harness.emit(stopTurn("not done yet"));
 	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "cap-hit"), true);
 	// after the cap trips, further stop turns produce no more nudges
@@ -148,7 +195,7 @@ test("round budget is exhausted and the goal is dropped without an unbounded nud
 test("turn_end is ignored when the assistant did not actually stop (tool call pending)", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
-	await harness.invokeCommand("goal", "keep trying");
+	await setGoal(harness, "keep trying");
 	await harness.emit({
 		type: "turn_end",
 		turnIndex: 0,

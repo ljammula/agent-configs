@@ -236,7 +236,11 @@ Written here:
   stable domain error. Primary detection moved to `tool_result` on
   `write`/`edit`, scanning the file the instant it changes, independent of
   git state entirely; `agent_settled` is a backstop.
-- **`goal-gate.ts`** — **new, no live-trial evidence yet.** A Claude-Code-
+- **`goal-gate.ts`** — **new; one live smoke trial found and fixed two real
+  bugs (kickoff never ran under `-p`; a genuine pass kept getting rejected
+  as unverified), both confirmed by the fix's own rerun -- see
+  `pi-harness-validation-status.md` for the full account. Not yet
+  battery-tested on a larger, multi-round task.** A Claude-Code-
   style `/goal <condition>` command: registers a real slash command (not a
   prompt template) that sets a goal for the rest of this pi process and
   immediately kicks off a follow-up turn to start working on it. On every

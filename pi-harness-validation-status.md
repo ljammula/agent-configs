@@ -204,9 +204,53 @@ passed; nudges to continue otherwise, capped at `PI_GOAL_MAX_ROUNDS`
 see the file's own header for why a same-model judge would carry the same
 self-report bias this doc already documents elsewhere. `npm test`:
 143/143 (12 new deterministic tests, `pi/tests/goal-gate.test.ts`); `tsc
---noEmit`: clean. Source/unit-tested only so far — no live-trial evidence
-yet; see todo below for the planned live run against
-personal-budget-simplifier.
+--noEmit`: clean.
+
+**Live-tested 2026-08-09 against a fresh empty repo under `pi -p`
+(`/goal say hello and stop`, "hello" Go program task) — two real bugs
+found and fixed, both confirmed by the fix's own rerun, not assumed:**
+
+1. **The kickoff never ran at all.** First live attempt: `pi -p "/goal ..."`
+   exited immediately (exit 0, one `session` line, zero `agent_start` —
+   not even a turn attempted) whether run in `--mode json` or plain text.
+   Root cause, confirmed by reading `agent-session.js`:
+   `ctx.waitForIdle()` returns instantly if the agent is idle *right now*
+   (`if (this.isIdle) return`), and `pi.sendUserMessage()` only queues a
+   turn -- it returns void, not a promise, and the queued turn hasn't
+   started by the time the command handler's next line runs. Calling
+   `waitForIdle()` right after `sendUserMessage()` raced the not-yet-started
+   turn and returned immediately, so the `-p` process exited before the
+   kicked-off turn ever began. **Fixed**: the command handler now waits for
+   a real `agent_start` event (bounded by `PI_GOAL_KICKOFF_TIMEOUT_MS`,
+   default 10s) before calling `waitForIdle()`. Confirmed live after the
+   fix: a real `agent_start`/turn sequence now runs under `-p`.
+2. **A genuine pass kept getting rejected as unverified.** With bug 1 fixed,
+   the same task ran for 74+ turns and 15 nudge rounds without ever
+   accepting a `GOAL COMPLETE` claim, despite `quality-gate.ts`'s own trace
+   log showing the exact same verification command passing repeatedly.
+   Root cause: `lastVerification` was reset to `"none"` after *every*
+   nudge, but `stopReason: "stop"` fires on ordinary mid-task narrative
+   with no tool call too (`"Now I'll run the tests:"` with nothing
+   attached) -- exactly what `continuation-nudge.ts` calls an abandoned
+   turn -- not only on genuine stopping points. Each such narrative turn
+   wiped out a real pass long before the model's next actual completion
+   attempt. **Fixed**: only reset `lastVerification` when a `GOAL COMPLETE`
+   claim is specifically rejected, not on every nudge; documented as a
+   known, accepted gap that this signal isn't diff-hash-bound the way
+   `quality-gate.ts`'s is. **Confirmed live after both fixes**: rerun of
+   the identical task (fresh empty repo, same prompt) accepted
+   `GOAL COMPLETE` on the model's *first* claim (`pi-goal-trace` entry:
+   `{event: "complete", rounds: 0}`), finishing in 11 turns instead of 74+.
+   Verified independently, outside the harness: `make verify` passes,
+   `go run .` prints `hello`. 15 new/updated deterministic tests
+   (`pi/tests/goal-gate.test.ts`, 15 total for this file); `npm test`:
+   146/146; `tsc --noEmit`: clean.
+
+Not yet run: the actual planned target task (multi-round, open-ended
+feature work against `personal-budget-simplifier`) -- both fixes above
+were found and confirmed on a small single-round smoke task, which is
+enough to trust the mechanism's basic wiring but not its behavior across
+many genuine nudge rounds on a large existing codebase. See todo below.
 
 ## Todo
 

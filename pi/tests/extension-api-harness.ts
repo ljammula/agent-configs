@@ -58,7 +58,10 @@ export class ExtensionHarness {
 				confirm: async () => false,
 				input: async () => undefined,
 			} as any,
-		} as ExtensionContext;
+			// Command-handler-only members (ExtensionCommandContext), stubbed here too
+			// so commands registered via registerCommand can be exercised directly.
+			waitForIdle: async () => undefined,
+		} as unknown as ExtensionContext;
 
 		this.api = {
 			on: (event: EventType, handler: Handler) => {
