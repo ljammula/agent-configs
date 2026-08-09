@@ -191,8 +191,32 @@ confirming repros on one task/stack, not a battery — multi-round corrective
 recovery, `--containment`, and non-Go stacks are unexercised; see the
 todo below and `pi/scripts/README.md`'s "Known gaps" section.
 
+## Update 2026-08-09: `/goal` command (goal-gate.ts)
+
+New: `pi/extensions/goal-gate.ts` — a Claude-Code-style `/goal <condition>`
+command (registered via `pi.registerCommand`, not a prompt template, since
+it needs persistent cross-turn state and a stop-time gate). Sets a
+session-scoped goal, kicks off a follow-up turn immediately, and on every
+`stopReason: "stop"` turn checks for a literal `GOAL COMPLETE: <evidence>`
+line backed by the most recent broad verification command actually having
+passed; nudges to continue otherwise, capped at `PI_GOAL_MAX_ROUNDS`
+(default 15). Deliberately does not add an LLM-judged completion check —
+see the file's own header for why a same-model judge would carry the same
+self-report bias this doc already documents elsewhere. `npm test`:
+143/143 (12 new deterministic tests, `pi/tests/goal-gate.test.ts`); `tsc
+--noEmit`: clean. Source/unit-tested only so far — no live-trial evidence
+yet; see todo below for the planned live run against
+personal-budget-simplifier.
+
 ## Todo
 
+- Live-test `/goal` (`goal-gate.ts`) against a real repo with an
+  open-ended, multi-round condition (e.g.
+  `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
+  it a true usable full-stack app") — confirm the kickoff follow-up turn
+  actually fires under interactive `pi`, the nudge loop survives multiple
+  rounds, and a `GOAL COMPLETE` claim only sticks once backed by a real
+  passing verification run. Source/unit-tested only so far.
 - Battery-test `pi/scripts/build_app.py` across more stacks (Python,
   TypeScript, Flutter), with `--containment` on, and on a task deliberately
   seeded to fail its first verification round so the corrective-round path

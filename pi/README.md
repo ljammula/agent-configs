@@ -236,6 +236,27 @@ Written here:
   stable domain error. Primary detection moved to `tool_result` on
   `write`/`edit`, scanning the file the instant it changes, independent of
   git state entirely; `agent_settled` is a backstop.
+- **`goal-gate.ts`** — **new, no live-trial evidence yet.** A Claude-Code-
+  style `/goal <condition>` command: registers a real slash command (not a
+  prompt template) that sets a goal for the rest of this pi process and
+  immediately kicks off a follow-up turn to start working on it. On every
+  turn that looks like a stopping point (`stopReason: "stop"`), the gate
+  checks whether the model has earned the right to stop -- its message must
+  end with a literal `GOAL COMPLETE: <evidence>` line, and the most recent
+  broad verification command run since then must have passed -- and if not,
+  nudges it to keep going instead. Bounded by `PI_GOAL_MAX_ROUNDS` (default
+  15). Deliberately does not use an LLM to judge whether the goal is met the
+  way `cross-model-review.ts` does: a same-model completion judge would
+  carry the exact self-report bias this file already documents (models told
+  to "run the gate" report success without running anything) -- a passing
+  verification command is the one signal this harness treats as real
+  evidence elsewhere, so `goal-gate.ts` reuses that instead of inventing a
+  weaker one. `/goal clear` ends a goal early; `/goal status` reports the
+  current condition and round count. State is session-scoped, held only in
+  the extension's own memory -- a fresh `pi -p --continue` process (a new OS
+  process against the same session file) starts with no active goal; for a
+  batch build that must survive process restarts, use
+  `pi/scripts/build_app.py`'s outer round loop instead.
 
 All four are unit-tested (`pi/tests/*.test.ts`). The first live trial (a
 `pi -p` run building a small Go+SQLite backend from an empty directory)
@@ -276,6 +297,11 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 matching skills. They spell out each step and demand pasted command output,
 because a small model that is told "run the gate" will report success without
 running anything.
+
+`/goal` is not one of these: it's a real command registered by
+`goal-gate.ts` (see above), because a `/goal <condition>` needs persistent
+state across turns and a gate on stopping, neither of which a `.md` prompt
+template can do on its own.
 
 ### Hook semantics for extension authors
 

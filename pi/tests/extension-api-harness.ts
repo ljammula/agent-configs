@@ -23,11 +23,18 @@ export interface HarnessOptions {
 	activeTools?: string[];
 }
 
+export interface RegisteredCommandCall {
+	name: string;
+	options: any;
+}
+
 export class ExtensionHarness {
 	readonly entries: { type: string; data: unknown }[] = [];
 	readonly execCalls: ExecCall[] = [];
 	readonly messages: { content: unknown; options: unknown }[] = [];
+	readonly notifications: { message: string; type: string | undefined }[] = [];
 	readonly handlers = new Map<EventType, Handler[]>();
+	readonly commands = new Map<string, RegisteredCommandCall["options"]>();
 	readonly api: ExtensionAPI;
 	readonly context: ExtensionContext;
 	private activeTools: string[];
@@ -42,6 +49,14 @@ export class ExtensionHarness {
 			sessionManager: {
 				getLeafEntry: () => branch.at(-1),
 				getBranch: () => branch,
+			} as any,
+			ui: {
+				notify: (message: string, type?: string) => {
+					this.notifications.push({ message, type });
+				},
+				select: async () => undefined,
+				confirm: async () => false,
+				input: async () => undefined,
 			} as any,
 		} as ExtensionContext;
 
@@ -69,7 +84,9 @@ export class ExtensionHarness {
 			getAllTools: () => [],
 			registerProvider: () => undefined,
 			registerTool: () => undefined,
-			registerCommand: () => undefined,
+			registerCommand: (name: string, commandOptions: any) => {
+				this.commands.set(name, commandOptions);
+			},
 			registerShortcut: () => undefined,
 			registerFlag: () => undefined,
 			getFlag: () => undefined,
@@ -89,5 +106,12 @@ export class ExtensionHarness {
 
 	getActiveTools(): string[] {
 		return [...this.activeTools];
+	}
+
+	/** Invoke a previously registered command's handler with this harness's context. */
+	invokeCommand(name: string, args: string): Promise<void> {
+		const command = this.commands.get(name);
+		if (!command) throw new Error(`no command registered: ${name}`);
+		return command.handler(args, this.context);
 	}
 }
