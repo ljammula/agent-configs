@@ -157,6 +157,85 @@ test("agent_settled blocks until a pending review round finishes", async () => {
 	}
 });
 
+test("agent_settled fires a backstop review when the model never ran a broad verification command", async () => {
+	// This is the local-model-bench shape from the todo item: the model does
+	// real work but never runs a command the tool_result trigger recognizes
+	// (it hides hidden tests until after pi exits), so without a settlement
+	// backstop the reviewer would fire zero times all session.
+	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
+	const previousModel = process.env.AI_REVIEW_MODEL;
+	const previousFetch = globalThis.fetch;
+	process.env.AI_REVIEW_BASE_URL = "http://review/v1";
+	process.env.AI_REVIEW_MODEL = "reviewer";
+	let reviewRequests = 0;
+	globalThis.fetch = async () => {
+		reviewRequests += 1;
+		return { ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' } }] }) } as Response;
+	};
+	try {
+		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+		const harness = new ExtensionHarness({
+			branch,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "base\n", stderr: "", killed: false };
+				if (command === "git" && args[0] === "diff") return { code: 0, stdout: "diff --git a/app.ts b/app.ts\n+changed\n", stderr: "", killed: false };
+				if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "", killed: false };
+				return { code: 1, stdout: "", stderr: "", killed: false };
+			},
+		});
+		reviewer(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		// No tool_result at all -- straight to settlement.
+		await harness.emit({ type: "agent_settled" } as any);
+		assert.equal(reviewRequests, 1);
+		assert.equal(
+			harness.entries.some((entry) => (entry.data as any)?.event === "review" && (entry.data as any)?.metadata?.trigger === "settlement"),
+			true,
+		);
+	} finally {
+		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
+		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
+		if (previousModel === undefined) delete process.env.AI_REVIEW_MODEL;
+		else process.env.AI_REVIEW_MODEL = previousModel;
+		globalThis.fetch = previousFetch;
+	}
+});
+
+test("agent_settled does not spend a backstop review round on an empty diff", async () => {
+	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
+	const previousModel = process.env.AI_REVIEW_MODEL;
+	const previousFetch = globalThis.fetch;
+	process.env.AI_REVIEW_BASE_URL = "http://review/v1";
+	process.env.AI_REVIEW_MODEL = "reviewer";
+	let reviewRequests = 0;
+	globalThis.fetch = async () => {
+		reviewRequests += 1;
+		return { ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' } }] }) } as Response;
+	};
+	try {
+		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+		const harness = new ExtensionHarness({
+			branch,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "base\n", stderr: "", killed: false };
+				if (command === "git" && args[0] === "diff") return { code: 0, stdout: "", stderr: "", killed: false };
+				if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "", killed: false };
+				return { code: 1, stdout: "", stderr: "", killed: false };
+			},
+		});
+		reviewer(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "agent_settled" } as any);
+		assert.equal(reviewRequests, 0);
+	} finally {
+		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
+		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
+		if (previousModel === undefined) delete process.env.AI_REVIEW_MODEL;
+		else process.env.AI_REVIEW_MODEL = previousModel;
+		globalThis.fetch = previousFetch;
+	}
+});
+
 test("a new agent run resets a settled reviewer", async () => {
 	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
 	const previousModel = process.env.AI_REVIEW_MODEL;

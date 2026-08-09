@@ -142,8 +142,67 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | KAT-Coder-V2.5-Dev-OptiQ-4bit (`:8083`) | Ruled out, both roles | **As primary model**: spot-checked 2026-08-04 against pair 4 (go-flutter/bookmarks-app) — fixed the `go test -race` bug that stumped Qwen, but introduced 3 new Dart test failures and the task still failed overall; independent review found this is not real signal, since Qwen itself already fixes this same race in 2/5 runs on its own (see `pi-harness-history.md`'s prior five-run investigation), so a single win is statistically indistinguishable from Qwen's known variance. **As reviewer**: ruled out for a structural reason, not a tunable one — a real production-shaped review request (task spec + diff, 22,784 chars, no `max_tokens` cap) against a confirmed-idle `:8083` route ran 220+ seconds and never completed successfully (`upstream_errors` incremented rather than `completed`). Unlike Gemma's near-miss on the timeout, this wasn't close: the route errored out rather than merely running long, so raising `REVIEW_TIMEOUT_MS` would not fix it. Full detail in `pi-harness-history.md`'s "KAT-Coder ruled out" section. |
 | GLM-4.7-Flash-4bit (`:8081`) | Ruled out as reviewer | 0/3 planted-bug catches at default invocation (5-token `NO_ISSUES_FOUND` shortcut every time, no reasoning content) vs. Gemma's 3/3 on the identical prompts. Retried with `chat_template_kwargs: {"enable_thinking": true}` since GLM is hybrid-reasoning and thinking is opt-in per request on most local serving stacks — this unlocked real reasoning exactly once across 10 trials (1/10), reverting to the same shortcut on repeats of the same prompt at `temperature: 0`. Unlike KAT-Coder's reviewer rule-out (a structural request failure), this route responds fine and fast, it just doesn't reliably do the review task on this checkpoint at 4-bit. Community reports corroborate both a Flash-tier reasoning-depth tradeoff and a known 4-bit-quantization weakness on agentic/structured-judgment tasks for this checkpoint. `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` remain pointed at Gemma. Full detail in `pi-harness-history.md`'s "GLM-4.7-Flash-4bit ruled out as reviewer candidate" section. |
 
+## Update 2026-08-09: cross-model-review settlement-time trigger added
+
+Todo item "Give `cross-model-review.ts` a settlement-time trigger" is done.
+`agent_settled` now falls back to firing a review round directly (gated on
+`snapshotDiff(...).material`, so an empty/no-op turn doesn't spend one) when
+no `tool_result`-triggered round ever completed this session —  covers
+exactly the `local-model-bench`-shaped gap described in the original todo
+(hidden tests don't exist yet during the model's own session, so the
+reactive trigger structurally can't fire). Both triggers now share one
+`startReviewRound()` path and tag their trace `metadata.trigger` as
+`tool_result` or `settlement` so which one fired is greppable. Same caveat
+as quality-gate's corrective follow-up applies and is stated in the code
+comment: whether a `sendUserMessage(..., {deliverAs: "followUp"})` sent
+this late in the turn reliably produces a second turn under `pi -p` is
+still the open question tracked below, not newly resolved by this change —
+firing at all, even without a guaranteed follow-up turn, is still strictly
+better than the previous zero-fire outcome, since the review trace/verdict
+itself is real signal. `npm test`: 131/131 (2 new tests: fires on a
+material diff with no prior tool_result round; does not spend a round on
+an empty diff). Live battery re-run against `local-model-bench` still
+pending — this is source/unit-tested only so far, same evidentiary status
+the rest of this doc uses that phrase for elsewhere.
+
+## Update 2026-08-09: zero-human full-stack build orchestrator
+
+`pi/scripts/build_app.py` (new) — drives `pi -p` through however many
+corrective rounds it takes to get real verification evidence passing, with
+no chat interaction and no assumption that quality-gate's in-session
+follow-up loop works under `-p` (it's independently unresolved, see above).
+The orchestrator runs its own verification command after each `pi -p`
+round and starts a fresh `--continue` round with the failure as the prompt
+if it didn't pass, capped at `--max-rounds`. Optional `--containment` runs
+each round through the live-proven Docker sandbox. Always writes
+`BUILD_REPORT.md` (rounds, verify results, extension traces, review
+verdicts) as the durable zero-human record. Full detail and known gaps in
+`pi/scripts/README.md`.
+
+Live-smoke-tested twice 2026-08-09 (Go/net-http health-endpoint task, host
+direct, no `--containment`): both runs succeeded on round 1 —
+`stack-router` routed, `quality-gate` verified twice, `cross-model-review`
+fired via its `tool_result` trigger and returned `clean`, real commit made,
+`go vet`/`go test` independently re-confirmed passing outside the harness.
+Second run also confirmed the orchestrator's own `.pi-build-session/` and
+`BUILD_REPORT.md` stay out of the app's git history (a real leak the first
+run hit and the second run's `.gitignore` seeding fixed). This is two
+confirming repros on one task/stack, not a battery — multi-round corrective
+recovery, `--containment`, and non-Go stacks are unexercised; see the
+todo below and `pi/scripts/README.md`'s "Known gaps" section.
+
 ## Todo
 
+- Battery-test `pi/scripts/build_app.py` across more stacks (Python,
+  TypeScript, Flutter), with `--containment` on, and on a task deliberately
+  seeded to fail its first verification round so the corrective-round path
+  (not just the succeed-on-round-1 path both smoke runs hit) gets real
+  coverage.
+- Live-battery-confirm the new cross-model-review settlement trigger
+  against a real `local-model-bench` task (or any task whose verification
+  command never runs inside the model's own session) — so far it's
+  source/unit-tested only, not live-run-confirmed the way the tool_result
+  path already is.
 - Live-test the revised (`tool_result`/`turn_end`-based) designs of
   `makefile-scaffold-nudge.ts`, `artifact-guard.ts`, and
   `error-leak-guard.ts` — the 2026-08-05 live test that motivated their
