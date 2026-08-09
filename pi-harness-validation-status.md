@@ -252,15 +252,63 @@ were found and confirmed on a small single-round smoke task, which is
 enough to trust the mechanism's basic wiring but not its behavior across
 many genuine nudge rounds on a large existing codebase. See todo below.
 
+**Update, same day: the real target task was run.** `/goal enrich this
+app's features and make it a true, usable full-stack app` against
+`personal-budget-simplifier` (existing Go+Flutter repo, not a fresh
+empty one). Real, verified outcome: 3 clean commits landed on `main`
+(new backend endpoints -- trends/delete/export/rename, all with Go test
+coverage; the trends Flutter UI wired into the dashboard;
+`category_name` wired through the API responses and Flutter models),
+`make verify` fully green, pushed to `origin/main`. This is genuine
+incremental progress, not the full "true usable full-stack app" scope
+(delete/export/rename aren't in the UI yet) -- the run did not
+self-report completion; it was stopped deliberately partway.
+
+Two things worth recording plainly rather than glossing over:
+
+1. **The background `pi -p` process was killed twice, unexplained,
+   mid-round** (host/orchestration-level, not something in `goal-gate.ts`
+   itself asked for or logged) -- each time it left a real, partially-
+   applied diff in the workspace, once with a broken build. This is an
+   operational reliability gap for any unattended multi-round `/goal`
+   session on this machine: something outside pi's own process can end it
+   mid-edit with no warning, and the only recovery path right now is a
+   human noticing and manually resuming with `--continue`. Worth
+   root-causing before treating long unattended `/goal` runs as safe to
+   walk away from.
+2. **The round-to-round loop in practice was `pi --continue` with a
+   plain human-written follow-up prompt, not a live `/goal` nudge
+   surviving across those kills.** `goal-gate.ts`'s own state is
+   documented as session-scoped/in-memory (see its file header) -- a
+   killed-and-restarted process is a new extension instance with no
+   active goal, so each recovery here was effectively a manual
+   `build_app.py`-style outer round, not the `/goal` mechanism itself
+   proving multi-hour endurance. The single-process, single-`/goal`-
+   invocation case (the personal-budget-simplifier round that ran
+   uninterrupted) did behave correctly and did produce the second
+   verified commit + fix without manual intervention.
+
 ## Todo
 
+- Root-cause the two unexplained background-process kills hit live during
+  the `personal-budget-simplifier` `/goal` run (see update above) — both
+  left a real, sometimes-broken diff mid-edit with no warning. Unattended
+  multi-round `/goal`/`build_app.py` runs on this machine shouldn't be
+  treated as safe to walk away from until this is understood.
+- Confirm `/goal` survives many nudge rounds *within one uninterrupted
+  process* (the personal-budget-simplifier round that did run start-to-
+  finish worked correctly) — the multi-hour/multi-restart endurance case
+  is still unproven, since every restart there was a manual
+  `--continue` recovery, not the live goal state surviving.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
   `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
   it a true usable full-stack app") — confirm the kickoff follow-up turn
   actually fires under interactive `pi`, the nudge loop survives multiple
   rounds, and a `GOAL COMPLETE` claim only sticks once backed by a real
-  passing verification run. Source/unit-tested only so far.
+  passing verification run. **Partially done** (see update above): kickoff
+  and single-process nudging both confirmed live; the fully-unattended,
+  many-rounds-through-restarts case is still open, per the two items above.
 - Battery-test `pi/scripts/build_app.py` across more stacks (Python,
   TypeScript, Flutter), with `--containment` on, and on a task deliberately
   seeded to fail its first verification round so the corrective-round path
