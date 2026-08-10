@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Does /goal actually work?</title>
+<meta name="description" content="Three live trials of Pi's autonomous /goal completion gate — bugs found, fixes confirmed, and what's still unproven.">
+<style>
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #e3e8ee;
+    --ink: #1b2028;
+    --ink-soft: #3a4149;
+    --muted: #5b6472;
+    --line: #c9d1da;
+    --accent: #a8681a;
+    --accent-ink: #7a4b12;
+    --pass: #2f7a56;
+    --pass-bg: #e3f1e9;
+    --open: #a8433a;
+    --open-bg: #f6e5e3;
+    --code-bg: #f2f0e8;
+    --code-ink: #3a3428;
+
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a;
+      --surface: #191d24;
+      --surface-2: #20252d;
+      --ink: #e4e7ec;
+      --ink-soft: #c3c9d1;
+      --muted: #8891a0;
+      --line: #313945;
+      --accent: #d99a4e;
+      --accent-ink: #f0b876;
+      --pass: #6fbf95;
+      --pass-bg: #1b2f24;
+      --open: #d9847a;
+      --open-bg: #34211f;
+      --code-bg: #1d2027;
+      --code-ink: #d7d2c2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a; --surface: #191d24; --surface-2: #20252d;
+    --ink: #e4e7ec; --ink-soft: #c3c9d1; --muted: #8891a0; --line: #313945;
+    --accent: #d99a4e; --accent-ink: #f0b876;
+    --pass: #6fbf95; --pass-bg: #1b2f24;
+    --open: #d9847a; --open-bg: #34211f;
+    --code-bg: #1d2027; --code-ink: #d7d2c2;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f5; --surface: #ffffff; --surface-2: #e3e8ee;
+    --ink: #1b2028; --ink-soft: #3a4149; --muted: #5b6472; --line: #c9d1da;
+    --accent: #a8681a; --accent-ink: #7a4b12;
+    --pass: #2f7a56; --pass-bg: #e3f1e9;
+    --open: #a8433a; --open-bg: #f6e5e3;
+    --code-bg: #f2f0e8; --code-ink: #3a3428;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent); color: #fff; }
+
+  a { color: var(--accent-ink); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+  }
+
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1.75rem;
+    margin-bottom: 2.5rem;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    gap: 0.6em;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+  }
+  .eyebrow span:not(:last-child)::after { content: "·"; margin-left: 0.6em; color: var(--line); }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(1.9rem, 4.4vw, 2.6rem);
+    line-height: 1.18;
+    margin: 0 0 0.7rem;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .dek {
+    font-size: 1.08rem;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 1.45rem;
+    margin: 3rem 0 1rem;
+    letter-spacing: -0.005em;
+  }
+  h3 {
+    font-family: var(--font-body);
+    font-weight: 650;
+    font-size: 1rem;
+    margin: 1.7rem 0 0.6rem;
+  }
+  p { max-width: 68ch; margin: 0 0 1rem; color: var(--ink-soft); }
+  p.lead { color: var(--ink); font-size: 1.04rem; }
+  strong { color: var(--ink); font-weight: 650; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+
+  /* Summary stat row */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 1.8rem 0 0.5rem;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 1.1rem 1.2rem;
+  }
+  .stat .n {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.6rem;
+    color: var(--ink);
+    display: block;
+    line-height: 1;
+    margin-bottom: 0.4rem;
+  }
+  .stat .n.pass { color: var(--pass); }
+  .stat .n.open { color: var(--open); }
+  .stat .label {
+    font-size: 0.76rem;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+  }
+
+  /* Timeline */
+  .timeline { margin-top: 0.5rem; }
+  .trial {
+    position: relative;
+    padding: 0 0 2.1rem 2.1rem;
+    border-left: 2px solid var(--line);
+    margin-left: 0.5rem;
+  }
+  .trial:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .trial::before {
+    content: "";
+    position: absolute;
+    left: -7px; top: 0.35rem;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+  }
+  .trial.confirmed::before { border-color: var(--pass); }
+  .trial-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7em;
+    flex-wrap: wrap;
+    margin-bottom: 0.45rem;
+  }
+  .trial-num {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent-ink);
+    letter-spacing: 0.03em;
+  }
+  .trial-title { font-weight: 650; font-size: 1.02rem; color: var(--ink); }
+  .trial-meta {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--muted);
+  }
+  .trial p { margin-bottom: 0.7rem; }
+  .finding {
+    display: flex;
+    gap: 0.6em;
+    align-items: flex-start;
+    margin: 0.55rem 0;
+    font-size: 0.94rem;
+    color: var(--ink-soft);
+  }
+  .tag {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.18em 0.5em;
+    border-radius: 999px;
+    margin-top: 0.15em;
+  }
+  .tag.pass { background: var(--pass-bg); color: var(--pass); }
+  .tag.open { background: var(--open-bg); color: var(--open); }
+  .tag.corr { background: var(--surface-2); color: var(--muted); }
+
+  /* Trace block */
+  .trace {
+    font-family: var(--font-mono);
+    font-size: 0.79rem;
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    margin: 0.9rem 0 1rem;
+    line-height: 1.55;
+  }
+  .trace .k { color: var(--accent-ink); }
+
+  /* Status table */
+  .status-wrap { overflow-x: auto; margin: 1rem 0 2rem; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.89rem; min-width: 560px; }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:nth-child(odd) { background: var(--surface); }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface) 96%, var(--surface-2)); }
+  td.pill-cell { white-space: nowrap; }
+  .pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+  }
+  .pill.pass { background: var(--pass-bg); color: var(--pass); }
+  .pill.open { background: var(--open-bg); color: var(--open); }
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 8px 8px 0;
+    padding: 1rem 1.2rem;
+    margin: 1.6rem 0;
+    font-size: 0.95rem;
+    color: var(--ink-soft);
+  }
+  .callout strong { color: var(--ink); }
+
+  ul.open-list { padding-left: 1.2rem; margin: 0.6rem 0 1.4rem; }
+  ul.open-list li { color: var(--ink-soft); margin-bottom: 0.5rem; max-width: 64ch; }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .trial { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">
+      <span>Pi harness research</span>
+      <span>2026-08-09 — 2026-08-10</span>
+      <span>agent-configs / pi-harness-validation-status.md</span>
+    </div>
+    <h1>Does <code>/goal</code> actually work?</h1>
+    <p class="dek">A Claude-Code-style autonomous completion gate for the Pi coding harness — set a
+      condition, walk away, and it keeps nudging the model until a real, independently-verifiable
+      pass backs a genuine completion claim. Three live trials, two real bugs found and fixed in
+      the first one, and one gap that's still open after all three.</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><span class="n">3</span><span class="label">live trials, distinct stacks</span></div>
+    <div class="stat"><span class="n pass">2/2</span><span class="label">live-found bugs, fixed &amp; reconfirmed</span></div>
+    <div class="stat"><span class="n">2</span><span class="label">real repos touched, one shipped</span></div>
+    <div class="stat"><span class="n open">0/3</span><span class="label">trials that hit the reject-loop path</span></div>
+  </div>
+
+  <h2>What <code>/goal</code> is</h2>
+  <p class="lead">Most autonomous-agent failures aren't the model refusing to work — they're the
+    model <em>believing</em> it's done when it isn't. <code>/goal &lt;condition&gt;</code> sets a
+    goal for the rest of a Pi session. On every turn that looks like a stopping point, a gate
+    checks whether the model has actually earned the right to stop: its final message must end
+    with a <code>GOAL COMPLETE: &lt;evidence&gt;</code> line, and the most recent broad
+    verification command run since then must have genuinely passed. Absent either, it nudges the
+    model to keep working instead of letting the turn — and, unattended, the process — end.</p>
+  <p>Deliberately not built: an LLM judging its own completion. A same-model judge carries the
+    same self-report bias the gate exists to route around. The one signal trusted here is a
+    verification command that was actually run and actually passed — the same convention the rest
+    of this harness already uses.</p>
+
+  <h2>Three live trials</h2>
+
+  <div class="timeline">
+
+    <div class="trial confirmed">
+      <div class="trial-head">
+        <span class="trial-num">TRIAL 1</span>
+        <span class="trial-title">Fresh empty repo — Go "print hello"</span>
+        <span class="trial-meta">2026-08-09</span>
+      </div>
+      <p>The smallest possible smoke test surfaced two real, unrelated bugs on first contact —
+        exactly the value of running something live instead of trusting the source.</p>
+
+      <div class="finding">
+        <span class="tag open">bug found</span>
+        <span><strong>The kickoff never ran at all.</strong> <code>pi -p "/goal ..."</code> exited
+          immediately — zero <code>agent_start</code> events, not even one attempted turn.
+          <code>sendUserMessage()</code> only queues a turn; it doesn't return a promise, so
+          <code>waitForIdle()</code> called right after it raced the not-yet-started turn and
+          returned instantly. Fixed by waiting for a real <code>agent_start</code> event first.</span>
+      </div>
+      <div class="finding">
+        <span class="tag open">bug found</span>
+        <span><strong>A genuine pass kept getting rejected.</strong> After the kickoff fix, the
+          same task ran 74+ turns across 15 nudge rounds without ever accepting a
+          <code>GOAL COMPLETE</code> claim — despite the verification command visibly passing.
+          Cause: the pass/fail signal was reset on <em>every</em> nudge, including ordinary
+          mid-task narrative with no tool call attached, wiping out real passes long before the
+          model's next genuine attempt. Fixed to reset only when a claim is specifically rejected.</span>
+      </div>
+      <div class="finding">
+        <span class="tag pass">confirmed</span>
+        <span>Rerun of the identical task after both fixes: accepted on the model's <strong>first</strong>
+          claim, 11 turns instead of 74+. Verified independently, outside the harness —
+          <code>make verify</code> passes, the program actually prints <code>hello</code>.</span>
+      </div>
+    </div>
+
+    <div class="trial confirmed">
+      <div class="trial-head">
+        <span class="trial-num">TRIAL 2</span>
+        <span class="trial-title">Fresh empty repo — Python calculator + pytest</span>
+        <span class="trial-meta">2026-08-09/10</span>
+      </div>
+      <p>A second stack, to see whether the fixes generalized rather than papering over one
+        specific run.</p>
+      <div class="finding">
+        <span class="tag pass">confirmed</span>
+        <span>Kickoff fired immediately, no race — holds on a second stack.</span>
+      </div>
+      <div class="finding">
+        <span class="tag pass">confirmed</span>
+        <span>The model hit real environment friction first — no venv, <code>pytest</code> not
+          installed, two genuine verification failures — and only claimed complete once tests
+          actually passed. Independently rerun afterward: 5/5 passed, matching the claim exactly.</span>
+      </div>
+      <div class="finding">
+        <span class="tag corr">correction</span>
+        <span>This trial's <code>GOAL COMPLETE</code> landed on the model's very first attempt
+          (no preceding nudge), so it never actually exercised the reset-on-nudge code path Trial
+          1's second bug lived in — an earlier draft of this write-up claimed otherwise and
+          overstated it. Caught on review, corrected against the raw trace rather than left as-is.</span>
+      </div>
+      <div class="finding">
+        <span class="tag pass">confirmed</span>
+        <span>Bonus: a second, independent mechanism — the artifact guard — caught real leftover
+          binaries in <code>.venv/</code> after the goal cleared, and nudged its own cleanup turn
+          without interfering with the (already-settled) goal state.</span>
+      </div>
+    </div>
+
+    <div class="trial confirmed">
+      <div class="trial-head">
+        <span class="trial-num">TRIAL 3</span>
+        <span class="trial-title">Real app — wire delete/export/rename into the UI</span>
+        <span class="trial-meta">2026-08-10</span>
+      </div>
+      <p>Not a synthetic task this time: the actual leftover scope from an earlier build, run
+        foreground against a real, existing Go+Flutter app.</p>
+      <div class="finding">
+        <span class="tag open">still open</span>
+        <span>Converged on the first genuine attempt again — third straight trial that hasn't
+          exercised the reject-and-retry path. Every trial so far has happened to get it right the
+          first time.</span>
+      </div>
+      <div class="finding">
+        <span class="tag pass">confirmed</span>
+        <span>New signal: after the goal was accepted, an independent reviewer caught a real crash
+          bug — <code>.first</code> on a list that could legitimately be empty — and drove its own
+          three-round fix cycle the gate's own pass/fail signal couldn't have seen on its own.</span>
+      </div>
+      <div class="finding">
+        <span class="tag open">gap flagged</span>
+        <span>The run made zero <code>git commit</code>s despite tests passing throughout —
+          accepting a goal doesn't imply the work got committed. Verified the diff independently,
+          then committed and pushed it by hand.</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout">
+    <strong>Methodology note.</strong> Every claim above was re-checked against the raw
+    <code>--mode json</code> event log and, where possible, against the repository itself
+    afterward — not taken from the model's own end-of-run summary. One overclaim (Trial 2's
+    correction, above) only surfaced this way.
+  </div>
+
+  <h3>A trace excerpt, for a sense of what "verified" means here</h3>
+  <div class="trace">{<span class="k">"event"</span>: "complete", <span class="k">"condition"</span>: "write a small Python calculator…", <span class="k">"rounds"</span>: 0}
+{<span class="k">"extension"</span>: "quality-gate", <span class="k">"event"</span>: "verification", <span class="k">"outcome"</span>: "pass"}</div>
+
+  <h2>What this leaves open</h2>
+  <ul class="open-list">
+    <li><strong>The reject-and-nudge loop itself is still unconfirmed live.</strong> All three
+      trials converged on the model's first genuine completion attempt. The mechanism that rejects
+      a false claim and successfully drives a real correction round has only been proven in
+      principle (Trial 1's before/after fix), never watched happen end-to-end on a task that
+      doesn't get it right the first time.</li>
+    <li><strong>Unattended, multi-restart endurance is unproven.</strong> A separate run this
+      session was killed twice, unexplained, mid-round — recovery each time was a human noticing
+      and manually resuming, not the live goal state surviving a restart on its own (it's
+      deliberately session-scoped, not persisted to disk).</li>
+    <li><strong>Completion doesn't imply commit.</strong> Trial 3's real, verified work sat
+      uncommitted until checked and pushed by hand.</li>
+  </ul>
+
+  <h2>Status at a glance</h2>
+  <div class="status-wrap">
+    <table>
+      <thead><tr><th>Claim</th><th>Status</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Kickoff fires reliably under <code>-p</code></td>
+          <td class="pill-cell"><span class="pill pass">confirmed</span></td>
+          <td>3/3 trials, distinct stacks</td>
+        </tr>
+        <tr>
+          <td>A genuine pass isn't wiped by ordinary nudges</td>
+          <td class="pill-cell"><span class="pill pass">confirmed</span></td>
+          <td>Trial 1 before/after rerun (74+ turns → 11)</td>
+        </tr>
+        <tr>
+          <td>Independent reviewer catches what the gate can't</td>
+          <td class="pill-cell"><span class="pill pass">confirmed</span></td>
+          <td>Trial 3, real crash bug fixed</td>
+        </tr>
+        <tr>
+          <td>Reject-then-correct loop, live end-to-end</td>
+          <td class="pill-cell"><span class="pill open">open</span></td>
+          <td>0/3 trials reached it</td>
+        </tr>
+        <tr>
+          <td>Survives an unattended multi-restart session</td>
+          <td class="pill-cell"><span class="pill open">open</span></td>
+          <td>Two unexplained kills, manual recovery only</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    Source: <code>pi-harness-validation-status.md</code> and <code>goal-gate.ts</code> in
+    <code>agent-configs</code>. All three trial logs were hand-traced from raw
+    <code>--mode json</code> output rather than the model's own summaries.
+  </footer>
+
+</div>
+</body>
+</html>
