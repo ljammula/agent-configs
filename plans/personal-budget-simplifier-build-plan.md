@@ -1,5 +1,13 @@
 # personal-budget-simplifier — build plan
 
+**Status:** the 7-chunk build described below shipped (see
+`pi-real-task-report-personal-budget-simplifier.md` for the transcript-
+sourced report). The app has since grown past this plan's original scope
+via later `/goal` runs -- see `pi-harness-validation-status.md`'s `/goal`
+update entries for what was added afterward and their live-verification
+status. Treat this file as the original scope contract, not the current
+state of the app.
+
 **Date:** 2026-08-05
 **Source:** `research/product-ideas/experiments/2026-08-05.md` (build brief, PASS on channel-verification gate)
 **Driven by:** explicit user goal (`/goal`), not the product-lab's own stage gate — the lab candidate
