@@ -47,7 +47,7 @@ requirements, and scope creep; resolve behavior-changing findings before coding.
 
 ## 2. Branch
 
-Multi-file changes require a branch and PR (GUIDELINES.md §5):
+Multi-file changes require a branch and PR:
 
 ```bash
 git switch main && git pull

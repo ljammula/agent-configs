@@ -243,3 +243,38 @@ Verifies that every step in a documented N-step feature wiring pattern exists in
 ## RTK
 
 [RTK (Rust Token Killer)](https://github.com/rtk-ai/rtk) is a CLI proxy that reduces token usage 60-90% by filtering/compressing command output. All agents are configured to prefix shell commands with `rtk`.
+
+## Documentation map
+
+Three kinds of `.md` file live in this repo, and they're not redundant with
+each other even where they cover the same extensions or the same runs --
+each answers a different question:
+
+- **Living status** — updated in place, always describes the current
+  state. [pi-harness-validation-status.md](pi-harness-validation-status.md)
+  (what's adopted vs. not, per extension, with real trial counts) and
+  [local-ai-stack.md](local-ai-stack.md) (current local model routes,
+  performance, client rules) are the two files to read for "is X actually
+  working right now."
+- **Plans** (`plans/*.md`, plus [pi/todo-app-hardening-plan.md](pi/todo-app-hardening-plan.md)) —
+  an implementation contract written before or during a body of work, each
+  carrying its own status line. Once a plan's status reads "implemented" or
+  "complete," treat the living-status doc above as the current source of
+  truth on whether it actually holds up, not the plan itself.
+- **Dated snapshots** — a record of a specific investigation, review, or
+  build run at the time it happened; never updated afterward except to add
+  a banner pointing at whichever living doc superseded it.
+  [pi-harness-history.md](pi-harness-history.md) is the main dated
+  narrative (full investigation log, one entry per finding).
+  [fable-review-all-customizations.md](fable-review-all-customizations.md)
+  and [claude-pi-quality-extensions-review-feedback.md](claude-pi-quality-extensions-review-feedback.md)
+  are independent-review passes from 2026-07-24, each with a "Historical
+  snapshot" banner pointing at the current status doc.
+  [pi-real-task-report-daily-briefing-screen.md](pi-real-task-report-daily-briefing-screen.md)
+  and [pi-real-task-report-personal-budget-simplifier.md](pi-real-task-report-personal-budget-simplifier.md)
+  are transcript-sourced (not self-reported) observation reports from real
+  delegated builds, same banner convention.
+
+If a claim in a dated snapshot and the living status doc ever disagree,
+the living status doc wins -- it's the one that gets corrected when a
+belief turns out to be wrong.
