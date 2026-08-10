@@ -394,8 +394,14 @@ kill this time), full event log hand-traced:
   explicit commit/push language to `/goal` prompts until this is either
   confirmed reliable or goal-gate grows its own opinion on it.
 
-Diff currently sitting uncommitted in `~/code/personal-budget-simplifier`
-pending a decision on whether to commit it.
+**Update, same day**: committed and pushed by hand (`4fee1fa`,
+`personal-budget-simplifier` main) after independently re-verifying
+`make verify` passed and reading the `.firstOrNull` fix directly --
+resolving the "gap worth flagging" above for this specific run. Doesn't
+change the underlying finding: goal-gate accepting a `/goal` still
+doesn't commit on its own, so this same gap will recur on the next run
+unless the prompt explicitly asks for a commit or goal-gate grows its own
+opinion on it.
 
 ## Todo
 
