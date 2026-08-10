@@ -35,7 +35,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { BROAD_VERIFICATION_PATTERNS, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 const DEFAULT_MAX_ROUNDS = 15;
-const COMPLETE_MARKER = /^GOAL COMPLETE:\s*(.+)$/im;
+const COMPLETE_MARKER = /^GOAL COMPLETE:\s*(.+)$/i;
 
 export function resolveMaxRounds(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env.PI_GOAL_MAX_ROUNDS;
@@ -62,6 +62,22 @@ function messageText(message: { content: { type: string; text?: string }[] }): s
 		.filter((c) => c.type === "text")
 		.map((c) => c.text ?? "")
 		.join("\n");
+}
+
+// The docstring's contract is "end your final message with a line reading
+// exactly: GOAL COMPLETE: ...", i.e. the marker must be the message's last
+// line, not merely present anywhere in it. COMPLETE_MARKER's `$` (no `m`
+// flag) only anchors to the end of the whole string, so it must be tested
+// against just the final non-empty line -- otherwise a multiline regex would
+// match a marker line followed by more prose (e.g. a hedge like "Actually,
+// more work remains" after the marker), and testing the full message would
+// wrongly reject a genuine completion that has ordinary narrative before it.
+function lastNonEmptyLine(text: string): string {
+	const lines = text.split("\n");
+	for (let i = lines.length - 1; i >= 0; i -= 1) {
+		if (lines[i].trim() !== "") return lines[i];
+	}
+	return "";
 }
 
 function kickoffMessage(condition: string): string {
@@ -166,7 +182,7 @@ export default function goalGate(pi: ExtensionAPI): void {
 		const { message } = event;
 		if (message.role !== "assistant" || message.stopReason !== "stop") return;
 
-		const declaredComplete = COMPLETE_MARKER.test(messageText(message));
+		const declaredComplete = COMPLETE_MARKER.test(lastNonEmptyLine(messageText(message)));
 
 		if (declaredComplete && lastVerification === "pass") {
 			pi.appendEntry("pi-goal-trace", { event: "complete", condition: goal.condition, rounds: goal.rounds });
