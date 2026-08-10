@@ -330,6 +330,53 @@ first genuine attempt (every confirming run to date -- this one and the
 original Go smoke test -- happened to reach `rounds: 0`), and the
 fully-unattended multi-restart endurance case flagged above.
 
+**Update 2026-08-10: real remaining scope on personal-budget-simplifier,
+run foreground (not backgrounded) to sidestep the unexplained-kill gap.**
+`/goal wire delete, export, and rename into the Flutter UI (backend
+endpoints for these already exist and are tested) so a user can actually
+invoke them from the dashboard, not just via the API; keep make verify
+green after every change` -- the exact leftover scope the prior
+personal-budget-simplifier run didn't finish. Single uninterrupted `pi -p`
+process (foreground; the harness auto-moved it to background tracking
+after its 10-minute cap, but it kept running as the same process -- no
+kill this time), full event log hand-traced:
+
+- **goal-gate itself again converged on `rounds: 0`** -- the model's first
+  `GOAL COMPLETE` claim was backed by a real passing `make verify` and was
+  accepted immediately. Third straight run (after the Go and Python smoke
+  tests) that didn't reach the nudge-and-reject path; that gap is still open.
+- **New, real evidence though: `cross-model-review.ts`'s independent
+  reviewer caught a genuine crash bug post-completion and drove its own
+  fix loop.** After goal-gate accepted completion, the reviewer flagged
+  `dashboard_screen.dart`'s long-press rename handler using `.first` on a
+  `.where(...)`-filtered list -- throws if the category was renamed/deleted
+  server-side between load and long-press. Round 1: model fixed it
+  (`.firstOrNull` + null guard), reran `make verify`, passed. Round 2: the
+  reviewer re-flagged the *same, already-fixed* line (a real staleness/dedup
+  gap in the reviewer's own re-check, not a fresh bug) -- the model
+  correctly recognized it as already-fixed rather than blindly re-editing.
+  Round 3: reviewer confirmed clean. This is the first live confirmation of
+  the settlement-time reviewer catching and driving a fix for a real bug
+  goal-gate's own pass/fail signal couldn't see (it only knows whether the
+  verification *command* passed, not whether a reviewer would flag the diff).
+- **Independently reverified, not trusted from the log**: ran `make verify`
+  myself afterward -- backend tests, `go vet`, `flutter analyze`, and all 20
+  Flutter tests (up from the pre-run count, confirming new tests were
+  actually added) genuinely pass. Read the fixed code directly: the
+  `.firstOrNull` + null-guard fix is real and correctly addresses the race.
+- **Gap worth flagging, not a goal-gate bug**: unlike the earlier
+  personal-budget-simplifier run (which self-committed 3 times and pushed),
+  this run made zero `git commit`s -- `make verify`-passing work sat
+  uncommitted in the working tree at `agent_end`. The goal text didn't
+  explicitly ask for commits either time, so this looks like model-level
+  variance rather than a harness regression, but it means "goal-gate
+  accepted completion" does not imply "work is committed" -- worth adding
+  explicit commit/push language to `/goal` prompts until this is either
+  confirmed reliable or goal-gate grows its own opinion on it.
+
+Diff currently sitting uncommitted in `~/code/personal-budget-simplifier`
+pending a decision on whether to commit it.
+
 ## Todo
 
 - Root-cause the two unexplained background-process kills hit live during
@@ -341,13 +388,17 @@ fully-unattended multi-restart endurance case flagged above.
   process* (the personal-budget-simplifier round that did run start-to-
   finish worked correctly) — the multi-hour/multi-restart endurance case
   is still unproven, since every restart there was a manual
-  `--continue` recovery, not the live goal state surviving. **Still open**:
-  both single-process confirming runs to date (Go smoke test, Python calc
-  smoke test above) happened to converge on the model's first genuine
-  `GOAL COMPLETE` attempt (`rounds: 0`) — the nudge-and-reject loop path
-  itself (not just the kickoff and single-shot-accept paths) has no live
-  confirmation yet. Needs a task deliberately harder to get right in one
-  pass.
+  `--continue` recovery, not the live goal state surviving. **Still open,
+  now n=3**: every single-process confirming run to date (Go smoke test,
+  Python calc smoke test, personal-budget-simplifier delete/export/rename
+  UI run) converged on the model's first genuine `GOAL COMPLETE` attempt
+  (`rounds: 0`) — the nudge-and-reject loop path itself (not just the
+  kickoff and single-shot-accept paths) still has no live confirmation.
+  Needs a task deliberately harder to get right in one pass, or a
+  deliberately-injected first-attempt failure. Note: the third run did get
+  live confirmation of a *different* multi-round loop — `cross-model-
+  review.ts`'s post-completion 3-round reviewer cycle, which caught and
+  drove a real fix for a crash bug goal-gate's own signal couldn't see.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
   `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
