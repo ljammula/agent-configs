@@ -154,6 +154,33 @@ test("GOAL COMPLETE backed by a passing verification clears the goal", async () 
 	assert.equal(harness.messages.length, 1);
 });
 
+test("GOAL COMPLETE followed by more prose is not treated as a final-line completion", async () => {
+	// Regression test: COMPLETE_MARKER used to run in multiline mode, so `$`
+	// matched the end of any line, not just the message's actual last line.
+	// A marker line followed by a hedge ("Actually, more work remains") was
+	// wrongly accepted even though the docstring's contract requires the
+	// marker to be the message's final line.
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await passingVerify(harness);
+	await harness.emit(stopTurn("GOAL COMPLETE: dashboard renders.\nActually, more work remains."));
+	assert.equal(harness.messages.length, 2); // nudged, not accepted
+	assert.equal(harness.entries.length, 0); // no pi-goal-trace complete entry
+	assert.match(String(harness.messages[1].content), /Goal not yet met: "add a dashboard"/);
+});
+
+test("GOAL COMPLETE as the true final line is still accepted with trailing blank lines", async () => {
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await passingVerify(harness);
+	await harness.emit(stopTurn("All done.\n\nGOAL COMPLETE: dashboard renders.\n\n"));
+	assert.equal(harness.messages.length, 1); // no nudge, accepted
+	assert.equal(harness.entries.length, 1);
+	assert.equal(harness.entries[0].type, "pi-goal-trace");
+});
+
 test("an ordinary not-yet-met nudge does not discard a genuine pass -- a later claim still succeeds", async () => {
 	// Live-confirmed 2026-08-09 (see goal-gate.ts's turn_end comment): a
 	// stopReason:"stop" turn fires on ordinary mid-task narrative with no

@@ -136,7 +136,7 @@ Full record: `pi/evals/full-screening-2026-08-03.json`. Runner:
 | `cross-model-review.ts` | Adopted, resolves to genuine `independent-review`, confirmed firing and completing real review rounds under `pi -p` on tasks with a committed base and a genuine broad verification command; was structurally blind on all-untracked repos (fixed 2026-08-05, see below) and still structurally blind on task suites whose verification command never runs (e.g. `local-model-bench`, see below) | `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` moved to `~/.zshenv` 2026-08-05 (was `~/.zshrc`, interactive-shell-only — see `pi-harness-history.md`'s env-propagation entries) set to `gemma-4-26b-a4b-it` on `:8081`, distinct from the `:8080` Qwen primary. Deterministic tests pass (74/74); live-checked 2026-08-04 that `resolveReviewerConfig()` resolves `independent-review` (not `disabled`/`blind-self-review`) and that `requestReview()` correctly flagged a deliberately planted bug against the real endpoint. A separate 2026-08-04 investigation against a third route (KAT-Coder, `:8083`, not the standing config) found and fixed a process-crashing stale-context bug in the `tool_result` catch handler and a structural gap where `pi -p` exited before any review round could finish; both fixed, tested, and now apply to whichever route is configured — see `pi-harness-history.md`'s "Trying a third reviewer route" section. `REVIEW_TIMEOUT_MS` raised from 120s to 240s (commit `83ca0cb`) after a real production-shaped review request against idle Gemma took 121.4s — 1.4s past the old timeout, which would have silently discarded a correct finding. A full end-to-end rerun (2026-08-04, standing Qwen+Gemma config, pair 4) confirmed the task itself passes cleanly (9/9 go -race, 17/17 dart) but the reviewer never fired on that suite specifically: its `tool_result` trigger only reacts to the *model's own* successful broad-verification command, and `local-model-bench` hides real test files until after `pi` exits, so the model never has one to run there — it wrote its own smoke test instead, and its one `dart test` call errored on "no test files," which the trigger explicitly excludes. Discovered 2026-08-05: after the `:8082`→`:8081` route move, `AI_REVIEW_MODEL` held the short id `gemma-4-26b-a4b-it` while the route now serves `/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`; every real request 400'd `model_mismatch`, which `requestReview()` silently downgrades to `{outcome: "transient"}` — the reviewer had been reviewing nothing since the move, with no error surfaced anywhere. Fixed by exporting the full served id. With the id corrected, a 15-trial reviewer-reliability battery (three planted bugs — `clampToRange` missing its upper-bound clamp, `divide` missing its zero-check, `add` implemented as subtraction — 5 trials each at `temperature: 0`, via the real `requestReview()` path) caught 15/15, deterministic across repeats (identical response length per bug on every trial). A 9-trial false-positive control (3 trials each of the correct implementation of the same three functions) returned `NO_ISSUES_FOUND` 9/9. Same day, on the personal-budget-simplifier build: `session_start`/`tool_result` confirmed firing via instrumented diagnostics, but zero `review` traces appeared in any of the build's 7 real sessions (checked directly in `~/.pi/agent/sessions/`, not just `--mode json` stdout) — root cause was a bare `git diff`, which never shows untracked content, against a repo with exactly one commit made at the very end, so every diff during the whole build was empty. **Fixed**: `cross-model-review.ts` now uses a new `buildReviewDiff()` (in `lib/verification.ts`) that synthesizes diff blocks for untracked files the same way `quality-gate.ts`'s `snapshotDiff` already accounts for them; a `review`/`blocked` trace now fires on the previously-silent early-return paths too. `npm test`: 123/123. Live-verified against the exact original bug shape (fresh repo, zero commits, one untracked file) — reviewer now fires and completes a round there. See todo and `pi-harness-history.md`'s "Correction of the correction" entry for the full account, including an earlier same-day retraction of this finding that was itself wrong and has been superseded. **2026-08-05, later the same day**: the 15/9 battery above had never been a checked-in, reproducible test — it existed only as an ad-hoc invocation, and the marker-matching verdict parser (`NO_ISSUES_FOUND` on the last non-empty line) meant any trailing commentary from Gemma flipped a clean review to flagged, an unaudited failure mode of exactly the same shape as the `AI_REVIEW_MODEL` incident above. Fixed in two commits. First (`c94fa60`): split the single `transient` outcome into a `ReviewUnavailableReason` (`not-configured`/`model-rejected`/`empty-response`/`request-failed`, plus `review-pipeline-error`) that reaches the harness trace with the HTTP status attached, so "did the reviewer actually run, and if not why" is now greppable instead of silent; and checked in `evals/reviewer-battery.ts`, reproducing the 15/9 numbers live (confirmed 15/15, 0/9). Second (`125f2b2`): replaced the marker parser with a `response_format` JSON Schema verdict (`{analysis, verdict, findings[]}`) — verified live that `:8081` honors `response_format` correctly, and a parse failure is now `malformed-verdict`, not `clean`, so unreviewed code can never read as reviewed. The first cut of the schema put `verdict` before `analysis` and the battery caught a real regression before it shipped: 10/15, missing the planted `divide` zero-check bug 5/5 deterministically at `temperature: 0`, because constrained decoding emits properties in schema order and a verdict-first schema forces the model to commit before it has reasoned — the same constraint-tax effect reported for small models on structured output generally. An isolation probe (schema × prompt-wording, 4-way) confirmed the schema was the cause, not the reworded prompt. Putting `analysis` first in the schema restored 15/15, 0/9. **Constraint discovered in passing**: `:8080` rejects `response_format` outright when serving with speculative decoding (`"Structured response_format is not supported with speculative decoding"`), so the reviewer route must never be moved onto an MTP/draft launcher — doing so would silently fail every request as `model-rejected`. Gemma is not run with `GEMMA_MTP=1` and this is a deliberate constraint, not an oversight; see `local-ai-stack.md`. |
 | `new-project-scaffold.ts` | Adopted, on by default | Git-init nudge plus layered-architecture (`cmd/`/`internal/domain`/`internal/handler`-shaped) nudge for greenfield repos. Live-tested 2026-08-05 against a fresh Go+SQLite todo-app task: both nudges fired and worked exactly as designed (repo initialized, real commit made, the requested layered structure created). Deterministic tests pass. |
 | `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical `verify`/`test`/`check` Makefile target. The original `before_agent_start`-only precondition check was found structurally blind on greenfield repos by the 2026-08-05 live test above — it evaluated once, before any files existed, and was never re-checked after `go mod init` created a manifest mid-session. Redesigned to arm a `tool_result` flag when a manifest file appears and nudge once at the next `turn_end`. Deterministic tests pass (123/123); the revised design has not itself been live-tested — only the superseded version was. |
-| `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Same live test found the original `agent_settled`-only design structurally blind: in `-p` mode `agent_settled` fires once, *after* `agent_end`, by which point the model had already committed, leaving diff-since-`baseSha` empty. Redesigned: primary detection moved to `tool_result` on build-shaped bash commands, `agent_settled` kept only as a cwd-keyed backstop with an empty-tree fallback for the greenfield case (a follow-up review pass also fixed a case where that fallback was permanently dead when the first commit happened mid-session). Deterministic tests pass; revised design not yet live-tested. |
+| `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Same live test found the original `agent_settled`-only design structurally blind: in `-p` mode `agent_settled` fires once, *after* `agent_end`, by which point the model had already committed, leaving diff-since-`baseSha` empty. Redesigned: primary detection moved to `tool_result` on build-shaped bash commands, `agent_settled` kept only as a cwd-keyed backstop with an empty-tree fallback for the greenfield case (a follow-up review pass also fixed a case where that fallback was permanently dead when the first commit happened mid-session). Deterministic tests pass. **Backstop path (`agent_settled`) live-confirmed 2026-08-09/10**: the Python `/goal` smoke test below caught real Mach-O binaries left in `.venv/` at settlement time and correctly nudged a cleanup turn that resolved it. The primary `tool_result` path (detection during the build itself, not just at settlement) remains live-untested. |
 | `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks (e.g. `err.Error()` written straight into an HTTP response). Same structural blind spot and same fix as `artifact-guard.ts`: primary detection moved to a `tool_result` content scan on write/edit, `agent_settled` kept as a per-cwd, empty-tree-fallback backstop, sharing a dedup map with the `tool_result` path so a committed finding isn't re-flagged every subsequent build command. Deterministic tests pass; revised design not yet live-tested. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Gated on Aider dispatch being in scope; it isn't (`~/.claude/CLAUDE.md`, benchmarked and removed). |
 | KAT-Coder-V2.5-Dev-OptiQ-4bit (`:8083`) | Ruled out, both roles | **As primary model**: spot-checked 2026-08-04 against pair 4 (go-flutter/bookmarks-app) — fixed the `go test -race` bug that stumped Qwen, but introduced 3 new Dart test failures and the task still failed overall; independent review found this is not real signal, since Qwen itself already fixes this same race in 2/5 runs on its own (see `pi-harness-history.md`'s prior five-run investigation), so a single win is statistically indistinguishable from Qwen's known variance. **As reviewer**: ruled out for a structural reason, not a tunable one — a real production-shaped review request (task spec + diff, 22,784 chars, no `max_tokens` cap) against a confirmed-idle `:8083` route ran 220+ seconds and never completed successfully (`upstream_errors` incremented rather than `completed`). Unlike Gemma's near-miss on the timeout, this wasn't close: the route errored out rather than merely running long, so raising `REVIEW_TIMEOUT_MS` would not fix it. Full detail in `pi-harness-history.md`'s "KAT-Coder ruled out" section. |
@@ -299,12 +299,21 @@ hand-traced line-by-line rather than trusted from the model's own summary:
 
 - **Kickoff fix held**: `agent_start` fired immediately after the
   `session` event, no race, no empty exit.
-- **False-rejection fix held**: the model hit real environment friction
-  first (no venv, `pytest` not installed, two failed verification
-  attempts logged by `quality-gate.ts` as genuine `fail`s) and only
-  declared `GOAL COMPLETE` once `pytest` actually passed. Accepted on
-  that first genuine claim -- `pi-goal-trace` recorded `{event:
-  "complete", rounds: 0}` -- no false-rejection loop.
+- **Genuine pass correctly accepted on first claim** -- but, per review
+  correction, this does NOT confirm the false-rejection fix specifically.
+  The model hit real environment friction first (no venv, `pytest` not
+  installed, two failed verification attempts logged by `quality-gate.ts`
+  as genuine `fail`s) and only declared `GOAL COMPLETE` once `pytest`
+  actually passed, accepted immediately (`pi-goal-trace`: `{event:
+  "complete", rounds: 0}`). **Correction**: this entry originally claimed
+  that as a second confirmation the false-rejection fix "held." Wrong --
+  the bug that fix closed only fires after at least one nudge round resets
+  `lastVerification`, and this run's `GOAL COMPLETE` claim was the model's
+  *first* stop turn with no preceding nudge, so the buggy pre-fix code
+  would have accepted this exact claim too. This run confirms genuine
+  environment friction doesn't cause a false accept, which is real but
+  weaker evidence -- it does not exercise the reset-on-nudge path at all.
+  That path is still unconfirmed; see the Todo entry.
 - **Independently reverified, not just trusted from the log**: ran
   `pytest` myself outside the harness afterward against the same
   `calc.py`/`test_calc.py` the agent wrote -- 5/5 passed, matching the
@@ -323,12 +332,15 @@ hand-traced line-by-line rather than trusted from the model's own summary:
   did their own job without interfering with each other.
 
 This is the second stack (Python, vs. the first smoke test's Go and the
-target run's Go+Flutter) and the second confirmation that both live-found
-bugs stay fixed. Still not covered by any run so far: many nudge rounds
-within one uninterrupted process on a task that doesn't converge on the
-first genuine attempt (every confirming run to date -- this one and the
-original Go smoke test -- happened to reach `rounds: 0`), and the
-fully-unattended multi-restart endurance case flagged above.
+target run's Go+Flutter) and a second confirmation that the kickoff fix
+holds. The false-rejection fix's own reset-on-nudge path is still only
+confirmed by the original Go smoke test's before/after rerun (74+ turns
+pre-fix vs. 11 turns post-fix), not by this run -- see correction above.
+Still not covered by any run so far: many nudge rounds within one
+uninterrupted process on a task that doesn't converge on the first genuine
+attempt (every confirming run to date -- this one and the original Go
+smoke test -- happened to reach `rounds: 0` on its `GOAL COMPLETE` claim),
+and the fully-unattended multi-restart endurance case flagged above.
 
 **Update 2026-08-10: real remaining scope on personal-budget-simplifier,
 run foreground (not backgrounded) to sidestep the unexplained-kill gap.**
@@ -355,10 +367,18 @@ kill this time), full event log hand-traced:
   reviewer re-flagged the *same, already-fixed* line (a real staleness/dedup
   gap in the reviewer's own re-check, not a fresh bug) -- the model
   correctly recognized it as already-fixed rather than blindly re-editing.
-  Round 3: reviewer confirmed clean. This is the first live confirmation of
-  the settlement-time reviewer catching and driving a fix for a real bug
-  goal-gate's own pass/fail signal couldn't see (it only knows whether the
-  verification *command* passed, not whether a reviewer would flag the diff).
+  Round 3: reviewer confirmed clean. **Correction**: this entry originally
+  called this the settlement-time trigger firing -- wrong, re-checked
+  against the raw trace and every one of these rounds carries
+  `trigger: "tool_result"`, the same already-live-confirmed path documented
+  above, not the newer `settlement` path. What this run *does* newly
+  confirm is the `tool_result` reviewer catching and driving a real fix for
+  a bug goal-gate's own pass/fail signal couldn't see (it only knows
+  whether the verification *command* passed, not whether a reviewer would
+  flag the diff) -- and, separately, that the reviewer's own re-check can
+  itself go stale (round 2 re-flagged an already-fixed line). The
+  settlement-time trigger specifically remains source/unit-tested only; see
+  the Todo entry, unchanged by this run.
 - **Independently reverified, not trusted from the log**: ran `make verify`
   myself afterward -- backend tests, `go vet`, `flutter analyze`, and all 20
   Flutter tests (up from the pre-run count, confirming new tests were
@@ -419,11 +439,13 @@ pending a decision on whether to commit it.
   source/unit-tested only, not live-run-confirmed the way the tool_result
   path already is.
 - Live-test the revised (`tool_result`/`turn_end`-based) designs of
-  `makefile-scaffold-nudge.ts`, `artifact-guard.ts`, and
-  `error-leak-guard.ts` — the 2026-08-05 live test that motivated their
-  redesign only ran the original, now-superseded versions. See
-  `pi-harness-history.md`'s "Live end-to-end test finds three of four new
-  hardening extensions structurally blind" entry.
+  `makefile-scaffold-nudge.ts` and `error-leak-guard.ts`, and the
+  `tool_result` primary-detection path specifically for `artifact-guard.ts`
+  (its `agent_settled` backstop path is now live-confirmed, see the status
+  table above and the 2026-08-09/10 update below) — the 2026-08-05 live
+  test that motivated their redesign only ran the original, now-superseded
+  versions. See `pi-harness-history.md`'s "Live end-to-end test finds three
+  of four new hardening extensions structurally blind" entry.
 - Rerun the personal-budget-simplifier-shaped scenario (or any greenfield,
   no-commits-yet project) now that `buildReviewDiff()` handles untracked
   files, to get a real paired before/after adoption data point — everything

@@ -127,6 +127,7 @@ class Round:
 	traces: list[dict]
 	verify_command: str | None
 	verify_passed: bool | None
+	verify_timed_out: bool
 	verify_output_tail: str
 	duration_s: float
 
@@ -141,20 +142,25 @@ class BuildResult:
 
 
 def pi_invocation(workspace: Path, *, prompt: str, session_dir: Path, containment: bool, continue_session: bool) -> list[str]:
-	base = [
-		"pi", "--print", "--mode", "json",
+	# Deliberately excludes the "pi" executable name itself: for a direct host
+	# invocation it's prepended below, but for containment run-contained.sh's
+	# "$@" is forwarded to container-entrypoint.sh, which already does
+	# `exec pi "$@"`. Including "pi" here too used to produce `pi pi --print
+	# ...` inside the container -- an extra positional argument pi rejects.
+	pi_args = [
+		"--print", "--mode", "json",
 		"--provider", "ai-stack-local",
 		"--model", MODEL,
 		"--thinking", "off",
 		"--session-dir", str(session_dir),
 	]
 	if continue_session:
-		base += ["--continue"]
-	base += [prompt]
+		pi_args += ["--continue"]
+	pi_args += [prompt]
 	if not containment:
-		return base
+		return ["pi", *pi_args]
 	run_contained = CONTAINMENT_DIR / "run-contained.sh"
-	return [str(run_contained), str(workspace), *base]
+	return [str(run_contained), str(workspace), *pi_args]
 
 
 def ensure_git_repo(workspace: Path) -> None:
@@ -178,6 +184,27 @@ def ensure_git_repo(workspace: Path) -> None:
 			if existing and not existing.endswith("\n"):
 				handle.write("\n")
 			handle.write("\n".join(needed) + "\n")
+
+
+def check_containment_can_reach_model(containment: bool) -> None:
+	# containment/README.md documents this plainly: run-contained.sh's
+	# network-denied profile (--network=none) cannot reach this machine's LAN
+	# inference service, and this script only knows how to drive pi through
+	# the ai-stack-local provider. Running --containment anyway doesn't fail
+	# loudly -- pi just hangs or errors deep inside a round with no network,
+	# which reads as a build failure rather than the actual "this mode isn't
+	# wired for inference yet" cause. Fail fast here instead, before anything
+	# else runs, until a reviewed relay exists (see the README's own todo).
+	if not containment:
+		return
+	raise SystemExit(
+		"--containment cannot currently reach the ai-stack-local model: "
+		"run-contained.sh's network-denied profile (--network=none) has no "
+		"path to this machine's LAN inference service, and no relay/proxy "
+		"provider is wired into the container yet. See pi/containment/"
+		"README.md's network-denied section. Refusing to start a build that "
+		"cannot produce a real agent turn."
+	)
 
 
 def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment: bool, timeout_minutes: int) -> BuildResult:
@@ -208,21 +235,45 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 
 		verify_command = resolve_verify_command(workspace)
 		verify_passed: bool | None = None
+		verify_timed_out = False
 		verify_tail = ""
 		if verify_command:
-			verify_started = time.monotonic()
-			verify_result = sh(["bash", "-o", "pipefail", "-lc", verify_command], cwd=workspace, timeout=20 * 60)
-			verify_passed = verify_result.returncode == 0
-			verify_tail = redact(f"{verify_result.stdout}\n{verify_result.stderr}")
+			try:
+				verify_result = sh(["bash", "-o", "pipefail", "-lc", verify_command], cwd=workspace, timeout=20 * 60)
+				verify_passed = verify_result.returncode == 0
+				verify_tail = redact(f"{verify_result.stdout}\n{verify_result.stderr}")
+			except subprocess.TimeoutExpired as exc:
+				# Record this as a failed round instead of letting the
+				# exception propagate past write_report -- the orchestrator's
+				# whole point is that a BUILD_REPORT.md always gets written,
+				# success or failure, so a silent crash here would be exactly
+				# the failure mode this script exists to avoid.
+				verify_timed_out = True
+				verify_passed = False
+				verify_tail = redact(
+					f"verification command timed out after 20 minutes: {verify_command}\n"
+					f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
+				)
+
+		pi_returncode = completed.returncode if completed else -1
+		# A nonzero pi exit means the CLI itself crashed, was invoked wrong, or
+		# otherwise didn't complete a real agent turn -- verify_passed alone
+		# can't be trusted as evidence of *this round's* work in that case,
+		# since it just reruns whatever verification command already exists in
+		# the workspace and would happily report "passed" against a tree pi
+		# never touched. Success requires both: pi actually ran to completion
+		# (returncode 0) and the real verification command passed.
+		pi_failed = (not timed_out) and pi_returncode != 0
 
 		rnd = Round(
 			index=round_index,
 			command=command,
-			pi_returncode=(completed.returncode if completed else -1),
+			pi_returncode=pi_returncode,
 			pi_usage=parse_usage(stdout),
 			traces=parse_pi_traces(stdout),
 			verify_command=verify_command,
 			verify_passed=verify_passed,
+			verify_timed_out=verify_timed_out,
 			verify_output_tail=verify_tail,
 			duration_s=duration,
 		)
@@ -234,7 +285,7 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 		if verify_command is None:
 			result.stopped_reason = "no verification command resolvable (unconfigured)"
 			break
-		if verify_passed:
+		if verify_passed and not pi_failed:
 			result.succeeded = True
 			result.stopped_reason = "verification passed"
 			break
@@ -243,15 +294,28 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 		# prompt ourselves, same content quality-gate.ts's in-session message
 		# has, and start a fresh --continue round on top of the same session.
 		if round_index == max_rounds:
-			result.stopped_reason = f"round budget ({max_rounds}) exhausted, verification still failing"
+			result.stopped_reason = (
+				f"round budget ({max_rounds}) exhausted, pi exited {pi_returncode} on the last round"
+				if pi_failed
+				else f"round budget ({max_rounds}) exhausted, verification still failing"
+			)
 			break
-		prompt = (
-			f"The verification command `{verify_command}` did not pass "
-			f"(attempt {round_index}/{max_rounds}).\n\n"
-			f"Redacted failure excerpt:\n\n{verify_tail}\n\n"
-			"Inspect the failure, make the smallest fix, and rerun it yourself "
-			"before finishing this turn."
-		)
+		if pi_failed:
+			prompt = (
+				f"The previous `pi` invocation exited with code {pi_returncode} instead of "
+				f"completing normally (attempt {round_index}/{max_rounds}); no completed turn "
+				"can be trusted from that round. Continue the work from wherever it left off, "
+				"make the smallest fix needed, and rerun the project's real verification "
+				"command yourself before finishing this turn."
+			)
+		else:
+			prompt = (
+				f"The verification command `{verify_command}` did not pass "
+				f"(attempt {round_index}/{max_rounds}).\n\n"
+				f"Redacted failure excerpt:\n\n{verify_tail}\n\n"
+				"Inspect the failure, make the smallest fix, and rerun it yourself "
+				"before finishing this turn."
+			)
 
 	return result
 
@@ -284,7 +348,8 @@ def write_report(result: BuildResult) -> Path:
 		if rnd.pi_usage:
 			lines.append(f"- pi usage: {json.dumps(rnd.pi_usage)}")
 		lines.append(f"- verify command: `{rnd.verify_command or '(none resolved)'}`")
-		lines.append(f"- verify passed: {rnd.verify_passed}")
+		verify_status = "timed out" if rnd.verify_timed_out else str(rnd.verify_passed)
+		lines.append(f"- verify passed: {verify_status}")
 		lines.append(f"- duration: {rnd.duration_s:.1f}s")
 		trace_summary = [f"{t.get('extension')}:{t.get('event')}={t.get('outcome')}" for t in rnd.traces]
 		if trace_summary:
@@ -324,6 +389,7 @@ def main() -> int:
 	parser.add_argument("--containment", action="store_true", help="Run pi inside the Docker containment launcher instead of directly on the host.")
 	parser.add_argument("--timeout-minutes", type=int, default=45)
 	args = parser.parse_args()
+	check_containment_can_reach_model(args.containment)
 
 	result = run_build(
 		args.workspace.resolve(), args.spec.resolve(),
