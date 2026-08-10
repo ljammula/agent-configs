@@ -47,12 +47,17 @@ python3 pi/scripts/build_app.py \
   its own `.pi-build-session/` and `BUILD_REPORT.md` into the workspace
   and gitignores those automatically, but it does not manage where you put
   the spec file itself.
-- `--containment` runs each `pi -p` round through
-  `pi/containment/run-contained.sh` (Docker, live-proven 17/17 checks:
-  workspace-only writes, no host creds/socket, no network, `/tmp` noexec,
-  no-new-privileges). Off by default because it costs Docker-start latency
-  per round and this hasn't yet been battery-run with `--containment` on;
-  recommended for anything you're not personally supervising.
+- `--containment` is currently **unusable, by design, not a bug**: the
+  script refuses it immediately (before any round runs, no
+  `BUILD_REPORT.md` produced) because `run-contained.sh`'s network-denied
+  profile (`--network=none`, live-proven 17/17 escape checks: workspace-
+  only writes, no host creds/socket, no network, `/tmp` noexec, no-new-
+  privileges) has no path to this machine's LAN inference service, and
+  this script only knows how to drive `pi` through the `ai-stack-local`
+  provider. Passing the flag today is guaranteed to exit before doing
+  anything. See `pi/containment/README.md`'s network-denied section; this
+  will become usable once a reviewed relay/proxy provider exists for the
+  container, not before.
 - Exit code 0 only if real verification evidence passes within the round
   budget. Non-zero (with a `BUILD_REPORT.md` explaining why) if the round
   budget is exhausted, pi times out, or no verification command could be

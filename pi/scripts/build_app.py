@@ -21,12 +21,20 @@ local-model-bench (commits 8531917/dfe4620), generalized from
 
 Usage:
     python3 build_app.py --workspace /path/to/app --spec spec.md \
-        [--max-rounds 6] [--containment] [--timeout-minutes 45]
+        [--max-rounds 6] [--timeout-minutes 45]
+
+--containment currently refuses to run at all (see check_containment_can_
+reach_model's docstring below): its network-denied Docker profile has no
+path to this machine's LAN inference service, so passing it exits
+immediately with no round attempted and no BUILD_REPORT.md written --
+unlike every other failure mode this script handles, which always ends in
+a report. That exception is deliberate, not an oversight.
 
 Exit code 0 only if real verification evidence passes by the round budget.
-A BUILD_REPORT.md is always written to the workspace, whether it succeeded
-or the round budget ran out -- the point of zero-human is that the report,
-not a chat transcript, is the record of what happened.
+A BUILD_REPORT.md is always written to the workspace on any full run,
+whether it succeeded or the round budget ran out -- the point of
+zero-human is that the report, not a chat transcript, is the record of
+what happened.
 """
 
 from __future__ import annotations
@@ -386,7 +394,12 @@ def main() -> int:
 	parser.add_argument("--workspace", required=True, type=Path)
 	parser.add_argument("--spec", required=True, type=Path)
 	parser.add_argument("--max-rounds", type=int, default=6)
-	parser.add_argument("--containment", action="store_true", help="Run pi inside the Docker containment launcher instead of directly on the host.")
+	parser.add_argument(
+		"--containment", action="store_true",
+		help="Currently refused unconditionally: the Docker containment launcher's network-denied "
+		"profile cannot reach the ai-stack-local model, so no round could ever run. See "
+		"pi/containment/README.md.",
+	)
 	parser.add_argument("--timeout-minutes", type=int, default=45)
 	args = parser.parse_args()
 	check_containment_can_reach_model(args.containment)
