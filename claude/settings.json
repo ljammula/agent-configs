@@ -3,7 +3,6 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -39,7 +38,8 @@
   "enableWorkflows": true,
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
-    "andrej-karpathy-skills@multica-ai": true
+    "andrej-karpathy-skills@multica-ai": true,
+    "mattpocock-skills@claude-plugins-official": true
   },
   "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,

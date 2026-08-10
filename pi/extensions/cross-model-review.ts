@@ -9,7 +9,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
-import { buildReviewDiff, isBroadVerificationCommand, resolveDiffTarget, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
+import {
+	buildReviewDiff,
+	isBroadVerificationCommand,
+	resolveDiffTarget,
+	snapshotDiff,
+	verificationPipelineCanMaskFailure,
+} from "./lib/verification.ts";
 
 const REVIEW_TIMEOUT_MS = 240_000;
 const EXEC_TIMEOUT_MS = 5000;
@@ -221,10 +227,14 @@ export default function reviewer(pi: ExtensionAPI): void {
 		if (result?.code === 0) baseSha = result.stdout.trim();
 	});
 
-	pi.on("tool_result", (event, ctx) => {
-		if (!config.enabled || settled || reviewInFlight || event.toolName !== "bash" || event.isError) return;
-		const command = event.input.command;
-		if (typeof command !== "string" || !isBroadVerificationCommand(command) || verificationPipelineCanMaskFailure(command)) return;
+	// Shared by both triggers below. `trigger` only affects telemetry: the
+	// tool_result path fires reactively off the model's own verification
+	// command; the agent_settled path (added to fix the todo item that this
+	// extension "structurally cannot activate" on suites where the model
+	// never runs one itself, e.g. local-model-bench) fires once at
+	// settlement as a backstop, gated on a materially non-empty diff instead
+	// of on any particular bash command.
+	function startReviewRound(ctx: ExtensionContext, trigger: "tool_result" | "settlement"): Promise<void> {
 		reviewInFlight = true;
 		const reviewRunId = runId;
 		const startedAt = Date.now();
@@ -237,7 +247,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 		// this, a project with nothing committed or staged yet (exactly the
 		// state new-project-scaffold.ts leaves a repo in) always sees an empty
 		// diff and never actually reviews anything, silently.
-		inFlightReview = resolveDiffTarget(pi, ctx.cwd, baseSha)
+		const round = resolveDiffTarget(pi, ctx.cwd, baseSha)
 			.then((target) => buildReviewDiff(pi, ctx.cwd, target))
 			.then(async (diff) => {
 				if (reviewRunId !== runId) return;
@@ -251,6 +261,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 						durationMs: Date.now() - startedAt,
 						metadata: {
 							kind: config.kind,
+							trigger,
 							reason: !diff ? "empty-diff" : !spec ? "no-task-spec" : "unchanged-since-last-review",
 						},
 					});
@@ -266,6 +277,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 					durationMs: Date.now() - startedAt,
 					metadata: {
 						kind: config.kind,
+						trigger,
 						round: reviewCount + 1,
 						...(result.reason ? { reason: result.reason } : {}),
 						...(result.status ? { status: result.status } : {}),
@@ -279,6 +291,12 @@ export default function reviewer(pi: ExtensionAPI): void {
 				}
 				reviewCount += 1;
 				settled = reviewCount >= MAX_REVIEW_ROUNDS;
+				// A settlement-triggered follow-up fires after pi has already
+				// decided the turn is done; whether `-p` mode resumes on it is the
+				// same open question tracked for quality-gate's corrective
+				// follow-up (see pi-harness-validation-status.md). Send it anyway
+				// -- it's a strict improvement over never reviewing at all -- but
+				// don't claim it reliably produces a second turn.
 				pi.sendUserMessage(
 					`A ${config.kind} flagged a possible issue (round ${reviewCount}/${MAX_REVIEW_ROUNDS}):\n\n${result.text}\n\nInvestigate it against the code and spec; fix it if real, otherwise explain why it is false.`,
 					{ deliverAs: "followUp" },
@@ -289,7 +307,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 				// replacement session; there is nothing left here to log against.
 				if (isStaleContextError(error)) return;
 				try {
-					appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind, reason: "review-pipeline-error" } });
+					appendHarnessTrace(pi, { extension: "reviewer", diffHash: null, event: "review", outcome: "transient", durationMs: Date.now() - startedAt, metadata: { kind: config.kind, trigger, reason: "review-pipeline-error" } });
 				} catch (traceError) {
 					if (!isStaleContextError(traceError)) throw traceError;
 				}
@@ -297,6 +315,15 @@ export default function reviewer(pi: ExtensionAPI): void {
 			.finally(() => {
 				if (reviewRunId === runId) reviewInFlight = false;
 			});
+		inFlightReview = round;
+		return round;
+	}
+
+	pi.on("tool_result", (event, ctx) => {
+		if (!config.enabled || settled || reviewInFlight || event.toolName !== "bash" || event.isError) return;
+		const command = event.input.command;
+		if (typeof command !== "string" || !isBroadVerificationCommand(command) || verificationPipelineCanMaskFailure(command)) return;
+		startReviewRound(ctx, "tool_result");
 	});
 
 	// Give a pending review round time to finish before pi decides the run
@@ -304,10 +331,24 @@ export default function reviewer(pi: ExtensionAPI): void {
 	// only re-throws a non-stale error out of its own trace-logging fallback
 	// (a genuine bug, not staleness), so mirror the same stale-context guard
 	// used everywhere else in the harness rather than swallow it here too.
-	pi.on("agent_settled", async () => {
-		if (!inFlightReview) return;
+	//
+	// Settlement backstop: if no review round ever ran this session (the
+	// tool_result trigger requires the model itself to run a broad
+	// verification command, which task suites like local-model-bench never
+	// give it the chance to do), fire one directly here, gated on a
+	// materially non-empty diff so an empty/no-op turn doesn't spend a
+	// review round on nothing.
+	pi.on("agent_settled", async (_event, ctx) => {
 		try {
-			await inFlightReview;
+			if (inFlightReview) await inFlightReview;
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
+		}
+		if (!config.enabled || settled || reviewInFlight || lastReviewedDiff !== undefined) return;
+		try {
+			const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+			if (!snapshot.material) return;
+			await startReviewRound(ctx, "settlement");
 		} catch (error) {
 			if (!isStaleContextError(error)) throw error;
 		}
