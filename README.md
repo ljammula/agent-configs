@@ -262,18 +262,24 @@ each answers a different question:
   "complete," treat the living-status doc above as the current source of
   truth on whether it actually holds up, not the plan itself.
 - **Dated snapshots** — a record of a specific investigation, review, or
-  build run at the time it happened; never updated afterward except to add
-  a banner pointing at whichever living doc superseded it.
+  build run at the time it happened. Not append-only: several of these
+  carry an in-place "Historical snapshot"/correction banner pointing at
+  whichever living doc superseded their overall claims, but that doesn't
+  mean the body text below the banner is frozen -- some (e.g.
+  `claude-pi-quality-extensions-review-feedback.md`,
+  `pi-real-task-report-personal-budget-simplifier.md`) later received
+  their own in-place correction rounds when a specific finding turned out
+  to be wrong, same-day or after. Read the banner for current status, but
+  don't assume everything past it is untouched history.
   [pi-harness-history.md](pi-harness-history.md) is the main dated
   narrative (full investigation log, one entry per finding).
   [fable-review-all-customizations.md](fable-review-all-customizations.md)
   and [claude-pi-quality-extensions-review-feedback.md](claude-pi-quality-extensions-review-feedback.md)
-  are independent-review passes from 2026-07-24, each with a "Historical
-  snapshot" banner pointing at the current status doc.
+  are independent-review passes from 2026-07-24.
   [pi-real-task-report-daily-briefing-screen.md](pi-real-task-report-daily-briefing-screen.md)
   and [pi-real-task-report-personal-budget-simplifier.md](pi-real-task-report-personal-budget-simplifier.md)
   are transcript-sourced (not self-reported) observation reports from real
-  delegated builds, same banner convention.
+  delegated builds.
 
 If a claim in a dated snapshot and the living status doc ever disagree,
 the living status doc wins -- it's the one that gets corrected when a
