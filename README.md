@@ -280,6 +280,11 @@ each answers a different question:
   and [pi-real-task-report-personal-budget-simplifier.md](pi-real-task-report-personal-budget-simplifier.md)
   are transcript-sourced (not self-reported) observation reports from real
   delegated builds.
+- **Presentations** — a standalone, non-technical writeup of a specific
+  finding, meant to be opened directly in a browser and shared, not read
+  as markdown. [pi-goal-gate-research.html](pi-goal-gate-research.html)
+  covers the three live `/goal` trials in `pi-harness-validation-status.md`'s
+  `/goal` update entries.
 
 If a claim in a dated snapshot and the living status doc ever disagree,
 the living status doc wins -- it's the one that gets corrected when a
