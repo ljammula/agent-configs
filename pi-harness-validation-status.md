@@ -288,6 +288,48 @@ Two things worth recording plainly rather than glossing over:
    uninterrupted) did behave correctly and did produce the second
    verified commit + fix without manual intervention.
 
+**Update 2026-08-09/10: second confirming smoke run, fresh empty repo,
+different stack.** `/goal write a small Python calculator module (add,
+subtract, multiply, divide with zero-division handling) in calc.py with
+pytest tests in test_calc.py covering each function including the
+divide-by-zero case; run pytest and only report done once it passes`
+against a brand-new empty git repo (no prior `/goal` usage in that repo).
+Single uninterrupted `pi -p` process, full JSON event log captured and
+hand-traced line-by-line rather than trusted from the model's own summary:
+
+- **Kickoff fix held**: `agent_start` fired immediately after the
+  `session` event, no race, no empty exit.
+- **False-rejection fix held**: the model hit real environment friction
+  first (no venv, `pytest` not installed, two failed verification
+  attempts logged by `quality-gate.ts` as genuine `fail`s) and only
+  declared `GOAL COMPLETE` once `pytest` actually passed. Accepted on
+  that first genuine claim -- `pi-goal-trace` recorded `{event:
+  "complete", rounds: 0}` -- no false-rejection loop.
+- **Independently reverified, not just trusted from the log**: ran
+  `pytest` myself outside the harness afterward against the same
+  `calc.py`/`test_calc.py` the agent wrote -- 5/5 passed, matching the
+  agent's claim exactly.
+- **A second, unrelated mechanism also fired correctly and is worth
+  noting**: after goal-gate cleared the (now-met) goal, `artifact-guard.ts`
+  independently caught real Mach-O binaries left in `.venv/` at
+  settlement time and nudged a cleanup turn. The model's cleanup turn also
+  ended with a `GOAL COMPLETE` line in its text, but by then `goal-gate.ts`'s
+  own state was already `undefined` (cleared on the first acceptance), so
+  its `turn_end` handler's early-return (`if (!goal) return`) means that
+  second marker was inert text, not a second accepted completion --
+  confirmed by only one `pi-goal-trace` `complete` entry existing in the
+  whole log. Good defense-in-depth evidence: two independent settlement
+  mechanisms (goal-gate's own gate, artifact-guard's separate check) each
+  did their own job without interfering with each other.
+
+This is the second stack (Python, vs. the first smoke test's Go and the
+target run's Go+Flutter) and the second confirmation that both live-found
+bugs stay fixed. Still not covered by any run so far: many nudge rounds
+within one uninterrupted process on a task that doesn't converge on the
+first genuine attempt (every confirming run to date -- this one and the
+original Go smoke test -- happened to reach `rounds: 0`), and the
+fully-unattended multi-restart endurance case flagged above.
+
 ## Todo
 
 - Root-cause the two unexplained background-process kills hit live during
@@ -299,7 +341,13 @@ Two things worth recording plainly rather than glossing over:
   process* (the personal-budget-simplifier round that did run start-to-
   finish worked correctly) — the multi-hour/multi-restart endurance case
   is still unproven, since every restart there was a manual
-  `--continue` recovery, not the live goal state surviving.
+  `--continue` recovery, not the live goal state surviving. **Still open**:
+  both single-process confirming runs to date (Go smoke test, Python calc
+  smoke test above) happened to converge on the model's first genuine
+  `GOAL COMPLETE` attempt (`rounds: 0`) — the nudge-and-reject loop path
+  itself (not just the kickoff and single-shot-accept paths) has no live
+  confirmation yet. Needs a task deliberately harder to get right in one
+  pass.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
   `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
