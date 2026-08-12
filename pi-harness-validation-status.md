@@ -429,8 +429,103 @@ and a completion claim. `npm test`: 149/149 (1 new regression test added,
 `pi/tests/goal-gate.test.ts`, "a pass followed by a further unverified
 edit does not back an immediate completion claim"); `tsc --noEmit`: clean.
 
+## Update 2026-08-12: goal-gate hardened against non-Claude models never using the marker
+
+Live finding, not a hypothetical: re-read the personal-budget-simplifier
+OTEL-metrics `/goal` session recorded above (2026-08-10/11-12, local
+`ai-stack-local` route, `ThinkingCap-Qwen3.6-27B-MLX-8bit`) directly from
+its session log. Grepping the full ~330KB transcript for `GOAL COMPLETE`
+(case-insensitive) returns exactly one hit -- the kickoff instruction
+itself. Across 7 recorded nudge rounds the model never once attempted the
+marker; it kept ending turns with its own habitual `before-done`-style
+phrasing ("done?", "Everything is... complete") instead, which the gate's
+regex doesn't recognize, so every round fell into the generic `"Goal not
+yet met... Keep working"` branch. The last two of those rounds made zero
+new edits (`quality-gate` trace `diffHash` identical across both) -- the
+model was re-running `make verify` and re-declaring victory in prose, not
+iterating. The session file ends mid-round-7-of-15 with no `pi-goal-trace`
+complete/cap-hit entry -- abandoned, not resolved. Notably, every
+single-process run confirmed earlier in this doc (Go smoke test, Python
+calc smoke test, personal-budget-simplifier delete/export/rename UI run)
+used the standard Claude route and converged on `rounds: 0` -- this is the
+first case of the marker itself never landing, and it's specific to the
+weaker local route.
+
+Three code-level mitigations, all in `goal-gate.ts`:
+
+1. The plain `"not yet met"` nudge previously said nothing about the
+   marker format beyond the one-time kickoff message. It now restates the
+   exact required line every round, so recalling it doesn't depend on a
+   single early instruction surviving in context.
+2. New `session_compact` handler: re-sends that same reminder immediately
+   once a goal-bearing session gets compacted (skipped when `willRetry` is
+   true -- that's mid-turn overflow recovery, not a between-turns landing
+   spot). A compaction summary is a paraphrase, not a transcript; nothing
+   guaranteed it would preserve a literal string requirement, and the
+   2026-08-10 compaction event on this exact session is a real instance of
+   that risk.
+3. New stall tracking: if the working diff's hash is unchanged across
+   `STALL_ROUNDS_BEFORE_ESCALATION` (2) consecutive plain nudges, the
+   message escalates from the generic prompt to naming the stall
+   explicitly, with a `pi-goal-trace` `"stalled"` entry for visibility --
+   directly targets the zero-progress round-6/7 pattern seen in this run.
+
+**Not live-tested yet.** These are code-level fixes for a failure mode
+diagnosed from a real log, not something re-run against the local route to
+confirm the marker now lands. `npm test`: 156/156 (8 new tests in
+`pi/tests/goal-gate.test.ts` covering the marker-reminder text, stall
+escalation with both a static and a changing diff, and the three
+`session_compact` cases); `tsc --noEmit`: clean. Next step: re-run the
+same OTEL-metrics-shaped task against the local route and confirm it
+either reaches `GOAL COMPLETE` or the stall escalation visibly changes the
+model's behavior instead of silently spinning to the round cap again.
+
+## Update 2026-08-12 (same day): live-retested against the local route
+
+Set up a fresh scratch git repo (`/private/tmp/.../goal-gate-live-test-2`,
+gitignoring `__pycache__`/`.pytest_cache`) and ran `pi -p '/goal add a
+multiply(a, b) function to app.py with a passing pytest test for it'`
+against the local `ai-stack-local` route (same model as the OTEL-metrics
+run that surfaced the original gap). Result: the model implemented the
+function, added a test, ran `pytest`, and its first stop turn ended with
+`GOAL COMPLETE: pytest reports 2 passed...` — accepted immediately
+(`pi-goal-trace`: `{event: "complete", rounds: 0}`). Independently
+verified, not trusted from the log: re-ran `pytest` myself afterward (2
+passed) and read `app.py` directly — the `multiply` function is real and
+correct. This confirms the marker convention itself still works cleanly on
+this route when the model gets it right on the first try; it does not by
+itself exercise the harder repeated-nudge path the fix targets, since the
+task converged before any nudge fired.
+
+**A first attempt at this immediately surfaced a real methodology bug, not
+a goal-gate bug.** The first run redirected `pi -p ... --mode json`'s own
+growing stdout (`run.jsonl`) into the *same repo* the model was working
+in and that goal-gate diffs against. Every quality-gate verification round
+in that run recorded a different `diffHash` (16 checks, 16 distinct
+hashes) purely because the ever-growing log file counted as untracked
+material in `git status`, not because of any real code churn — so no
+completion claim could ever have passed evidence-binding in that run,
+independent of anything the model did. That run did, incidentally, still
+show the model attempting `GOAL COMPLETE` repeatedly across 9+ rounds
+(never observed at all in the original bad session) before being killed
+once the contamination was identified — consistent with, but not clean
+confirmation of, the marker-reminder-every-round fix. Lesson for any
+future live goal-gate test on this harness: never let the harness's own
+process output land inside the repo it's diffing.
+
+**Still not live-exercised**: the stall-escalation path (needs a task the
+model can complete but initially fumbles the verification loop on) and the
+`session_compact` reminder path (needs an actual mid-goal compaction,
+hard to force deliberately on a small task). Both remain unit-test-only
+confirmed.
+
 ## Todo
 
+- Live-exercise the stall-escalation and `session_compact`-reminder paths
+  of the 2026-08-12 goal-gate hardening specifically — the round-0-success
+  live retest (see update above) confirmed the marker convention and
+  evidence-binding still work cleanly on the local route, but neither of
+  those two newer code paths has fired in a live run yet.
 - Root-cause the two unexplained background-process kills hit live during
   the `personal-budget-simplifier` `/goal` run (see update above) — both
   left a real, sometimes-broken diff mid-edit with no warning. Unattended
