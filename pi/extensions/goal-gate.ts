@@ -34,6 +34,25 @@
  * survive restarts, use `pi/scripts/build_app.py`'s outer round loop
  * instead; that script drives verification from outside the process for
  * exactly this reason (see its own header comment).
+ *
+ * Non-Claude-model hardening (live-confirmed 2026-08-11/12 on the local
+ * ai-stack route, see pi-harness-validation-status.md): a weaker model can
+ * run an entire multi-round goal without ever attempting the `GOAL
+ * COMPLETE:` marker, instead relying on whatever ad hoc "done?" phrasing a
+ * skill (e.g. before-done) trained into it -- the gate then only ever fires
+ * the generic "not yet met" nudge, which used to say nothing about the
+ * marker format at all beyond the one-time kickoff message. Two mitigations:
+ * (1) every plain nudge now restates the exact marker requirement, so
+ * recalling it doesn't depend on a single early instruction surviving
+ * context compaction; (2) a `session_compact` handler re-sends that same
+ * reminder immediately after any compaction lands while a goal is active,
+ * since a paraphrased compaction summary is not guaranteed to preserve a
+ * literal string requirement. A third guard tracks the working diff's hash
+ * across nudged rounds: if it hasn't changed for `STALL_ROUNDS_BEFORE_
+ * ESCALATION` consecutive rounds, the model is re-asserting "done" without
+ * making new edits, and the nudge escalates to say so explicitly instead of
+ * repeating the same generic prompt until the round cap silently drops the
+ * goal.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isStaleContextError } from "./lib/stale-context.ts";
@@ -47,6 +66,15 @@ import {
 
 const DEFAULT_MAX_ROUNDS = 15;
 const COMPLETE_MARKER = /^GOAL COMPLETE:\s*(.+)$/i;
+// Consecutive plain "not yet met" nudges whose diff hash didn't move before
+// the nudge text escalates from generic to "you have not actually changed
+// anything." Two rather than one: the first unchanged round is often just a
+// verification-only turn (re-running `make verify` after a real prior edit
+// that already got its own nudge), not yet a real stall.
+const STALL_ROUNDS_BEFORE_ESCALATION = 2;
+
+const MARKER_REMINDER =
+	'Once it truly passes, end your final message with exactly this line: "GOAL COMPLETE: <one-sentence summary of the evidence>" -- no other phrasing (e.g. "done?", "all set") satisfies this gate.';
 
 export function resolveMaxRounds(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env.PI_GOAL_MAX_ROUNDS;
@@ -119,6 +147,12 @@ export default function goalGate(pi: ExtensionAPI): void {
 	// completion claim could slip through; tightened to close that gap.
 	let evidence: VerificationEvidence | undefined;
 	let baseSha: string | undefined;
+	// Stall tracking for the escalation nudge: the diff hash as of the last
+	// *plain* nudge (not a rejected-completion-claim nudge -- that path
+	// already tells the model exactly what's wrong) and how many nudges in a
+	// row it hasn't moved. Reset whenever a goal is (re)set.
+	let lastNudgeDiffHash: string | undefined;
+	let staleRounds = 0;
 
 	// `ctx.waitForIdle()` returns immediately if the agent is idle *right
 	// now* (confirmed by reading agent-session.js: `if (this.isIdle) return`).
@@ -174,6 +208,8 @@ export default function goalGate(pi: ExtensionAPI): void {
 			}
 			goal = { condition: args, rounds: 0, maxRounds: resolveMaxRounds() };
 			evidence = undefined;
+			lastNudgeDiffHash = undefined;
+			staleRounds = 0;
 			ctx.ui.notify(`Goal set: ${args}`, "info");
 			pi.sendUserMessage(kickoffMessage(args), { deliverAs: "followUp" });
 			// Under `pi -p`, the process exits once this command handler's
@@ -206,6 +242,29 @@ export default function goalGate(pi: ExtensionAPI): void {
 		}
 	});
 
+	// A compaction summary is a paraphrase, not a transcript -- it is not
+	// guaranteed to preserve the kickoff message's literal marker
+	// requirement, and the model has no other way to rediscover the exact
+	// required string. Re-assert it immediately once a goal-bearing session
+	// gets compacted, rather than waiting on the next turn_end nudge to carry
+	// it. Skipped when `willRetry` is true: that's context-overflow recovery
+	// mid-turn, and the aborted turn is about to be retried automatically --
+	// injecting a follow-up here would race that retry instead of landing
+	// cleanly between turns the way every other nudge does.
+	pi.on("session_compact", async (event, _ctx) => {
+		if (!goal || event.willRetry) return;
+		pi.appendEntry("pi-goal-trace", { event: "compaction-reminder", condition: goal.condition, rounds: goal.rounds });
+		pi.sendUserMessage(
+			[
+				`(Context was just compacted. Goal is still active: ${goal.condition})`,
+				"",
+				"Keep working toward it using whatever the compaction summary preserved of prior progress.",
+				MARKER_REMINDER,
+			].join("\n"),
+			{ deliverAs: "followUp" },
+		);
+	});
+
 	pi.on("turn_end", async (event, ctx) => {
 		if (!goal) return;
 		const { message } = event;
@@ -213,12 +272,16 @@ export default function goalGate(pi: ExtensionAPI): void {
 
 		const declaredComplete = COMPLETE_MARKER.test(lastNonEmptyLine(messageText(message)));
 
-		// Only bother snapshotting the diff when a completion claim was
-		// actually made -- an ordinary "not yet met" nudge doesn't need it.
+		// Only bother snapshotting the diff for a completion claim's own
+		// verification check -- an ordinary "not yet met" nudge doesn't need
+		// that. It still needs *a* snapshot for stall tracking below, though,
+		// so a completion-claim snapshot is reused there when we have one
+		// rather than paying for `git diff` twice on the same turn.
 		let verified = false;
+		let snapshot: Awaited<ReturnType<typeof snapshotDiff>> | undefined;
 		if (declaredComplete) {
 			try {
-				const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+				snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
 				verified = evidencePassesCurrentDiff(evidence, snapshot);
 			} catch (error) {
 				if (!isStaleContextError(error)) throw error;
@@ -239,11 +302,39 @@ export default function goalGate(pi: ExtensionAPI): void {
 			return;
 		}
 
+		// Stall tracking only applies to plain "not yet met" nudges -- a
+		// rejected completion claim already gets a specific, actionable
+		// message regardless of whether the diff moved.
+		let stalled = false;
+		if (!declaredComplete) {
+			if (!snapshot) {
+				try {
+					snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+				} catch (error) {
+					if (!isStaleContextError(error)) throw error;
+					// Can't tell if it stalled; fall through without tracking
+					// rather than dropping the nudge entirely.
+				}
+			}
+			if (snapshot) {
+				stalled = snapshot.hash === lastNudgeDiffHash && staleRounds + 1 >= STALL_ROUNDS_BEFORE_ESCALATION;
+				staleRounds = snapshot.hash === lastNudgeDiffHash ? staleRounds + 1 : 0;
+				lastNudgeDiffHash = snapshot.hash;
+			}
+		}
+		if (stalled) {
+			pi.appendEntry("pi-goal-trace", { event: "stalled", condition: goal.condition, rounds: goal.rounds });
+		}
+
 		const nudge = declaredComplete
 			? "You wrote GOAL COMPLETE but the most recent verification command did not pass against the current diff " +
 				"(or none has run since). Run the project's real verification command against the latest edits and only " +
 				"claim complete once it actually passes."
-			: `Goal not yet met: "${goal.condition}". Keep working -- make the next concrete edit, then verify it.`;
+			: stalled
+				? `Goal not yet met: "${goal.condition}". The working diff hasn't changed across the last ` +
+					`${staleRounds} check(s) -- restating that it's done isn't progress. Make a concrete code edit, ` +
+					`then verify it. ${MARKER_REMINDER}`
+				: `Goal not yet met: "${goal.condition}". Keep working -- make the next concrete edit, then verify it. ${MARKER_REMINDER}`;
 		// Only discard the current evidence on a *rejected completion claim* --
 		// that's the one case where reusing it would be wrong (the model must
 		// re-verify before claiming again). A plain "not yet met" nudge fires

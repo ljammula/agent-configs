@@ -262,6 +262,108 @@ test("round budget is exhausted and the goal is dropped without an unbounded nud
 	assert.equal(harness.messages.length, messageCountAtCap);
 });
 
+test("a plain not-yet-met nudge always restates the exact completion-marker format", async () => {
+	// Regression coverage for the local-model failure mode: a weaker model
+	// ran an entire multi-round goal without ever attempting the marker,
+	// because the generic nudge never repeated the format after the one-time
+	// kickoff. See goal-gate.ts's header comment.
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit(stopTurn("still working, more to do"));
+	assert.match(String(harness.messages[1].content), /GOAL COMPLETE: <one-sentence summary of the evidence>/);
+});
+
+test("repeated plain nudges against an unchanged diff escalate after the stall threshold", async () => {
+	const { exec } = gitFixture("diff-v1"); // never changes across rounds
+	const harness = new ExtensionHarness({ exec });
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit(stopTurn("still working")); // round 1: establishes the baseline hash
+	await harness.emit(stopTurn("still working")); // round 2: matches, still below threshold
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "stalled"), false);
+	await harness.emit(stopTurn("still working")); // round 3: threshold hit
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "stalled"), true);
+	assert.match(String(harness.messages.at(-1)?.content), /hasn't changed across the last 2 check\(s\)/);
+});
+
+test("a changing diff between plain nudges never escalates", async () => {
+	const { diffState, exec } = gitFixture("diff-v1");
+	const harness = new ExtensionHarness({ exec });
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit(stopTurn("still working"));
+	diffState.value = "diff-v2";
+	await harness.emit(stopTurn("still working"));
+	diffState.value = "diff-v3";
+	await harness.emit(stopTurn("still working"));
+	assert.equal(harness.entries.some((e) => (e.data as any)?.event === "stalled"), false);
+});
+
+test("a rejected completion claim is never treated as a stalled plain nudge", async () => {
+	// declaredComplete rejections already carry a specific, actionable
+	// message -- the stall-escalation text (which talks about "not yet met")
+	// must never appear on this path even across repeats against a static diff.
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit(stopTurn("GOAL COMPLETE: done."));
+	await harness.emit(stopTurn("GOAL COMPLETE: done."));
+	await harness.emit(stopTurn("GOAL COMPLETE: done."));
+	assert.equal(harness.entries.some((e) => (e.data as any)?.event === "stalled"), false);
+	for (const m of harness.messages.slice(1)) {
+		assert.match(String(m.content), /did not pass against the current diff/);
+	}
+});
+
+test("session_compact re-sends the marker reminder while a goal is active", async () => {
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await harness.emit({
+		type: "session_compact",
+		compactionEntry: {} as any,
+		fromExtension: false,
+		reason: "threshold",
+		willRetry: false,
+	} as any);
+	assert.equal(harness.messages.length, 2);
+	assert.match(String(harness.messages[1].content), /Context was just compacted/);
+	assert.match(String(harness.messages[1].content), /GOAL COMPLETE:/);
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "compaction-reminder"), true);
+});
+
+test("session_compact is a no-op with no active goal", async () => {
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await harness.emit({
+		type: "session_compact",
+		compactionEntry: {} as any,
+		fromExtension: false,
+		reason: "threshold",
+		willRetry: false,
+	} as any);
+	assert.equal(harness.messages.length, 0);
+});
+
+test("session_compact skips the reminder during context-overflow retry", async () => {
+	// willRetry means the aborted turn is about to be retried automatically;
+	// injecting a follow-up here would race that retry instead of landing
+	// cleanly between turns.
+	const harness = new ExtensionHarness();
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	const countAfterKickoff = harness.messages.length;
+	await harness.emit({
+		type: "session_compact",
+		compactionEntry: {} as any,
+		fromExtension: false,
+		reason: "overflow",
+		willRetry: true,
+	} as any);
+	assert.equal(harness.messages.length, countAfterKickoff);
+});
+
 test("turn_end is ignored when the assistant did not actually stop (tool call pending)", async () => {
 	const harness = new ExtensionHarness();
 	goalGate(harness.api);
