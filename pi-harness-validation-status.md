@@ -690,36 +690,171 @@ a literal marker string, consistent with the docs below.
    condition text says nothing about it; Claude Code's is safer *only if*
    the user remembers to opt in per-goal, and silently uncapped otherwise.
 
+## Update 2026-08-12 (later still): a real live compaction, n=2 on rounds>0, and a corrected root-cause writeup
+
+Follow-up work in the same session, pushed further after review feedback
+that the prior update's "not yet tested"/"could not be established"
+callouts, while honest, hadn't actually exhausted what was live-testable.
+Three more live runs and one source-level trace, all against the real
+local Qwen route (never simulated), all evidence below is either a raw
+grep against a session JSONL or an independently rerun command.
+
+**Second `rounds: 1` confirmation (n=2 now).** A second scratch task
+(`goal-gate-live-test-5`, a `kv.py` key-value store with the same
+atomic-write/pytest-coverage shape as the first, launched the same
+contamination-safe way — log outside the diffed repo) also produced a
+real plain nudge followed by an accepted claim: `{event: "complete",
+rounds: 1}`. Independently reverified: `pytest` 8/8 against the agent's
+own `kv.py`/`test_kv.py`. Two independent live runs now show `rounds > 0`
+(n=2 of 5 total confirming runs across this file's history) — still not
+"many," but no longer a single data point either.
+
+**A real compaction was captured live, for the first time — but it
+exposed both a wrong assumption and an unexplained gap, reported
+plainly rather than smoothed over.** Getting here took two failed
+attempts, kept below rather than deleted, because the failure mode is
+itself informative:
+
+- *Attempt 1* (the `session_compact` test in the prior update, and a
+  repeat here with `contextWindow` temporarily patched in
+  `ai-stack-local.ts` from `49152` to `8000`, `reserveTokens` left at
+  default `16384`): produced **zero** compaction events across two live
+  runs, despite `shouldCompact(contextTokens, contextWindow, settings)`
+  in the installed package
+  (`pi-coding-agent/dist/core/agent-session.js`) reading, by inspection,
+  as trivially satisfied (`contextWindow - reserveTokens` went negative).
+  Traced the actual reason by reading the installed package source, not
+  by guessing: `_checkCompaction`'s threshold branch feeding
+  `shouldCompact` is a *distinct* code path from `prepareCompaction`,
+  which decides *what's actually left to cut* using `keepRecentTokens`
+  against the message-history-only token estimate (excluding the system
+  prompt) — with `keepRecentTokens` still at its default `24000` and a
+  short task's real message history well under that, `prepareCompaction`
+  correctly found nothing to summarize regardless of the threshold check
+  passing. **Correction to the prior update's framing**: forcing
+  compaction needs both a shrunk `contextWindow` (to trip the threshold)
+  *and* a shrunk `keepRecentTokens` (to leave something for
+  `prepareCompaction` to actually cut) — the prior write-up only
+  identified the first knob.
+- *Attempt 2* (`keepRecentTokens` additionally dropped to `500` in
+  `~/.pi/agent/settings.json`, same `contextWindow: 8000` override, task:
+  the `kv.py` run above): **a real compaction fired** —
+  `compaction_start` → `compaction_end` in the raw event log, with an
+  actual generated summary (`"## Goal\nBuild a small key-value store
+  module..."`, `tokensBefore: 10760`, `estimatedTokensAfter: 1475`). This
+  is the first live-captured Pi auto-compaction event in this file's
+  entire history, not just a source-level description of the mechanism.
+  **But it fired with `reason: "overflow"` (Case 1, a genuine
+  context-length rejection triggering compact-and-retry), not
+  `reason: "threshold"` (Case 2, the proactive path both settings were
+  meant to force) — and it landed *after* `goal-gate`'s own `{event:
+  "complete"}` trace, i.e. after `goal` was already `undefined`.** Two
+  consequences, stated precisely rather than rounded up to "confirmed":
+  1. `goal-gate.ts`'s `session_compact` handler has an explicit
+     `if (!goal || event.willRetry) return;` guard — with no active goal
+     at compaction time, this run structurally could not have exercised
+     the reminder-resend behavior even if the event reached the handler.
+  2. Separately, and left unresolved rather than hand-waved:
+     **`grep -c '"type":"session_compact"'` on this run's log returns
+     `0`**, even though `compaction_end` fired and the installed source
+     (`agent-session.js`, the code directly above where `compaction_end`
+     is emitted) shows a `session_compact` extension-event emission
+     gated only on `this._extensionRunner && savedCompactionEntry` being
+     truthy — both of which should hold here. Did not root-cause this
+     gap in the time available; flagging it as a genuine open question
+     (bug in the installed package, a lookup-key mismatch, or a
+     misreading of the source) rather than assuming either "it's fine"
+     or "it's broken."
+  - All temporary overrides (`ai-stack-local.ts`'s `contextWindow`,
+    `~/.pi/agent/settings.json`'s `compaction` block) were reverted
+    immediately after; `git status` on `pi/` is clean and `npm test` is
+    156/156 with zero source changes to `goal-gate.ts` itself.
+  - **Net honest status on item 1**: a real compaction is now live-
+    confirmed to be reachable with the right settings (a first), but the
+    specific `goal-gate.ts` code path this was meant to test (the
+    `session_compact` handler re-sending `MARKER_REMINDER` *while a goal
+    is still active*) remains unexercised — both because this occurrence
+    landed post-completion and because the raw `session_compact` event
+    itself didn't appear in the trace for a reason not yet understood.
+    Needs a task long/heavy enough to cross the compaction threshold
+    *before* its first `GOAL COMPLETE` attempt, not after.
+
+**Root-cause investigation redone with a testable hypothesis instead of
+a purely negative result.** The prior update's mitigation story (`nohup
+... & disown` prevents the kind of kill that hit the original run) was
+checked directly rather than left as an assumption: started a plain
+`sleep 240 &` with **no** `nohup` at all, inspected it with
+`ps -o pid,ppid,stat`, and found it had *already* reparented to PID 1 —
+standard Unix orphan-reparenting, which happens on a background job
+regardless of `nohup` (`nohup` only matters if the parent shell itself
+receives `SIGHUP`, a different event from a Bash-tool call's transient
+shell simply finishing normally). **Correction: the specific mechanism
+proposed for the original kills does not hold up under its own test.**
+Also checked and came back empty: `~/.zsh_history` (no `pi -p`/
+`personal-budget-simplifier` entries — commands run through an agent's
+non-interactive Bash tool don't get written there at all, so no local
+trail of the original launch command exists to inspect) and
+`pi/scripts/build_app.py`'s `subprocess.run` calls (no
+`start_new_session=True`, so *if* that orchestrator had launched the
+killed process it would be vulnerable to a group-wide signal — but the
+doc's own account says this run used manual `pi --continue`, not
+`build_app.py`, so this is a related, real, fixable gap and not confirmed
+as the cause of this specific incident). **Final status, unchanged in
+substance but now backed by a disproved hypothesis instead of an
+untested one**: root cause remains genuinely unknown given the tools
+available on this machine three days after the fact. The actionable
+recommendation is process-external supervision that captures the exit
+signal to a file on the *next* occurrence, not a specific launch flag,
+since the specific flag hypothesized didn't survive its own test.
+
 ## Todo
 
-- Live-exercise the stall-escalation path specifically (needs 2
-  *consecutive* unchanged-diff plain nudges in one run — the 2026-08-12
-  later-day live test above produced exactly one nudge total, not two
-  consecutive stalled ones, so this remains untested) and the
-  `session_compact`-reminder path (the same run's deliberate
-  `reserveTokens` reduction to 47500 did not trigger a compaction before
-  the 25-turn task finished — `session_compact` count: 0 — so this also
-  remains untested; needs either a longer/more context-hungry task or a
-  still-more-aggressive forced threshold).
+- Live-exercise the stall-escalation path specifically (needs 3
+  *consecutive* unchanged-diff plain nudges in one run, per
+  `STALL_ROUNDS_BEFORE_ESCALATION = 2` and the off-by-one in how
+  `staleRounds` is checked before it's incremented — traced in source,
+  not yet hit live; both live attempts to date produced only one nudge
+  total, not three consecutive stalled ones). The `session_compact`-
+  reminder path specifically *while a goal is still active* also remains
+  untested, but for a now-understood reason, not an unknown one: the
+  2026-08-12 later-still update above got a real compaction to fire live
+  (a first) by shrinking both `contextWindow` *and* `keepRecentTokens`
+  together (shrinking `contextWindow` alone, as the first attempt did,
+  satisfies the threshold check but leaves `prepareCompaction` nothing to
+  cut) — but that compaction landed with `reason: "overflow"` after the
+  goal had already completed, so `goal-gate.ts`'s own `if (!goal ...)
+  return` guard means the reminder-resend logic still didn't get
+  exercised. Also newly open: that same run's `session_compact` extension
+  event never appeared in the trace despite `compaction_end` firing and
+  the emission-gating condition in the installed package appearing to be
+  satisfied — unexplained, not yet root-caused. Next attempt needs a task
+  heavy enough to cross the (now-understood) compaction threshold
+  *before* the model's first `GOAL COMPLETE` attempt, not after.
 - The two unexplained background-process kills from the
   `personal-budget-simplifier` `/goal` run remain **not root-caused** —
   macOS unified log and crash-report checks came back empty for the
   incident window and (as a sanity check) for a full 7-day window
   generally, meaning `pi`/`node` processes don't appear to emit forensic
   data this way on this host at all, not just that the old window expired.
-  Treat this as closed-out-as-unknowable via this method, not solved.
-  Mitigation (detached `nohup ... & disown` launch, verified live to
-  reparent to init) is recommended for future unattended runs but is
-  unconfirmed against the original failure mode specifically, since it
-  was never reproduced.
+  The leading mitigation hypothesis from the first pass (`nohup ... &
+  disown` prevents the kind of kill that hit the original run) was then
+  tested directly and **did not hold up**: a plain `sleep 240 &` with no
+  `nohup` at all was found already reparented to PID 1 via standard Unix
+  orphan-reparenting, so parent-shell-exit-without-nohup isn't a
+  convincing mechanism for the original incident either. Treat this as
+  closed-out-as-unknowable via every method tried so far, not solved —
+  the actionable path forward is process-external exit-signal capture on
+  the next occurrence, not a specific launch-flag fix.
 - Confirm `/goal` survives *many* nudge rounds within one uninterrupted
-  process, not just one. **Now n=4, 1 of 4 with `rounds > 0`** (the
-  2026-08-12 later-day inventory.py run above, `rounds: 1`) — real
-  progress on this item, but "many rounds" and the stall-escalation path
-  specifically are still unconfirmed; the multi-hour/multi-restart
-  endurance case (surviving actual process restarts, not just nudge
-  rounds within one process) is separately still open too, since every
-  restart seen so far was a manual `--continue` recovery, not live goal
+  process, not just one. **Now n=6 confirming single-process runs total,
+  2 of 6 with `rounds > 0`** (the inventory.py and kv.py runs above, both
+  `rounds: 1`) — real, now-doubled progress on this item, but "many
+  rounds" and the stall-escalation path specifically (needs 3 consecutive
+  stalled rounds, not just 1 nudge) are still unconfirmed; the
+  multi-hour/multi-restart endurance case (surviving actual process
+  restarts, not just nudge rounds within one process) is separately still
+  open too, since every restart seen so far was a manual `--continue`
+  recovery, not live goal
   state surviving a restart.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
