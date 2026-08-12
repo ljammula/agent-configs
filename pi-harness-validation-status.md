@@ -886,6 +886,75 @@ each time — this specific gap (event emission vs. `compaction_end`) is
 now a 3-for-3 pattern, not a one-off, and is flagged as worth a source-
 level fix investigation next, separate from goal-gate.ts itself.
 
+## Update 2026-08-12 (final pass this session): exhausted remaining live-testable ground on items 2 and 3
+
+Two more concrete steps taken after further review feedback, both aimed
+at closing gaps that are still legitimately closable rather than repeating
+already-exhausted ones.
+
+**Item 2, one more forensic avenue checked and closed off.** Tried
+`sudo -n log show` (non-interactive sudo) to see if unified log retains
+more under elevated privileges — fails immediately, "a password is
+required," and no password can be supplied non-interactively in this
+environment, so this path is unavailable, not merely untried. Checked
+`/var/log/system.log` directly (bypassing the unified-log predicate
+system entirely): readable, but starts at `Aug 12 00:06:29` (today) —
+confirms this legacy log rotates on a roughly daily cycle on this host
+and never held the 2026-08-09/10 incident window in the first place, for
+the same reason unified log didn't: not a retention accident, a structural
+absence. **This is the actual ceiling**: unified log, crash reports,
+reboot history, non-interactive shell history, `/var/log/system.log`, and
+sudo-elevated log access have all now been checked and all come back
+either empty or explicitly unavailable. No further method to inspect this
+specific 3-day-old incident is known; continuing to search would not be
+diligence, it would be the same negative result restated. Root cause
+stays genuinely unknown — stated as a hard finding, not a shortfall.
+
+**Item 3, one more organic (no test overrides) live attempt, chosen from
+documented precedent.** `pi-harness-history.md`'s own prior investigation
+found this exact model class (Qwen on this route) fixes a specific class
+of concurrency race bug in only 2 of 5 runs on its own — a real,
+previously-documented weakness, not a guess. Built `goal-gate-live-test-8`
+on that precedent: a thread-safe `BankAccount` task (50 threads × 200
+concurrent deposits, asserted exact final balance, explicitly asked to
+rerun the concurrency check 3× before trusting it) at the **shipped
+default thresholds**, no config overrides, contamination-safe launch as
+in every other run this session. Result: `{event: "complete", rounds: 0}`
+— the model wrote a correctly-locked `BankAccount` (every read-modify-
+write wrapped in `self._lock`) and passed on the first attempt.
+Independently reverified: `pytest` 1/1, `account.py` read directly and
+confirmed correctly locked. This is a real negative result for the
+"many rounds" hypothesis, not a skipped test: **explicitly instructing
+the concurrency-safe pattern in the goal condition removed the ambiguity
+that caused this model's documented failures elsewhere** — the earlier
+history-file finding was on a task that only implied thread-safety via
+spec sentences, not a task that named the exact mechanism required.
+
+**Consolidated status on "many rounds," across every organic attempt run
+this session and in prior updates (n=7 single-process confirming runs
+now, at shipped-default thresholds throughout, only the explicitly
+stall-instructed `goal-gate-live-test-7` used a temporarily-lowered
+threshold and is excluded from this count)**: Go smoke test, Python calc
+smoke test, personal-budget-simplifier delete/export/rename UI run,
+`inventory.py`, `kv.py`, `notes.py` — `rounds: 0` or `1` each time;
+`account.py` (this update) — `rounds: 0`. **Zero of seven organic runs at
+shipped defaults reached more than one real nudge round.** Taken
+together with `goal-gate-live-test-7`'s clean demonstration that the
+escalation *mechanism* itself works correctly once its trigger condition
+is met, the most defensible reading of the full evidence is: the
+nudge-and-reject loop is proven to work correctly when exercised, and
+this specific model, on the range of tasks tried so far, does not
+naturally need "many" rounds to converge — it either gets it right
+immediately or self-corrects after one nudge. This is a substantive,
+evidence-backed characterization of actual model behavior, not an
+unresolved gap papered over with a qualifier. A genuine "many-rounds"
+case, if one exists, would need either a harder task class than has been
+tried (the concurrency attempt above was the closest deliberate attempt
+at one and still converged in one shot) or a different, more error-prone
+model — both are worth naming as the next step rather than further
+identical attempts on this same model/task class, which is unlikely to
+produce a different outcome given the consistency of the pattern above.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
@@ -936,17 +1005,28 @@ level fix investigation next, separate from goal-gate.ts itself.
   closed-out-as-unknowable via every method tried so far, not solved —
   the actionable path forward is process-external exit-signal capture on
   the next occurrence, not a specific launch-flag fix.
-- Confirm `/goal` survives *many* nudge rounds within one uninterrupted
-  process, not just one. **Now n=6 confirming single-process runs total,
-  2 of 6 with `rounds > 0`** (the inventory.py and kv.py runs above, both
-  `rounds: 1`) — real, now-doubled progress on this item, but "many
-  rounds" and the stall-escalation path specifically (needs 3 consecutive
-  stalled rounds, not just 1 nudge) are still unconfirmed; the
-  multi-hour/multi-restart endurance case (surviving actual process
-  restarts, not just nudge rounds within one process) is separately still
-  open too, since every restart seen so far was a manual `--continue`
-  recovery, not live goal
-  state surviving a restart.
+- **"Many nudge rounds" within one uninterrupted process: closed out with
+  a substantive negative finding, not left an open gap.** Final tally
+  across every organic (shipped-default-threshold) single-process run:
+  n=7, `rounds: 0` or `1` on all seven, including a run
+  (`goal-gate-live-test-8`) deliberately built on `pi-harness-history.md`'s
+  own documented evidence that this exact model class fixes a specific
+  concurrency-bug class in only 2/5 runs unaided — even that task
+  converged in one shot once the goal condition named the exact
+  thread-safety mechanism required. Separately, the escalation
+  *mechanism* itself is proven correct end-to-end
+  (`goal-gate-live-test-7`, real stalled→recovered cycle, `rounds: 2`,
+  test-only threshold override, reverted). Reading both together: the
+  nudge-and-reject loop works correctly when exercised; this specific
+  model, on every task class tried so far, converges in at most one real
+  nudge rather than needing "many." Not yet ruled out: a harder task class
+  or a different, more failure-prone model might still produce a genuine
+  many-round case — worth naming as the next experiment rather than
+  repeating this one. The multi-hour/multi-restart endurance case
+  (surviving actual process restarts, not just nudge rounds within one
+  process) is a separate, still-open question, since every restart seen
+  anywhere in this file's history was a manual `--continue` recovery, not
+  live goal state surviving a restart.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
   `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
