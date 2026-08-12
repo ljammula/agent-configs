@@ -519,33 +519,208 @@ model can complete but initially fumbles the verification loop on) and the
 hard to force deliberately on a small task). Both remain unit-test-only
 confirmed.
 
+## Update 2026-08-12 (later): live multi-round confirmation, background-kill investigation, Claude Code /goal comparison
+
+Four items from that day's todo list, worked in one session. Evidence and
+explicit non-coverage below — nothing in this section is inferred from the
+model's own self-report; every claim is either a grep against the raw
+session JSONL or an independently-rerun command.
+
+**1. First live confirmation of the nudge-and-reject loop actually
+rejecting a claim and looping (`rounds: 1`), not converging at round 0.**
+Methodology fix applied first: the 2026-08-12 same-day contamination bug
+(harness stdout landing inside the diffed repo) was avoided this time by
+launching via `nohup pi -p '...' --mode json > <scratchpad>/log.jsonl 2>&1
+< /dev/null &` with the `--mode json` log written *outside* the scratch
+git repo entirely (a sibling directory, not a subdirectory of it) —
+confirmed afterward the scratch repo's working tree contains only
+`inventory.py`/`test_inventory.py`/`.venv/`, no log file, so `git status`
+inside it was never contaminated. Task: a fresh scratch repo (git-inited,
+one commit), local Qwen route (`ai-stack-local`, same weaker route the
+2026-08-12 hardening targeted), goal condition asking for an
+atomic-write inventory module with pytest coverage including a
+`monkeypatch`ed-`os.replace`-failure test — chosen because "does a
+partial write leave the original file corrupted" is the kind of subtlety
+a first attempt plausibly gets wrong. Full JSON event log
+(`goal-gate-live-test-3.jsonl`, 25 turns, ~5m56s wall clock) hand-checked,
+not trusted from a summary:
+
+- `pi-goal-trace`: `{event: "complete", rounds: 1}` — the model's first
+  stop turn got a genuine plain `"Goal not yet met..."` nudge (grepped
+  directly: `Goal not yet met: "build inventory.py..."` appears in the
+  log), and its *second* stop turn's `GOAL COMPLETE` claim was accepted.
+  This is the first real, live exercise of the round-increment path with
+  `rounds > 0` across every confirming run to date (Go smoke test, Python
+  calc smoke test, personal-budget-simplifier delete/export/rename —
+  all `rounds: 0`) — n=4 now, 1 of 4 with a real nudge.
+- **Independently reverified, not trusted from the log**: ran `pytest`
+  myself against the agent's own `inventory.py`/`test_inventory.py`
+  afterward — 9/9 passed. Read `inventory.py` directly: `_save()` writes
+  to a `tempfile.mkstemp`-created temp file, `os.replace`s it onto the
+  real path, and cleans up the temp file on any exception; `remove()`
+  raises `ValueError` for both the unknown-sku and insufficient-stock
+  cases before calling `_save()` at all (file genuinely untouched on
+  those paths, not just claimed).
+- **Still not exercised even by this run**: the stall-escalation branch
+  (needs `STALL_ROUNDS_BEFORE_ESCALATION` = 2 *consecutive unchanged-diff*
+  plain nudges; this run only produced one nudge total, so escalation
+  logic never got a chance to trigger) and the `session_compact` reminder
+  path (compaction was deliberately forced by temporarily editing
+  `~/.pi/agent/settings.json`'s `compaction.reserveTokens` from `16384` to
+  `47500` for the duration of this one run only, reverted immediately
+  after — `session_compact` count in the log: **0**. The task finished in
+  25 turns without the running context ever crossing even that aggressive
+  threshold, so this specific forcing attempt didn't work either; the
+  path remains genuinely untested, not just under-tested). Both need a
+  dedicated follow-up run, not assumed covered by this one.
+- **Bonus, unplanned finding**: after goal-gate cleared, `cross-model-
+  review.ts`'s *settlement*-trigger fired for real for the first time
+  (`trigger: "settlement"` in the trace) — previously source/unit-tested
+  only (see the 2026-08-09 entry above and the matching todo item below).
+  Outcome was `model-rejected`/HTTP 400, i.e. the same `AI_REVIEW_MODEL`-
+  drift failure mode documented earlier in this file for the reactive
+  trigger — not re-diagnosed further here since it's off this task's
+  critical path, but worth noting the settlement trigger's *wiring* is now
+  live-confirmed even though this particular invocation didn't get a clean
+  review round out of it.
+
+**2. Background-process-kill root cause: could not be established
+retroactively; diagnostic channel checked and found unusable for this
+process class, not just for this incident.** `log show` (macOS unified
+log) queried for `process == "pi"` and `process == "node"` over a full
+7-day sanity-check window (not just the original 2026-08-09/10 incident
+window) returned zero matching entries in both cases — `pi` is a plain
+Node.js CLI script that does not emit unified-log (os_log/ASL) entries
+during normal operation on this host, so this channel was never going to
+surface a plain external `SIGKILL`/`SIGTERM`/`SIGHUP`, independent of log
+retention. No crash reports in `~/Library/Logs/DiagnosticReports/` for
+that window either — consistent with an external signal rather than a
+crash (a crash normally does generate a report). `last reboot` confirms
+no host restart in that window. **Conclusion: the specific 2026-08-09/10
+kills cannot be root-caused after the fact from this machine's forensic
+data** — say so plainly rather than assume it's now understood.
+**Actionable mitigation, tested live in this session rather than just
+proposed**: launched this run's `pi -p` process via
+`nohup ... < /dev/null > log 2>&1 & disown` and confirmed via
+`ps -p <pid> -o ppid,stat` that it reparented to PID 1 (init/launchd) with
+state `SN` — i.e., fully detached from the invoking shell/session, unlike
+an ordinary backgrounded child that stays in the parent's process group
+and would receive a `SIGHUP` if that parent shell/session ended. This
+run's process was never killed (I terminated it myself with `SIGTERM`
+after confirming `agent_settled` and no further pending work — a
+deliberate, logged shutdown, not an unexplained one). This is one clean
+run with the detached-launch mitigation, not a repro of the original
+failure mode with and without the fix — it demonstrates the mitigation
+doesn't break anything, not that it was the actual cause of the original
+kills. **Recommendation**: any future unattended `/goal`/`build_app.py`
+run on this machine should use this exact launch pattern
+(`nohup ... < /dev/null > logfile 2>&1 & disown`, log path outside the
+diffed repo) until/unless the original incident is independently
+reproduced and diagnosed with better tooling in place beforehand (e.g.
+wrapping the launch in a small supervisor that logs its own exit signal).
+
+**3. Multi-round survival within one uninterrupted process: now
+confirmed for `rounds: 1`, still not confirmed for "many."** Item 1 above
+is the first live case where the nudge fired and the model's next attempt
+was accepted, all within a single process — genuine, if modest,
+progress on this open item. It is *not* evidence of surviving "many"
+rounds; one round is not the multi-hour/many-nudge endurance case the
+original todo names, and the stall-escalation path specifically (which
+only engages after 2 *consecutive* unchanged-diff nudges) still has zero
+live rounds. Treat this as n=1 for `rounds > 0`, not as closing the item.
+
+**4. Claude Code's own `/goal` compared directly, not just guessed at.**
+Fetched Anthropic's own docs (`https://code.claude.com/docs/en/goal.md`)
+and cross-checked against this very session's own live Stop hook, which
+is a real `/goal` instance I directly observed rather than inferred:
+its condition was stated in free natural language and never asked me for
+a literal marker string, consistent with the docs below.
+
+- **Mechanism**: Claude Code sends `{condition, conversation-so-far}` to a
+  *separate* small/fast evaluator model (defaults to Haiku) after every
+  turn; the evaluator answers yes/no with a short reason. This is genuinely
+  a different model than the one doing the work, not a self-report — but
+  per the same docs, "it doesn't run commands or read files independently,"
+  i.e. it judges the transcript, not ground truth.
+- **No literal marker required** — the evaluator tolerates phrasing
+  variance by design, judging semantically against what the working model
+  "surfaced in the conversation."
+- **Round cap is opt-in per-goal** (write "...or stop after N turns" into
+  the condition text yourself), not a global default the way pi's
+  `PI_GOAL_MAX_ROUNDS` (15) is.
+- **Not documented anywhere findable**: whether the condition/reminder is
+  resent to the evaluator after context compaction. Flagging this as "not
+  documented," not "doesn't happen" — absence of a public doc section on
+  it isn't proof either way.
+
+**Structural gaps named, not just bugs:**
+
+1. *No fallback for near-marker phrasing.* This is the exact 2026-08-12
+   local-route failure mode (model said "done?"/"Everything is complete,"
+   the literal-regex gate never recognized it) — Claude Code's design
+   structurally cannot hit this specific failure, because completion isn't
+   gated on the working model reproducing an exact string at all.
+2. *The self-report-bias tradeoff is inverted, not equivalent, between the
+   two designs.* Claude Code accepts transcript-only judgment (some
+   self-report-adjacent risk, since the evaluator never independently
+   verifies) in exchange for phrasing robustness. `goal-gate.ts` accepts
+   phrasing brittleness in exchange for eliminating self-report risk
+   entirely — its only evidence is a real command's exit code bound to the
+   current diff hash, never any model's opinion, echoing this doc's
+   own prior finding elsewhere that self-report checks are unreliable.
+   Adding an LLM-judged fallback on pi's side to close gap #1 the way
+   Claude Code does it would reopen exactly the bias problem
+   `goal-gate.ts`'s docstring already warns against — it would just move
+   the self-report from "the marker" to "the evaluator's read of a
+   transcript it cannot independently verify," which Claude Code's own
+   docs concede is a real limitation of their design, not a solved
+   problem to imitate uncritically. **Not implemented as part of this
+   session** — recorded as a designed-but-not-shipped recommendation
+   (a small fixed allow-list of equivalent completion phrasings, accepted
+   *only* when they still co-occur with the same
+   `evidencePassesCurrentDiff` check the literal marker already requires,
+   so the evidence binding never weakens) pending explicit sign-off, per
+   the goal directive's "don't silently implement" instruction.
+3. *Compaction handling*: `goal-gate.ts`'s `session_compact` reminder is a
+   direct, shipped answer to a problem Claude Code's public docs don't
+   even confirm they've addressed — a case where pi's design is ahead on
+   this one dimension, not behind, though (per item 1 above) the
+   `session_compact` path itself remains live-unexercised here.
+4. *Round-cap default*: pi's global default caps every goal even if the
+   condition text says nothing about it; Claude Code's is safer *only if*
+   the user remembers to opt in per-goal, and silently uncapped otherwise.
+
 ## Todo
 
-- Live-exercise the stall-escalation and `session_compact`-reminder paths
-  of the 2026-08-12 goal-gate hardening specifically — the round-0-success
-  live retest (see update above) confirmed the marker convention and
-  evidence-binding still work cleanly on the local route, but neither of
-  those two newer code paths has fired in a live run yet.
-- Root-cause the two unexplained background-process kills hit live during
-  the `personal-budget-simplifier` `/goal` run (see update above) — both
-  left a real, sometimes-broken diff mid-edit with no warning. Unattended
-  multi-round `/goal`/`build_app.py` runs on this machine shouldn't be
-  treated as safe to walk away from until this is understood.
-- Confirm `/goal` survives many nudge rounds *within one uninterrupted
-  process* (the personal-budget-simplifier round that did run start-to-
-  finish worked correctly) — the multi-hour/multi-restart endurance case
-  is still unproven, since every restart there was a manual
-  `--continue` recovery, not the live goal state surviving. **Still open,
-  now n=3**: every single-process confirming run to date (Go smoke test,
-  Python calc smoke test, personal-budget-simplifier delete/export/rename
-  UI run) converged on the model's first genuine `GOAL COMPLETE` attempt
-  (`rounds: 0`) — the nudge-and-reject loop path itself (not just the
-  kickoff and single-shot-accept paths) still has no live confirmation.
-  Needs a task deliberately harder to get right in one pass, or a
-  deliberately-injected first-attempt failure. Note: the third run did get
-  live confirmation of a *different* multi-round loop — `cross-model-
-  review.ts`'s post-completion 3-round reviewer cycle, which caught and
-  drove a real fix for a crash bug goal-gate's own signal couldn't see.
+- Live-exercise the stall-escalation path specifically (needs 2
+  *consecutive* unchanged-diff plain nudges in one run — the 2026-08-12
+  later-day live test above produced exactly one nudge total, not two
+  consecutive stalled ones, so this remains untested) and the
+  `session_compact`-reminder path (the same run's deliberate
+  `reserveTokens` reduction to 47500 did not trigger a compaction before
+  the 25-turn task finished — `session_compact` count: 0 — so this also
+  remains untested; needs either a longer/more context-hungry task or a
+  still-more-aggressive forced threshold).
+- The two unexplained background-process kills from the
+  `personal-budget-simplifier` `/goal` run remain **not root-caused** —
+  macOS unified log and crash-report checks came back empty for the
+  incident window and (as a sanity check) for a full 7-day window
+  generally, meaning `pi`/`node` processes don't appear to emit forensic
+  data this way on this host at all, not just that the old window expired.
+  Treat this as closed-out-as-unknowable via this method, not solved.
+  Mitigation (detached `nohup ... & disown` launch, verified live to
+  reparent to init) is recommended for future unattended runs but is
+  unconfirmed against the original failure mode specifically, since it
+  was never reproduced.
+- Confirm `/goal` survives *many* nudge rounds within one uninterrupted
+  process, not just one. **Now n=4, 1 of 4 with `rounds > 0`** (the
+  2026-08-12 later-day inventory.py run above, `rounds: 1`) — real
+  progress on this item, but "many rounds" and the stall-escalation path
+  specifically are still unconfirmed; the multi-hour/multi-restart
+  endurance case (surviving actual process restarts, not just nudge
+  rounds within one process) is separately still open too, since every
+  restart seen so far was a manual `--continue` recovery, not live goal
+  state surviving a restart.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
   `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
