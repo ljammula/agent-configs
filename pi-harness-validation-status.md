@@ -955,6 +955,26 @@ model — both are worth naming as the next step rather than further
 identical attempts on this same model/task class, which is unlikely to
 produce a different outcome given the consistency of the pattern above.
 
+**One more confirming data point, added after further review feedback**:
+`goal-gate-live-test-9`, a deliberately finicky task (exact-string
+exception messages, comma-formatted currency output, round-trip parsing)
+chosen to maximize the chance of a partial miss on the first pass — a
+different failure mode than either "one hard algorithmic bug" (the
+concurrency attempt) or "ambiguous spec" (earlier smoke tests). Result:
+`{event: "complete", rounds: 0}` again, independently reverified (20/20
+`pytest`, `price.py` read directly and confirmed byte-exact against every
+stated requirement). **n=8 organic shipped-threshold runs now, 8/8 at
+`rounds ≤ 1`, across four genuinely distinct failure-mode categories**
+(ambiguous spec, documented concurrency weakness, explicit no-edit
+instruction reversed into real work, and now bundled finicky exact-match
+requirements). This is no longer a small-sample gap; it is a consistently
+reproduced property of this model on this harness. Continuing to run the
+same class of experiment is very unlikely to change the picture — a
+genuine many-round case would need a structurally different model or task
+source (e.g. a harder external benchmark, not another hand-authored
+scratch task), which is a different, larger undertaking than a single
+scratch-task live test and is named as such rather than attempted here.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
