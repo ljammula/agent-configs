@@ -35,6 +35,22 @@
  * instead; that script drives verification from outside the process for
  * exactly this reason (see its own header comment).
  *
+ * Known operational risk, root-caused 2026-08-12 (see
+ * pi-harness-validation-status.md's "root cause found via the inference
+ * host's own server-side logs" entry): a long-running `/goal` session's
+ * accumulated context can push a single request's *prefill* time past
+ * roughly two minutes on the local `ai-stack-local` route, and something
+ * client-side (not yet traced to its exact call site, but confirmed
+ * shorter than the vendored OpenAI SDK's own 10-minute default) aborts
+ * the connection right as the first token would otherwise arrive -- this
+ * is believed to have killed the `pi -p` process outright on at least two
+ * confirmed occasions, mid-round, on this exact goal-gate flow. Not a bug
+ * in this file (the timeout lives in the request/HTTP layer, not
+ * goal-gate.ts's own logic), and this extension's session-scoped-only
+ * state (see above) means a kill here loses the active goal entirely --
+ * documented here so a future reader debugging a `/goal` session that
+ * silently stopped mid-build knows where to look first.
+ *
  * Non-Claude-model hardening (live-confirmed 2026-08-11/12 on the local
  * ai-stack route, see pi-harness-validation-status.md): a weaker model can
  * run an entire multi-round goal without ever attempting the `GOAL
