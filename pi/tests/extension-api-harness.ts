@@ -35,6 +35,7 @@ export class ExtensionHarness {
 	readonly notifications: { message: string; type: string | undefined }[] = [];
 	readonly handlers = new Map<EventType, Handler[]>();
 	readonly commands = new Map<string, RegisteredCommandCall["options"]>();
+	readonly tools = new Map<string, any>();
 	readonly api: ExtensionAPI;
 	readonly context: ExtensionContext;
 	private activeTools: string[];
@@ -86,7 +87,9 @@ export class ExtensionHarness {
 			},
 			getAllTools: () => [],
 			registerProvider: () => undefined,
-			registerTool: () => undefined,
+			registerTool: (toolDef: any) => {
+				this.tools.set(toolDef.name, toolDef);
+			},
 			registerCommand: (name: string, commandOptions: any) => {
 				this.commands.set(name, commandOptions);
 			},

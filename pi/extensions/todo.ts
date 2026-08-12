@@ -276,6 +276,25 @@ export default function (pi: ExtensionAPI) {
 
 				case "clear":
 					return new Text(theme.fg("success", "✓ ") + theme.fg("muted", "Cleared all todos"), 0, 0);
+
+				default: {
+					// Reached when `details` is a real (truthy) object but doesn't match
+					// the TodoDetails shape -- e.g. `{}`, which is exactly what pi's own
+					// tool-argument validator returns as `details` for a rejected call
+					// (malformed/incomplete arguments from a model that didn't emit valid
+					// `todo` tool-call syntax). Falling through this switch with no default
+					// used to return `undefined`, which tool-execution.js's success-path
+					// `renderContainer.addChild(component)` pushes unguarded -- crashing the
+					// whole TUI on the next render (Box.render: "Cannot read properties of
+					// undefined (reading 'render')"). Live-crashed and root-caused
+					// 2026-08-12 against a real `/goal` session
+					// (personal-budget-simplifier, OTEL-metrics); deterministically
+					// reproduced by calling this exact function with `details: {}`, the
+					// shape a rejected call actually produces. Render the raw result text
+					// instead, same fallback the `!details` branch above already uses.
+					const text = result.content[0];
+					return new Text(text?.type === "text" ? text.text : "", 0, 0);
+				}
 			}
 		},
 	});
