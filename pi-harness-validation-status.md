@@ -1108,6 +1108,55 @@ here because "we looked for a real code change and correctly declined one
 we found to be unsafe" is a materially different, more defensible
 position than either shipping it uncritically or not looking at all.
 
+## Update 2026-08-12 (adjacent finding): a second, unrelated crash found and fixed on the same live session — `todo.ts`'s TUI renderer
+
+Not part of the four-item goal-gate.ts hardening task, but found and
+fixed the same day, on the exact same personal-budget-simplifier
+OTEL-metrics `/goal` session, so recorded here for continuity. The user
+hit a real interactive-mode crash (`pi` exited with an uncaught
+`TypeError: Cannot read properties of undefined (reading 'render')` in
+`pi-tui`'s `Box.render`) while running `/goal implement OTEL metrics`.
+
+**Root cause, live-traced from the actual crashed session's log**
+(`~/.pi/agent/sessions/--Users-kanna-code-personal-budget-simplifier--/
+2026-08-12T19-29-54-282Z_...jsonl`, 37 entries, ends immediately at the
+crash): the local model emitted a malformed `todo` tool call
+(`{"toggle":"<parameter=id>\n1"}`), which pi's own JSON-schema argument
+validator correctly rejected, producing a tool result with `details: {}`
+(a real, truthy object -- not `undefined`) and `isError: true`. This
+repo's `pi/extensions/todo.ts` (the actual loaded extension, confirmed
+via `~/.pi/agent/extensions/todo.ts`'s symlink target -- not the
+unrelated npm-package example that happens to share the same bug) had a
+`switch (details.action)` in `renderResult` covering `list`/`add`/
+`toggle`/`clear` with **no `default:` case**. `details.action` is
+`undefined` for this shape, matches nothing, and the function **silently
+returns `undefined`** without throwing. `pi-coding-agent`'s
+`tool-execution.js` pushes that return value into a rendering `Box`'s
+children array with no undefined-guard on its success path (unlike the
+sibling `resultRenderer`-missing branch a few lines away, which does
+guard) -- the next render tick crashes calling `.render()` on that
+`undefined` entry.
+
+**Deterministically reproduced, not just reasoned through**: wrote a
+standalone script that imports the real (pre-fix) `todo.ts`, captures its
+registered tool definition, and calls its actual `renderResult` with the
+exact `details: {}` shape pi's validator produces -- confirmed it
+returned `undefined`. This is a universal bug (any model that trips
+pi's own argument validation on a `todo` call hits it, not something
+specific to the local weak route), just first surfaced here by this
+model's tool-call fragility.
+
+**Fixed**: added a `default:` case to the switch, falling back to the raw
+result text -- the same fallback the existing `!details` branch one line
+above already uses. Re-ran the same deterministic repro script against
+the fixed file: now returns a real `Text` component. Added
+`pi/tests/todo.test.ts` (3 new tests: the regression case, all four real
+actions still render correctly, the explicit-error branch still works)
+and extended `tests/extension-api-harness.ts` to capture registered tools
+via `registerTool` (previously a no-op stub; no prior test in this repo
+exercised a tool's renderer functions in isolation). `npm test`: 159/159.
+`tsc --noEmit`: clean. Commit `ac187ef`.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
