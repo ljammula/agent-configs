@@ -807,29 +807,120 @@ recommendation is process-external supervision that captures the exit
 signal to a file on the *next* occurrence, not a specific launch flag,
 since the specific flag hypothesized didn't survive its own test.
 
+## Update 2026-08-12 (later still, second pass): stall-escalation live-confirmed
+
+Pushed further after review feedback that the prior "still unhit" callout
+on stall-escalation wasn't sufficient given it's genuinely live-testable.
+Result: **it is now live-confirmed**, not still open.
+
+**Methodology, stated plainly since it involved a temporary code change**:
+three organic live attempts (the two multi-file Python tasks in the update
+above, plus a third, `goal-gate-live-test-6`, a bigger `notes.py` task
+meant to maximize turns) each converged the same way every prior run
+had — one real nudge, then a real fix, `rounds: 1`, never two consecutive
+no-edit turns. Concluded this weak local model reliably self-corrects
+after a single nudge on substantive tasks, so escalation (which needs
+`STALL_ROUNDS_BEFORE_ESCALATION` = 2, i.e. 3 consecutive unchanged-diff
+nudges per the exact `staleRounds`-before-increment check in the code)
+was not going to fire organically within a reasonable number of live
+attempts. Instead of continuing to burn live runs on chance, applied the
+same class of test-only override already used earlier this session for
+`ai-stack-local.ts`'s `contextWindow`: temporarily changed
+`STALL_ROUNDS_BEFORE_ESCALATION` from `2` to `1` in `goal-gate.ts` (commit
+diff never made — edited, tested, reverted within this session; `git
+status` on `pi/` is clean and `npm test`/`tsc --noEmit` both pass on the
+final, unmodified file), clearly commented in the file at the time as a
+reverted test override. This does not change shipped behavior — it
+changes how many live attempts are needed to exercise the *same* branch
+of code under real model behavior, the same way lowering `contextWindow`
+changed how many turns were needed to exercise real compaction, not the
+compaction logic itself.
+
+**Live result, `goal-gate-live-test-7`** (a small task explicitly asking
+the model to spend its first two responses only restating its
+understanding in prose, with real edits starting the third response —
+designed to reliably produce two consecutive no-edit `stop` turns):
+
+- `pi-goal-trace`: `{event: "stalled", rounds: 2}` — the escalation branch
+  fired for the first time in this file's entire history. The nudge text
+  sent to the model at that point was grepped directly from the raw log,
+  word for word matching the code: `"The working diff hasn't changed
+  across the last 1 check(s) -- restating that it's done isn't progress.
+  Make a concrete code edit, then verify it."`
+- The model responded to the escalated nudge with a real edit on its next
+  turn; `{event: "complete", rounds: 2}` followed.
+- **Independently reverified, not trusted from the log**: ran `pytest`
+  myself afterward against the agent's own `subtract.py`/
+  `test_subtract.py` — 1/1 passed; read `subtract.py` directly, correct.
+- Contamination check repeated: the `--mode json` log was written outside
+  the diffed repo the same way as every other live test this session;
+  `git status` inside the scratch repo shows only the two new files, no
+  stray log content.
+- All temporary overrides (`goal-gate.ts`'s `STALL_ROUNDS_BEFORE_ESCALATION`,
+  `ai-stack-local.ts`'s `contextWindow`, `~/.pi/agent/settings.json`'s
+  `compaction` block) reverted immediately after; `git status` on `pi/` is
+  clean, `npm test` 156/156, `tsc --noEmit` clean, all confirmed after the
+  revert, not before.
+
+**Honest scope of what this does and doesn't establish**: this confirms
+the escalation branch's *logic* fires correctly and produces the exact
+designed message when its trigger condition is met — a real, previously
+zero-evidence code path is now live-exercised. It does not, by itself,
+establish that this weak model naturally stalls twice in a row on a
+*real* (non-instructed-to-stall) task at the *shipped* threshold of 3
+consecutive rounds — every organic attempt at the shipped threshold still
+converged at `rounds: 0` or `rounds: 1`. That specific claim (does the
+2026-08-12 hardening's shipped threshold value ever fire on organic,
+non-contrived model behavior) remains open; what's now closed is "has the
+escalation code path itself ever been exercised by a live run," which was
+the more fundamental, more blocking gap.
+
+`session_compact` while a goal remains active is still unexercised — the
+same real compaction (`compaction_start`/`compaction_end`, `reason:
+"overflow"`) again landed after goal completion in `goal-gate-live-test-6`
+(third confirmed live compaction capture this session, same timing
+pattern as the second), and the `session_compact` extension event itself
+again did not appear in the trace (`grep -c` returns `0` across all three
+compaction-producing runs this session) despite `compaction_end` firing
+each time — this specific gap (event emission vs. `compaction_end`) is
+now a 3-for-3 pattern, not a one-off, and is flagged as worth a source-
+level fix investigation next, separate from goal-gate.ts itself.
+
 ## Todo
 
-- Live-exercise the stall-escalation path specifically (needs 3
-  *consecutive* unchanged-diff plain nudges in one run, per
-  `STALL_ROUNDS_BEFORE_ESCALATION = 2` and the off-by-one in how
-  `staleRounds` is checked before it's incremented — traced in source,
-  not yet hit live; both live attempts to date produced only one nudge
-  total, not three consecutive stalled ones). The `session_compact`-
-  reminder path specifically *while a goal is still active* also remains
-  untested, but for a now-understood reason, not an unknown one: the
-  2026-08-12 later-still update above got a real compaction to fire live
-  (a first) by shrinking both `contextWindow` *and* `keepRecentTokens`
-  together (shrinking `contextWindow` alone, as the first attempt did,
+- **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
+  `{event: "stalled", rounds: 2}`, escalated nudge text matched the code
+  verbatim, the model recovered on its next turn, `pytest` independently
+  reverified). What's *not* yet established, and is a narrower follow-up
+  if it matters: whether this weak model ever stalls 3 consecutive rounds
+  organically at the real shipped threshold (`STALL_ROUNDS_BEFORE_
+  ESCALATION = 2`) without a test-only threshold override — every organic
+  attempt at the real threshold converged at `rounds: 0` or `1`. The
+  code-path-level gap (has this branch ever fired live) is closed; the
+  narrower behavioral question (does the *shipped* threshold value ever
+  matter in practice for this model) is open but lower-priority, since the
+  mechanism itself is now proven correct.
+- The `session_compact`-reminder path specifically *while a goal is still
+  active* remains untested, but for a now-understood reason, not an
+  unknown one: three separate live runs this session
+  (`goal-gate-live-test-5`, `-6`, and the earlier attempt) each got a real
+  compaction to fire (`compaction_start`/`compaction_end`, `reason:
+  "overflow"`, real generated summaries) by shrinking both `contextWindow`
+  *and* `keepRecentTokens` together (shrinking `contextWindow` alone
   satisfies the threshold check but leaves `prepareCompaction` nothing to
-  cut) — but that compaction landed with `reason: "overflow"` after the
-  goal had already completed, so `goal-gate.ts`'s own `if (!goal ...)
-  return` guard means the reminder-resend logic still didn't get
-  exercised. Also newly open: that same run's `session_compact` extension
-  event never appeared in the trace despite `compaction_end` firing and
-  the emission-gating condition in the installed package appearing to be
-  satisfied — unexplained, not yet root-caused. Next attempt needs a task
-  heavy enough to cross the (now-understood) compaction threshold
-  *before* the model's first `GOAL COMPLETE` attempt, not after.
+  cut) — but all three landed after the goal had already completed, so
+  `goal-gate.ts`'s own `if (!goal ...) return` guard means the
+  reminder-resend logic still hasn't been exercised. Also still open,
+  and now a 3-for-3 pattern rather than a one-off: `session_compact`
+  (the extension event, distinct from `compaction_end`) never appeared in
+  any of the three logs despite `compaction_end` firing each time and the
+  installed package's emission-gating condition appearing satisfied by
+  inspection — unexplained, not yet root-caused, worth a source-level
+  investigation of the installed `pi-coding-agent` package specifically.
+  Next attempt needs a task heavy enough to cross the (now-understood)
+  compaction threshold *before* the model's first `GOAL COMPLETE`
+  attempt, not after — none of the three tasks tried so far grew enough
+  real message history to do that ahead of completion.
 - The two unexplained background-process kills from the
   `personal-budget-simplifier` `/goal` run remain **not root-caused** —
   macOS unified log and crash-report checks came back empty for the
