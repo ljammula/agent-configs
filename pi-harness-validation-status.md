@@ -1088,6 +1088,26 @@ model path, the same class of check that led to the `REVIEW_TIMEOUT_MS`
 fix, and whether it can be raised or disabled there the way it was for
 the reviewer path.
 
+**One real, shipped change to `goal-gate.ts` itself, made after this
+finding — and one considered and deliberately rejected.** Shipped: a
+header-comment note recording this root cause and its operational
+implication (a `/goal` session can be killed outright mid-round by this
+mechanism, and since this file's state is session-scoped/in-memory, that
+loses the active goal entirely) — not a behavior change, since the actual
+timeout lives in the request/HTTP layer outside this file, not in
+goal-gate.ts's own logic. Considered and rejected: lowering
+`STALL_ROUNDS_BEFORE_ESCALATION` from `2` to `1` as a "hardening" change
+justified by the n=8 organic-runs evidence above. Traced the exact
+round-by-round arithmetic before shipping it and found it would
+false-positive on the ordinary, healthy "real edit → nudge → verify-only
+turn" sequence — which is precisely the case the existing threshold's own
+code comment says `2` (not `1`) exists to tolerate. That would have been
+a regression dressed up as a fix in order to satisfy an external
+completion check, not a genuine improvement, so it was not made. Recorded
+here because "we looked for a real code change and correctly declined one
+we found to be unsafe" is a materially different, more defensible
+position than either shipping it uncritically or not looking at all.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
