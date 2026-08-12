@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import goalGate, { resolveKickoffTimeoutMs, resolveMaxRounds } from "../extensions/goal-gate.ts";
-import { ExtensionHarness } from "./extension-api-harness.ts";
+import { ExtensionHarness, type ExecCall } from "./extension-api-harness.ts";
+
+function result(code: number, stdout = "") {
+	return { code, stdout, stderr: "", killed: false };
+}
+
+// snapshotDiff() (lib/verification.ts) needs `git rev-parse`/`diff`/`status`
+// to resolve to something material for evidencePassesCurrentDiff() to ever
+// return true. `diffState.value` is the fixture's current diff content --
+// tests that need to simulate an edit landing between a passing
+// verification and a later completion claim mutate it mid-test; everyone
+// else can leave it alone and get a stable, matching diff hash throughout.
+function gitFixture(initialDiff = "diff-v1") {
+	const diffState = { value: initialDiff };
+	const exec = ({ command, args }: ExecCall) => {
+		if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+		if (command === "git" && args[0] === "diff") return result(0, diffState.value);
+		if (command === "git" && args[0] === "status") return result(0, " M app.ts\n");
+		return result(1);
+	};
+	return { diffState, exec };
+}
 
 function stopTurn(text: string) {
 	return {
@@ -127,7 +148,7 @@ test("GOAL COMPLETE without a passing verification is rejected and nudged", asyn
 	await setGoal(harness, "add a dashboard");
 	await harness.emit(stopTurn("GOAL COMPLETE: dashboard renders."));
 	assert.equal(harness.messages.length, 2);
-	assert.match(String(harness.messages[1].content), /did not pass \(or none has/);
+	assert.match(String(harness.messages[1].content), /did not pass against the current diff/);
 });
 
 test("GOAL COMPLETE with a failing verification is rejected", async () => {
@@ -140,7 +161,8 @@ test("GOAL COMPLETE with a failing verification is rejected", async () => {
 });
 
 test("GOAL COMPLETE backed by a passing verification clears the goal", async () => {
-	const harness = new ExtensionHarness();
+	const { exec } = gitFixture();
+	const harness = new ExtensionHarness({ exec });
 	goalGate(harness.api);
 	await setGoal(harness, "add a dashboard");
 	await passingVerify(harness);
@@ -171,7 +193,8 @@ test("GOAL COMPLETE followed by more prose is not treated as a final-line comple
 });
 
 test("GOAL COMPLETE as the true final line is still accepted with trailing blank lines", async () => {
-	const harness = new ExtensionHarness();
+	const { exec } = gitFixture();
+	const harness = new ExtensionHarness({ exec });
 	goalGate(harness.api);
 	await setGoal(harness, "add a dashboard");
 	await passingVerify(harness);
@@ -187,7 +210,8 @@ test("an ordinary not-yet-met nudge does not discard a genuine pass -- a later c
 	// tool call too, not just genuine stopping points. Wiping the pass
 	// signal on *every* such nudge meant a real pass right before a real
 	// GOAL COMPLETE kept getting rejected as unverified.
-	const harness = new ExtensionHarness();
+	const { exec } = gitFixture();
+	const harness = new ExtensionHarness({ exec });
 	goalGate(harness.api);
 	await setGoal(harness, "add a dashboard");
 	await passingVerify(harness);
@@ -195,6 +219,25 @@ test("an ordinary not-yet-met nudge does not discard a genuine pass -- a later c
 	await harness.emit(stopTurn("GOAL COMPLETE: done now."));
 	assert.equal(harness.messages.length, 2); // kickoff + the one "not yet met" nudge, then cleared
 	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "complete"), true);
+});
+
+test("a pass followed by a further unverified edit does not back an immediate completion claim", async () => {
+	// Regression test for the diff-hash-binding fix: evidence used to be a
+	// bare pass/fail flag with no tie to *which* diff it verified, so a real
+	// pass followed by more edits and an immediate GOAL COMPLETE could slip
+	// through on stale evidence. evidencePassesCurrentDiff() (shared with
+	// quality-gate.ts) now requires the verification's diff hash to match
+	// the diff at the moment of the claim.
+	const { diffState, exec } = gitFixture("diff-v1");
+	const harness = new ExtensionHarness({ exec });
+	goalGate(harness.api);
+	await setGoal(harness, "add a dashboard");
+	await passingVerify(harness); // passes against diff-v1
+	diffState.value = "diff-v2"; // further edit lands, never verified
+	await harness.emit(stopTurn("GOAL COMPLETE: done now."));
+	assert.equal(harness.messages.length, 2); // rejected, nudged instead of cleared
+	assert.match(String(harness.messages[1].content), /did not pass against the current diff/);
+	assert.equal(harness.entries.some((e) => e.type === "pi-goal-trace" && (e.data as any).event === "complete"), false);
 });
 
 test("a rejected completion claim resets the signal -- immediately repeating the claim still fails", async () => {

@@ -6,10 +6,14 @@
  * stopping point (`stopReason === "stop"`), the gate checks whether the
  * model has actually earned the right to stop: its final message must end
  * with a `GOAL COMPLETE: <evidence>` line, and the most recent broad
- * verification command run since then must have passed. Absent either, the
- * gate nudges the model to keep working instead of letting the turn -- and,
- * under `pi -p`, the process -- end. Bounded by `PI_GOAL_MAX_ROUNDS`
- * (default 15) so a goal that can't converge doesn't nudge forever.
+ * verification command run since then must have passed against the diff as
+ * it stands *right now* -- the same diff-hash-bound evidence check
+ * quality-gate.ts uses (lib/verification.ts's `evidencePassesCurrentDiff`),
+ * so a pass followed by further unverified edits can't be reused to back a
+ * later completion claim. Absent either, the gate nudges the model to keep
+ * working instead of letting the turn -- and, under `pi -p`, the process --
+ * end. Bounded by `PI_GOAL_MAX_ROUNDS` (default 15) so a goal that can't
+ * converge doesn't nudge forever.
  *
  * Deliberately does not call out to an LLM to judge completion the way
  * cross-model-review.ts does: AGENTS.md documents that a small model told to
@@ -32,7 +36,14 @@
  * exactly this reason (see its own header comment).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { BROAD_VERIFICATION_PATTERNS, verificationPipelineCanMaskFailure } from "./lib/verification.ts";
+import { isStaleContextError } from "./lib/stale-context.ts";
+import {
+	BROAD_VERIFICATION_PATTERNS,
+	evidencePassesCurrentDiff,
+	snapshotDiff,
+	verificationPipelineCanMaskFailure,
+	type VerificationEvidence,
+} from "./lib/verification.ts";
 
 const DEFAULT_MAX_ROUNDS = 15;
 const COMPLETE_MARKER = /^GOAL COMPLETE:\s*(.+)$/i;
@@ -98,15 +109,16 @@ function kickoffMessage(condition: string): string {
 
 export default function goalGate(pi: ExtensionAPI): void {
 	let goal: GoalState | undefined;
-	// Reflects only the *most recent* broad verification command's outcome.
-	// Reset to "none" specifically when a GOAL COMPLETE claim is rejected
-	// (see the turn_end handler below for why only that path resets it, not
-	// every nudge). Known, accepted gap: unlike quality-gate.ts, this is not
-	// bound to the current diff hash, so a pass followed by further
-	// unverified edits and an immediate completion claim can still slip
-	// through. goal-gate deliberately trades that precision for simplicity;
-	// tighten it if this gap is ever hit live.
-	let lastVerification: "pass" | "fail" | "none" = "none";
+	// The most recent broad verification command's outcome, bound to the
+	// diff it actually ran against -- same VerificationEvidence shape and
+	// evidencePassesCurrentDiff() check quality-gate.ts uses. Reset to
+	// undefined specifically when a GOAL COMPLETE claim is rejected (see the
+	// turn_end handler below for why only that path resets it, not every
+	// nudge). Previously this only tracked pass/fail with no diff binding,
+	// so a pass followed by further unverified edits and an immediate
+	// completion claim could slip through; tightened to close that gap.
+	let evidence: VerificationEvidence | undefined;
+	let baseSha: string | undefined;
 
 	// `ctx.waitForIdle()` returns immediately if the agent is idle *right
 	// now* (confirmed by reading agent-session.js: `if (this.isIdle) return`).
@@ -119,8 +131,12 @@ export default function goalGate(pi: ExtensionAPI): void {
 	// Wait for the turn to actually *start* first (bounded, in case it
 	// never does), then wait for it to finish.
 	const agentStartWaiters: (() => void)[] = [];
-	pi.on("agent_start", () => {
+	pi.on("agent_start", async (_event, ctx) => {
 		for (const resolve of agentStartWaiters.splice(0)) resolve();
+		if (!baseSha) {
+			const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: 5000 }).catch(() => undefined);
+			if (result?.code === 0) baseSha = result.stdout.trim();
+		}
 	});
 	function waitForNextAgentStart(timeoutMs = resolveKickoffTimeoutMs()): Promise<void> {
 		return new Promise((resolve) => {
@@ -157,7 +173,7 @@ export default function goalGate(pi: ExtensionAPI): void {
 				return;
 			}
 			goal = { condition: args, rounds: 0, maxRounds: resolveMaxRounds() };
-			lastVerification = "none";
+			evidence = undefined;
 			ctx.ui.notify(`Goal set: ${args}`, "info");
 			pi.sendUserMessage(kickoffMessage(args), { deliverAs: "followUp" });
 			// Under `pi -p`, the process exits once this command handler's
@@ -170,21 +186,47 @@ export default function goalGate(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.on("tool_result", (event) => {
+	pi.on("tool_result", async (event, ctx) => {
 		if (event.toolName !== "bash") return;
 		const command = event.input?.command;
 		if (typeof command !== "string" || !BROAD_VERIFICATION_PATTERNS.some((re) => re.test(command))) return;
-		lastVerification = event.isError || verificationPipelineCanMaskFailure(command) ? "fail" : "pass";
+		try {
+			const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+			const inconclusive = event.isError || verificationPipelineCanMaskFailure(command);
+			evidence = {
+				command,
+				diffHash: snapshot.hash,
+				startedAt: Date.now(),
+				endedAt: Date.now(),
+				exitCode: inconclusive ? 1 : 0,
+				truncated: false,
+			};
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
+		}
 	});
 
-	pi.on("turn_end", (event) => {
+	pi.on("turn_end", async (event, ctx) => {
 		if (!goal) return;
 		const { message } = event;
 		if (message.role !== "assistant" || message.stopReason !== "stop") return;
 
 		const declaredComplete = COMPLETE_MARKER.test(lastNonEmptyLine(messageText(message)));
 
-		if (declaredComplete && lastVerification === "pass") {
+		// Only bother snapshotting the diff when a completion claim was
+		// actually made -- an ordinary "not yet met" nudge doesn't need it.
+		let verified = false;
+		if (declaredComplete) {
+			try {
+				const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
+				verified = evidencePassesCurrentDiff(evidence, snapshot);
+			} catch (error) {
+				if (!isStaleContextError(error)) throw error;
+				return; // stale session; a fresh extension instance owns whatever comes next
+			}
+		}
+
+		if (declaredComplete && verified) {
 			pi.appendEntry("pi-goal-trace", { event: "complete", condition: goal.condition, rounds: goal.rounds });
 			goal = undefined;
 			return;
@@ -198,20 +240,21 @@ export default function goalGate(pi: ExtensionAPI): void {
 		}
 
 		const nudge = declaredComplete
-			? "You wrote GOAL COMPLETE but the most recent verification command did not pass (or none has " +
-				"run since). Run the project's real verification command and only claim complete once it actually passes."
+			? "You wrote GOAL COMPLETE but the most recent verification command did not pass against the current diff " +
+				"(or none has run since). Run the project's real verification command against the latest edits and only " +
+				"claim complete once it actually passes."
 			: `Goal not yet met: "${goal.condition}". Keep working -- make the next concrete edit, then verify it.`;
-		// Only discard the current pass/fail signal on a *rejected completion
-		// claim* -- that's the one case where reusing it would be wrong (the
-		// model must re-verify before claiming again). A plain "not yet met"
-		// nudge fires on every stopReason:"stop" turn, including ordinary
-		// mid-task narrative with no tool call attached (exactly what
+		// Only discard the current evidence on a *rejected completion claim* --
+		// that's the one case where reusing it would be wrong (the model must
+		// re-verify before claiming again). A plain "not yet met" nudge fires
+		// on every stopReason:"stop" turn, including ordinary mid-task
+		// narrative with no tool call attached (exactly what
 		// continuation-nudge.ts calls an abandoned turn) -- live-confirmed
 		// 2026-08-09: resetting on *every* nudge wiped out a genuine pass
 		// long before the model's next real GOAL COMPLETE attempt, so a
 		// truthful claim kept getting rejected as unverified. See
 		// pi-harness-validation-status.md's goal-gate entry.
-		if (declaredComplete) lastVerification = "none";
+		if (declaredComplete) evidence = undefined;
 		pi.sendUserMessage(`${nudge}\n\n(round ${goal.rounds}/${goal.maxRounds})`, { deliverAs: "followUp" });
 	});
 }

@@ -403,6 +403,32 @@ doesn't commit on its own, so this same gap will recur on the next run
 unless the prompt explicitly asks for a commit or goal-gate grows its own
 opinion on it.
 
+## Update 2026-08-12: goal-gate's verification signal is now diff-hash-bound
+
+Closes the gap named in the 2026-08-09 entry above ("known, accepted gap
+that this signal isn't diff-hash-bound the way `quality-gate.ts`'s is"):
+`goal-gate.ts` tracked verification as a bare `"pass" | "fail" | "none"`
+flag with no tie to *which* diff it verified, so a real pass followed by
+further unverified edits and an immediate `GOAL COMPLETE` claim could slip
+through. `evidence` is now the same `VerificationEvidence` shape and
+`evidencePassesCurrentDiff()` check `quality-gate.ts` already uses (shared
+via `lib/verification.ts`): a completion claim only passes if the most
+recent broad verification's diff hash matches the diff as it stands at the
+moment of the claim. `agent_start` now also captures `baseSha` the same
+way `quality-gate.ts` does, and both the `tool_result` and `turn_end`
+handlers wrap their new `snapshotDiff()` calls in the same
+`isStaleContextError` guard `quality-gate.ts` uses, since a goal-gate run
+can span a mid-session compaction (real, live example: the personal-
+budget-simplifier OTEL-metrics run recorded above hit a 2026-08-10
+compaction event mid-goal).
+
+Not live-tested yet -- this closes a known code-level gap named in an
+earlier real run's writeup, but the fix itself hasn't been exercised
+against a live run where an unverified edit actually lands between a pass
+and a completion claim. `npm test`: 149/149 (1 new regression test added,
+`pi/tests/goal-gate.test.ts`, "a pass followed by a further unverified
+edit does not back an immediate completion claim"); `tsc --noEmit`: clean.
+
 ## Todo
 
 - Root-cause the two unexplained background-process kills hit live during
