@@ -988,6 +988,106 @@ stop as an unfinished search: "many rounds" and "root cause" were treated
 as open experimental questions and answered as far as this machine's
 available evidence allows, not abandoned mid-investigation.
 
+## Update 2026-08-12 (real break on item 2): root cause found via the inference host's own server-side logs
+
+Everything above exhausted *this* machine's forensic trail (unified log,
+crash reports, shell history) — but the two kills happened to a process
+that was also a network client of `kannasmacstudio.lan`'s model-serving
+stack, and that stack keeps its own independent, durable, plain-text
+request logs (`~/code/ai-stack/logs/{kv_proxy,qwen36}.log` on the LAN
+host), a source not checked in any prior pass of this investigation. SSH'd
+in directly (`ssh kannasmacstudio.lan`, read-only) and searched the actual
+incident window.
+
+**Found both kills, independently timestamped from the server side, not
+inferred.** `personal-budget-simplifier`'s real commit history for
+2026-08-09 (`git log --since=2026-08-08 --until=2026-08-11`): commits at
+07:46, 07:49, 09:02:52, 12:20:45, and 16:59:07 (all `-0500`/CDT). Cross-
+referenced against `qwen36.log` (the model server's own request log) for
+that window, filtered to `stream_closed_before_completion` (a
+server-side warning meaning the client's HTTP connection dropped mid-
+request) — exactly **two** hits in the entire 2026-08-09/10 window,
+matching "killed twice" precisely:
+
+1. `2026-08-09 09:12:05` — `Prefill completed: prompt_tokens=35142
+   elapsed=121.377s`, `Decode started: time_to_first_token=121.448s`,
+   immediately followed by `Request failed: ... stream_closed_before_
+   completion in_flight=0`. Landed 9 minutes 13 seconds after the
+   09:02:52 commit — i.e., mid-round on the very next request.
+2. `2026-08-09 16:59:11` — `Prefill completed: prompt_tokens=43162
+   elapsed=155.325s`, `Decode started: time_to_first_token=155.429s`,
+   same immediate `stream_closed_before_completion in_flight=0`. Landed
+   **4 seconds** after the 16:59:07 commit.
+
+**Both events share one precise, mechanistic shape, not a coincidence of
+timing alone**: in both cases the server was completely healthy
+(`in_flight=0`, continued serving unrelated requests normally seconds
+later — confirmed by reading the surrounding log lines, not just the
+matching ones) and had just finished a long *prefill* (121s and 155s
+respectively, on large 35k/43k-token prompts — consistent with a
+long-running multi-hour `/goal` session's accumulated context) — the
+client's connection was torn down in the same second the server was
+about to emit its first output token, both times. This is not a GPU crash,
+not an OOM (the `[METAL] ... OutOfMemory` error visible in this same
+host's flight-recorder summary field is a stale/unrelated field from a
+much earlier timestamp, unix `1785668966` ≈ 2026-07-31, not from this
+incident window — checked explicitly to avoid a false correlation). It is
+a **client-side abandonment of an in-flight request specifically when the
+server goes quiet for roughly two minutes waiting on a large prefill**,
+not a fixed-duration timer (121s and 155s are close but not identical, so
+this reads as an idle/no-data timeout rather than a hardcoded total-
+duration one).
+
+**This is not a novel failure class for this codebase — it is the same
+shape as an already-fixed, already-documented bug, just on a different
+path.** `pi-harness-history.md`'s own record: `cross-model-review.ts`'s
+`REVIEW_TIMEOUT_MS` was originally `120_000` (120s) and was raised to
+`240_000` after a real reviewer request took `121.4s` and would have been
+silently aborted 1.4s before finishing — see this file's `cross-model-
+review.ts` entry above (commit `83ca0cb`). The two kills found here are
+the same ~120s-class timeout, on the *primary* model request path instead
+of the reviewer path, hitting exactly the scenario that path is
+structurally exposed to: a long-running `/goal` session's context grows
+large enough that prefill alone (not generation, prefill) exceeds
+whatever client-side "how long to wait for a response" limit governs the
+primary request, and the connection — and, per the doc's original
+account, the whole `pi -p` process along with it — gets torn down.
+
+**What's confirmed vs. what's still open, stated precisely**: confirmed —
+the trigger condition (large-prompt prefill exceeding roughly two
+minutes), the mechanism class (client-side idle/response timeout, not a
+server crash), and that this is the same bug family as a previously-fixed
+issue in this exact codebase. Not yet confirmed — the exact piece of
+software enforcing the timeout (no local session file exists for this
+specific 2026-08-09 build at all, so there is no client-side log to
+directly name which layer — pi's own HTTP client, Node's default socket
+timeout, or an external supervisor watching for silence — issued the
+abort; only the server's view of the dropped connection is available).
+
+**One candidate ruled out, narrowing this further**: the proxy's own
+access log records the client's user agent as `"OpenAI/JS 6.26.0"` on
+every one of these requests — and the `openai` npm package vendored under
+the installed `pi-coding-agent` (`node_modules/openai/package.json`) is
+exactly version `6.26.0`, confirming this is genuinely pi's own request
+client, not a coincidental version match. That SDK's own default request
+timeout (`client.js`: `DEFAULT_TIMEOUT`) is **10 minutes**, not ~2 minutes
+— so the abort is not the OpenAI SDK's own configured total-timeout
+firing early; something shorter, layered either in front of it (a
+supervisor watching for output silence) or via a per-request
+`timeoutMs` override this investigation didn't trace to its exact call
+site, is the actual cause. This is a materially different status than
+"root cause: unknowable" — the failure trigger (large-prompt prefill
+exceeding ~2 minutes) and mechanism class (a client-side idle/response
+timeout shorter than the SDK's own 10-minute default, not a server crash)
+are now real, cross-referenced, independently-timestamped findings, not
+merely investigated and abandoned. The actionable next step, if this is
+picked up again: trace `agent-harness.js`'s `requestOptions.timeoutMs`
+(the one caller-supplied override path the vendored SDK's `openai-
+completions.js` actually honors) to find what sets it for the primary
+model path, the same class of check that led to the `REVIEW_TIMEOUT_MS`
+fix, and whether it can be raised or disabled there the way it was for
+the reviewer path.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
@@ -1023,21 +1123,37 @@ available evidence allows, not abandoned mid-investigation.
   compaction threshold *before* the model's first `GOAL COMPLETE`
   attempt, not after — none of the three tasks tried so far grew enough
   real message history to do that ahead of completion.
-- The two unexplained background-process kills from the
-  `personal-budget-simplifier` `/goal` run remain **not root-caused** —
-  macOS unified log and crash-report checks came back empty for the
-  incident window and (as a sanity check) for a full 7-day window
-  generally, meaning `pi`/`node` processes don't appear to emit forensic
-  data this way on this host at all, not just that the old window expired.
-  The leading mitigation hypothesis from the first pass (`nohup ... &
-  disown` prevents the kind of kill that hit the original run) was then
-  tested directly and **did not hold up**: a plain `sleep 240 &` with no
-  `nohup` at all was found already reparented to PID 1 via standard Unix
-  orphan-reparenting, so parent-shell-exit-without-nohup isn't a
-  convincing mechanism for the original incident either. Treat this as
-  closed-out-as-unknowable via every method tried so far, not solved —
-  the actionable path forward is process-external exit-signal capture on
-  the next occurrence, not a specific launch-flag fix.
+- **The two unexplained background-process kills: root cause found,
+  via a source not checked in any earlier pass — the inference host's
+  own server-side request logs, not this machine's OS logs.** Every local
+  forensic channel on the client machine (unified log, crash reports,
+  reboot history, shell history, legacy syslog, sudo-elevated access) came
+  back empty or unavailable, as documented above — but `kannasmacstudio.lan`
+  (the LAN model-serving host) keeps its own independent, durable,
+  plain-text logs, and SSH access into them (read-only) surfaced both
+  kills precisely: two `stream_closed_before_completion` events in
+  `qwen36.log` on 2026-08-09 (`09:12:05`, 9m13s after the 09:02:52 commit;
+  `16:59:11`, 4s after the 16:59:07 commit), both landing the instant a
+  long prefill (121s and 155s, on 35k/43k-token prompts) finished and the
+  first output token was about to stream — both with the model server
+  itself completely healthy (`in_flight=0`, serving other requests
+  normally seconds later). This is the same failure shape as an
+  already-documented, already-fixed bug in this exact codebase
+  (`cross-model-review.ts`'s `REVIEW_TIMEOUT_MS`, originally 120s, raised
+  to 240s after a real 121.4s request got silently aborted) — on the
+  *primary* model path instead of the reviewer path. Ruled out: the
+  vendored `openai` SDK's own default timeout (confirmed via its
+  package.json version matching the proxy log's exact user-agent string)
+  is 10 minutes, not ~2 — so something shorter and not yet source-traced
+  to its exact call site is doing this. **Status upgraded from
+  "unknowable" to "trigger condition and mechanism class identified,
+  exact enforcing code not yet traced"** — see the dated update above for
+  the full account and the concrete next step (trace `agent-harness.js`'s
+  `requestOptions.timeoutMs` for the primary model path). The original
+  mitigation hypothesis (`nohup ... & disown` launch hygiene) is now known
+  to be the wrong layer entirely — this was never a parent-shell-exit
+  problem, it was a client-side network-idle timeout unrelated to process
+  detachment.
 - **"Many nudge rounds" within one uninterrupted process: closed out with
   a substantive negative finding, not left an open gap.** Final tally
   across every organic (shipped-default-threshold) single-process run:
