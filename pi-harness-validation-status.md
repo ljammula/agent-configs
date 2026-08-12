@@ -975,6 +975,19 @@ source (e.g. a harder external benchmark, not another hand-authored
 scratch task), which is a different, larger undertaking than a single
 scratch-task live test and is named as such rather than attempted here.
 
+**Closing status on this investigation, confirmed with the user rather
+than assumed**: presented with the full evidence above (9 live tests: 1
+stall-escalation confirmation, 1 real-compaction-timing series, 8
+organic-threshold runs across 4 distinct failure-mode categories all at
+`rounds ≤ 1`, plus the exhausted forensic list for the background-kill
+root cause), asked explicitly whether to keep running more live tests,
+pursue a larger external-benchmark undertaking, ship the unshipped item-4
+fallback, or accept the findings as final. Chose **accept current
+findings as final**. Recorded here so a future reader doesn't mistake the
+stop as an unfinished search: "many rounds" and "root cause" were treated
+as open experimental questions and answered as far as this machine's
+available evidence allows, not abandoned mid-investigation.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
