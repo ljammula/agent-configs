@@ -1,7 +1,7 @@
 # personal-budget-simplifier — build plan
 
 **Status:** the 7-chunk build described below shipped (see
-`pi-real-task-report-personal-budget-simplifier.md` for the transcript-
+`history/pi-real-task-report-personal-budget-simplifier.md` for the transcript-
 sourced report). The app has since grown past this plan's original scope
 via later `/goal` runs -- see `pi-harness-validation-status.md`'s `/goal`
 update entries for what was added afterward and their live-verification

@@ -266,25 +266,27 @@ each answers a different question:
   carry an in-place "Historical snapshot"/correction banner pointing at
   whichever living doc superseded their overall claims, but that doesn't
   mean the body text below the banner is frozen -- some (e.g.
-  `claude-pi-quality-extensions-review-feedback.md`,
-  `pi-real-task-report-personal-budget-simplifier.md`) later received
+  `history/claude-pi-quality-extensions-review-feedback.md`,
+  `history/pi-real-task-report-personal-budget-simplifier.md`) later received
   their own in-place correction rounds when a specific finding turned out
   to be wrong, same-day or after. Read the banner for current status, but
   don't assume everything past it is untouched history.
   [pi-harness-history.md](pi-harness-history.md) is the main dated
   narrative (full investigation log, one entry per finding).
-  [fable-review-all-customizations.md](fable-review-all-customizations.md)
-  and [claude-pi-quality-extensions-review-feedback.md](claude-pi-quality-extensions-review-feedback.md)
-  are independent-review passes from 2026-07-24.
-  [pi-real-task-report-daily-briefing-screen.md](pi-real-task-report-daily-briefing-screen.md)
-  and [pi-real-task-report-personal-budget-simplifier.md](pi-real-task-report-personal-budget-simplifier.md)
+  `history/` holds standalone dated snapshots kept for provenance (see
+  [history/README.md](history/README.md)):
+  [history/fable-review-all-customizations.md](history/fable-review-all-customizations.md)
+  and [history/claude-pi-quality-extensions-review-feedback.md](history/claude-pi-quality-extensions-review-feedback.md)
+  are independent-review passes from 2026-07-24;
+  [history/pi-real-task-report-daily-briefing-screen.md](history/pi-real-task-report-daily-briefing-screen.md)
+  and [history/pi-real-task-report-personal-budget-simplifier.md](history/pi-real-task-report-personal-budget-simplifier.md)
   are transcript-sourced (not self-reported) observation reports from real
   delegated builds.
 - **Presentations** — a standalone, non-technical writeup of a specific
   finding, meant to be opened directly in a browser and shared, not read
   as markdown. [pi-goal-gate-research.html](pi-goal-gate-research.html)
-  covers the three live `/goal` trials in `pi-harness-validation-status.md`'s
-  `/goal` update entries.
+  covers the three live `/goal` trials documented in `pi-harness-history.md`'s
+  `/goal` (`goal-gate.ts`) update entries.
 
 If a claim in a dated snapshot and the living status doc ever disagree,
 the living status doc wins -- it's the one that gets corrected when a

@@ -41,7 +41,7 @@ delegated to `pi` (`ai-stack-local`, ThinkingCap-Qwen3.6-27B-MLX-8bit, :8080) vi
 chunk. I (Claude, orchestrating) wrote the plan and each chunk's prompt, dispatched `pi`
 backgrounded, then independently re-ran the verification command and read the actual diff
 before marking a chunk done — not trusting `pi`'s self-reported pass. This is the same
-orchestration pattern as `pi-real-task-report-daily-briefing-screen.md`; this file exists to
+orchestration pattern as `history/pi-real-task-report-daily-briefing-screen.md`; this file exists to
 capture harness-improvement nudges from a second, structurally different real task (backend
 Go from scratch, not a Flutter screen added to an existing app).
 

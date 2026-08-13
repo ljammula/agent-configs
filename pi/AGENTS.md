@@ -29,7 +29,7 @@ Run the verification command yourself with bash. Do not ask the user to run it.
 ## Recurring test-correctness gotchas
 
 These are confirmed, not theoretical — each recurred on a real chunked build
-(see `pi-real-task-report-personal-budget-simplifier.md`), passed `gofmt`/
+(see `history/pi-real-task-report-personal-budget-simplifier.md`), passed `gofmt`/
 `go build`/`go vet`/`go test`, and was only caught by a human re-reading the
 diff. `go build` and friends prove the code runs; none of them prove a test
 actually exercises the behavior its own comment claims.
