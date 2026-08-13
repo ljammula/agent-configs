@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-13",
+  "purpose": "Pre-registered mechanism check (see plans/pair4-reviewer-mechanism-check-plan.md): does cross-model-review.ts's harness arm emit a genuine reviewer trace on pair 4 (go-flutter/bookmarks-app) under real battery methodology, now that a settlement-time trigger exists where the reactive trigger structurally could not on 2026-08-04. Reviewed and pre-registered by an independent Opus pass before running.",
+  "result": "INVALID per pre-registered criteria -- discarded, not reinterpreted",
+  "invalidity_reason": "harness arm hit the fixture's 45-minute timeout (pi_exit 124, timed_out=true) before pi's own settlement/corrective loop converged, one of the invalidity conditions fixed in advance",
+  "runner": "pi/evals/run_single_pair.py --seed 20260802 --pair 4 --host kannasmacstudio.lan",
+  "arm_order": ["baseline", "harness"],
+  "records": [
+    {
+      "arm": "baseline",
+      "valid": true,
+      "passed": true,
+      "pi_exit": 0,
+      "timed_out": false,
+      "hidden_test_exit": 0,
+      "harness_seconds": 185.884,
+      "usage": {"prompt_tokens": 126022, "completion_tokens": 4986, "assistant_messages": 13, "tool_calls": 16}
+    },
+    {
+      "arm": "harness",
+      "valid": false,
+      "passed": false,
+      "pi_exit": 124,
+      "timed_out": true,
+      "hidden_test_exit": 0,
+      "harness_seconds": 2700.03,
+      "usage": {"prompt_tokens": 808968, "completion_tokens": 7740, "assistant_messages": 45, "tool_calls": 57},
+      "trace_events": [
+        {"extension": "stack-router", "event": "routing", "outcome": "pass"},
+        {"extension": "quality-gate", "event": "verification", "outcome": "fail"},
+        {"extension": "reviewer", "event": "review", "outcome": "flagged"},
+        {"extension": "quality-gate", "event": "verification", "outcome": "fail"},
+        {"extension": "artifact-guard", "event": "nudge", "outcome": "flagged"},
+        {"extension": "reviewer", "event": "review", "outcome": "flagged"},
+        {"extension": "quality-gate", "event": "verification", "outcome": "fail"}
+      ]
+    }
+  ],
+  "not_counted_but_noted": {
+    "note": "Per pre-registration, an invalid run's reviewer trace does not answer the mechanism question -- recorded here as raw observation only, not as evidence. The harness arm's reviewer DID fire twice (outcome:flagged) before the timeout, which superficially looks like it would satisfy the primary pre-registered criterion. Not counted, because the run as a whole hit a pre-declared invalidity condition; treating a partial trace from a killed run as a clean answer is exactly the post-hoc reinterpretation the pre-registration exists to block.",
+    "incidental_observation": "hidden_test_exit=0 for the harness arm too -- the code state on disk at the moment pi was killed had already reached a state that passes both go test -race (no data-race warning) and dart test (17/17). pi's own settlement/corrective loop (3x quality-gate fail, 1x artifact-guard nudge, 2x reviewer flagged, 45 assistant turns, 57 tool calls) was still churning and never declared done within the 45-minute window despite the underlying code already passing -- consistent with, and possibly compounding, the quality-gate corrective-follow-up non-convergence-at-depth finding from the same 2026-08-12/13 session (see pi-harness-history.md)."
+  },
+  "artifacts": {
+    "rescued_from_tmp": "artifacts were written to /private/tmp/pi-screen-04-{baseline,harness}-* by execute_arm() and rescued before macOS could reap them; not committed to this repo (large, contains full session transcripts)."
+  },
+  "disposition": "Not rerun. Recorded as an invalid/discarded run rather than spending another ~45-70 minutes on an immediate retry. The underlying mechanism question (does the settlement trigger fire under real battery methodology on this task) remains genuinely open -- see pi-harness-validation-status.md."
+}

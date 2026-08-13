@@ -2657,6 +2657,130 @@ real verification failure — a harder task class (larger surface area,
 more interacting components, or a weaker model) would be needed to force
 it, not more attempts at this same difficulty tier.
 
+## Update 2026-08-13: pair-4 rerun, pre-registered before running (Opus-reviewed plan)
+
+Before running anything, an independent Opus review of the plan for the
+last open acceptance-boundary item — "pair 4 (go-flutter/bookmarks-app)
+needs a full paired rerun ... before any candidate-model claim beyond
+n=1" — found the original framing wrong and reframed the actual question
+worth answering. Recorded here, in full, before the run so the criteria
+can't be adjusted post-hoc — this project has two prior retracted
+findings (2026-08-05, "Corrected: two false harness-bug findings" and its
+own correction) that came from exactly that failure mode.
+
+**Corrected bookkeeping**: pair 4 already has three real Qwen-primary
+harness data points, not two — the original battery (fail), the
+same-day standalone rerun (fail), and the 2026-08-04 full-harness run
+with Gemma configured as reviewer and `REVIEW_TIMEOUT_MS` already raised
+to 240s, which **passed** both `go test -race ./...` (9/9) and
+`dart test` (17/17). Treating this as "n=2 → n=3" would have been wrong
+and, worse, would have silently erased the one passing result.
+
+**Why this can't be a statistics run at any affordable n**: the primary
+model's own unaided base rate on this race (2/5, from the five-run KAT-
+Coder investigation) has a binomial 95% CI of roughly 5-85% at that
+sample size — the history's own "roughly 8-10 paired runs" target is
+itself under-powered against a base rate that uncertain. A handful more
+pair-4 reruns buys nothing; this item is being deliberately *not*
+pursued as a candidate-model capability claim, and that scope-narrowing
+is a decision, not an oversight.
+
+**What this run actually checks, and why n=1 is decisive for it**: the
+2026-08-04 entry found `cross-model-review.ts`'s reactive `tool_result`
+trigger is *structurally* incapable of firing on this task suite, because
+`local-model-bench` hides its test files until after `pi` exits — no
+route/model/timeout fix could change that, only a design change (a
+settlement-time trigger) could. That trigger now exists and is
+separately live-confirmed on a different task (see the 2026-08-12 entry
+above). The open, still-unanswered question is binary: under real battery
+methodology (fixture copy-in, hidden-test-after-exit, the actual
+`execute_arm()` scoring path), does the harness arm now emit a genuine
+`cross-model-review` trace on pair 4, where it structurally could not
+five weeks ago? Yes or no, once, settles it — this is a mechanism check,
+not a sampling problem.
+
+**Pre-registered criteria, fixed before running**:
+- Primary, decisive at n=1: harness arm emits a `pi-harness-trace` entry
+  with `extension:"reviewer", event:"review", outcome ∈ {clean,flagged}`
+  during this run. A `blocked`/`transient` outcome or no reviewer trace
+  at all means the structural gap persists.
+- Secondary (pass/fail on `go test -race`/`dart test`): **declared
+  uninterpretable in advance.** Every outcome (both fail, harness passes,
+  baseline passes) is consistent with a ~40% Bernoulli process; no
+  pass/fail result from this run will be used to support or retract any
+  adoption or candidate-model claim.
+- Invalidity, declared in advance: a killed process, `valid:false` on
+  either arm (per `execute_arm`'s own gate), reviewer route unreachable
+  or model-id-mismatched, or a concurrently running heavy job on
+  `kannasmacstudio.lan` at launch time → the run is discarded and
+  redone, not reinterpreted.
+- **No pooling** with `full-screening-2026-08-03.json`'s harness-arm
+  numbers or the 2026-08-04 run's numbers: `REVIEW_TIMEOUT_MS` (120s→
+  240s), the settlement trigger, `buildReviewDiff()`'s untracked-file
+  fix, and `BROAD_VERIFICATION_PATTERNS` now tolerating `go test -race`
+  (which never matched at all during the original battery — neither arm's
+  detector could even recognize this task's real verification command
+  then) are all real harness changes since those runs. This run's harness
+  arm is not the same harness as any prior pair-4 run's.
+
+**Mechanics**: reusing `run_screening.py`'s actual `execute_arm()` and
+scoring/trace-parsing code via a small wrapper (`pi/evals/
+run_single_pair.py`) that runs only pair 4's task instead of the full
+9-task shuffle, replicating `main()`'s full preflight (model identity
+check, pinned `pi --version`, `baseline_agent_dir` isolation, runtime
+manifest) plus an added reviewer-route check (`AI_REVIEW_BASE_URL`/
+`AI_REVIEW_MODEL` resolve and match a live `:8081` model id) that
+`run_screening.py` itself doesn't do. Confirmed live and current before
+running: `AI_REVIEW_BASE_URL=http://kannasmacstudio.lan:8081/v1`,
+`AI_REVIEW_MODEL` matches Gemma's live id — the `:8082` references in
+the 2026-08-04 entries were that route's numbering at the time, not a
+live discrepancy today. Pair 4's actual recorded arm order under seed
+20260802 is `("baseline", "harness")`; this run uses that order, not an
+invented one.
+
+## Update 2026-08-13 (continued): pair-4 rerun executed — invalid per its own pre-registration, not reinterpreted
+
+Ran `pi/evals/run_single_pair.py --seed 20260802 --pair 4 --host
+kannasmacstudio.lan`. Preflight passed clean (model identity, `pi --version`
+0.83.0, reviewer route resolved live to Gemma on `:8081`). Baseline arm:
+valid, passed, 185.9s. Harness arm: **invalid** — hit the fixture's
+45-minute wall (`pi_exit: 124`, `timed_out: true`, `harness_seconds:
+2700.03`), one of the invalidity conditions fixed in the pre-registration
+above. Per that pre-registration, the run is discarded, not reinterpreted.
+Full record: `pi/evals/pair4-rerun-2026-08-13.json`.
+
+**The tempting-but-rejected read**: the harness arm's reviewer actually
+fired twice (`outcome: "flagged"`) before the kill — on its face, an
+answer to the mechanism question this run was built to check. Not counted.
+The run as a whole hit a pre-declared invalidity condition, and cherry-
+picking the one trace that would confirm the hypothesis from an otherwise-
+discarded run is exactly the failure mode the pre-registration exists to
+block. The mechanism question — does the settlement trigger fire under
+real battery methodology on this specific task — remains genuinely open.
+
+**Noted but not counted, a real incidental finding**: `hidden_test_exit:
+0` for the harness arm too. The code on disk at the moment `pi` was
+killed had already reached a state passing both `go test -race` (no data-
+race warning) and `dart test` (17/17) — but `pi`'s own settlement/
+corrective loop (3x `quality-gate` fail, 1x `artifact-guard` nudge, 2x
+`reviewer` flagged, across 45 assistant turns and 57 tool calls) never
+declared the turn done inside the 45-minute window despite the underlying
+code already passing. This lines up with, and may compound, this same
+session's earlier finding that `quality-gate`'s corrective follow-up
+doesn't reliably converge at depth (see the "confirmed not to fire at
+depth" entry above) — here the loop kept re-triggering rather than
+recognizing already-passing evidence, though the exact mechanism wasn't
+traced (that would need reading the rescued session JSONL, not done here).
+
+**Disposition**: not rerun immediately. Redoing costs another ~45-70
+minutes and real token spend for a question this run already spent that
+budget on without resolving; recorded as invalid and left open rather than
+spent again same-session. If revisited, raise `--timeout-minutes` well
+past 45 (the underlying code reached a passing state, so the loop needed
+more room to settle, not necessarily to do more work) and/or investigate
+the non-convergence itself directly from the rescued session JSONL rather
+than re-running blind.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,

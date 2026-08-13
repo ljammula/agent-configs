@@ -118,10 +118,21 @@ evidence-cited version of each):
   might still produce a genuine many-round case, and multi-restart
   endurance (surviving an actual process kill, not just corrective rounds
   within one process) is separate and still untested.
-- **Reviewer-candidate batteries**: pair 4 (go-flutter/bookmarks-app) needs
-  a full paired rerun, not just an isolated bug repro, before any
-  candidate-model claim beyond n=1; TypeScript/JS task fixtures still need
-  battery coverage (currently routed + unit-tested only).
+- **Pair 4 (go-flutter/bookmarks-app) reviewer mechanism check**: scope
+  narrowed on 2026-08-13 (Opus-reviewed) from a candidate-model capability
+  claim — dropped as infeasible at any affordable n, since the base rate
+  it would compare against (2/5) has a 5-85% CI — to a pre-registered,
+  n=1-decisive check of whether `cross-model-review.ts`'s settlement
+  trigger fires on this task under real battery methodology. Run, but
+  **invalid per its own pre-registration**: the harness arm hit the
+  fixture's 45-minute timeout mid-corrective-loop (code had already
+  reached a passing state; `pi` itself hadn't declared done). The
+  reviewer trace that did fire before the kill is deliberately not
+  counted. Mechanism question still open. See `pi/evals/
+  pair4-rerun-2026-08-13.json` and `plans/pair4-reviewer-mechanism-check-
+  plan.md`.
+- TypeScript/JS task fixtures still need battery coverage (currently
+  routed + unit-tested only).
 - **`co-change-suggest.ts` / `continuation-nudge.ts`**: both still need live
   (non-retrospective) field validation before they clear the adoption bar.
 - **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
