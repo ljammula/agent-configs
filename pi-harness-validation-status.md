@@ -68,20 +68,20 @@ Detail, including the pair-4 concurrency-bug deep-dive, in
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up under `pi -p` is **still unresolved** — works in isolation, didn't fire in a real 9-turn-deep build session; see history. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up under `pi -p` is a **confirmed real gap, not just a suspicion**: fires in a small isolated repro (n=1) but silently doesn't in two independent deep sessions (9 turns real, 30 turns deliberate repro) — queues the follow-up correctly, then the process exits with no second turn. Mechanism not yet isolated; see history. |
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Only Go/Dart routes have battery coverage; rest are unit-tested only. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target #1 of 8) short of the adoption threshold. Live validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic tests pass; widened trigger has zero real-trial field evidence. |
 | Auto-compaction (`ai-stack-local.ts` `contextWindow`) | Fixed and live-confirmed | Was mis-set to a value above the route's real admission budget, so Pi's own auto-compaction never fired on overflow. Corrected + adapter-level follow-up fix; live rerun: reward 1.0. Detail in history. |
 | `stack-skill-overlay.ts` | Fixed | Per-repo stack skills only load matching skill(s) instead of all 8 globally — real measured ~15% prompt-token reduction. |
 | `codebase-memory-mcp` 0.9.0 | Default-disabled, trial-only | No efficiency win over plain repo tools in a paired Go trial; vendor's token-reduction claim not confirmed. Not globally wired. |
-| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | 15/15 planted-bug catch rate, 0/9 false positives on a checked-in battery (`pi/evals/reviewer-battery.ts`). Was structurally blind on all-untracked repos (fixed) and on suites whose verification command never runs inside the model's own session (mitigated via a new settlement-time trigger, source/unit-tested, live-fired once with a `model-rejected` outcome — not yet a clean confirmed round). Full saga (stale-model-id incident, schema-ordering regression, timeout raise) in history. |
+| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | 15/15 planted-bug catch rate, 0/9 false positives on a checked-in battery (`pi/evals/reviewer-battery.ts`). Was structurally blind on all-untracked repos (fixed) and on suites whose verification command never runs inside the model's own session (mitigated via a settlement-time trigger). That trigger is now live-confirmed with a clean round: a task that only ran `go build`/`go vet` (no `go test`, no Makefile) still got a real settlement-triggered review with a genuine `outcome:"flagged"` finding, not the earlier `model-rejected` transport failure. Full saga (stale-model-id incident, schema-ordering regression, timeout raise) in history. |
 | `new-project-scaffold.ts` | Adopted, on by default | Git-init + layered-architecture nudge for greenfield repos. Live-tested. |
-| `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical Makefile target. Redesigned after a structural-blindness finding; revised design not yet live-tested. |
-| `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. `agent_settled` backstop path live-confirmed (caught real stray binaries); primary `tool_result` path still live-untested. |
-| `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks. Same redesign as `artifact-guard.ts`; not yet live-tested. |
+| `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical Makefile target. Redesigned `tool_result`/`turn_end` backstop live-confirmed: armed by a `go mod init` bash call, nudged at the next turn boundary, model acted on it. |
+| `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Both paths live-confirmed: `agent_settled` backstop (caught real stray binaries) and primary `tool_result` path (fired in-band on a `go build -o` command before any commit could hide the artifact). |
+| `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks. Redesigned `tool_result` write-scan live-confirmed (fired instantly on a planted `http.Error(w, err.Error(), ...)` leak); `agent_settled` backstop also confirmed in the same run. |
 | `goal-gate.ts` (`/goal` command) | Adopted, on by default | Session-scoped `/goal <condition>` with a literal `GOAL COMPLETE: <evidence>` marker gated on the most recent broad verification passing against the *current* diff hash (diff-hash-bound, not self-report). Live-confirmed: kickoff race fixed, false-rejection-after-nudge fixed, stall-escalation fixed and live-confirmed (real stall → escalated nudge → recovery), `session_compact` mid-goal reminder shipped but not yet live-exercised. n=7 organic single-process runs, all converged at `rounds: 0` or `1` — "many nudge rounds" behavior not yet seen from this model, treated as a real (if provisional) negative finding, not a gap. Full account, including two real production runs against `personal-budget-simplifier`, in history. |
-| `build_app.py` (zero-human build orchestrator) | New, smoke-tested | Drives bounded `pi -p` corrective rounds outside chat, always writes `BUILD_REPORT.md`. 2/2 live smoke runs on a Go task succeeded round 1. Multi-round corrective recovery, `--containment`, non-Go stacks unexercised. |
+| `build_app.py` (zero-human build orchestrator) | Live-tested | Drives bounded `pi -p` corrective rounds outside chat, always writes `BUILD_REPORT.md`. `--containment` confirmed refusing exactly as documented (exit 1, no report, no round attempted). Multi-round corrective recovery: 5/5 single-round successes across every attempt so far, including three deliberate traps (a hidden runtime-only behavioral contract, a concurrency-bug class this model class sometimes misses unaided) — same shape as `goal-gate.ts`'s n=7 negative finding, not a testing gap; the `--continue` loop itself is unit-tested but still never exercised against a real failure. Non-Go stacks unexercised. |
 | `todo.ts` (built-in TUI tool) | Fixed | A malformed model tool-call (validator-rejected `todo` args) hit a missing `default:` case in `renderResult`, returning `undefined` into the TUI's render tree and crashing the interactive session. Root-caused from the actual crashed session log, deterministically reproduced standalone, fixed with an explicit default case. Universal bug class (any model that trips arg validation on `todo`), not local-model-specific. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Aider dispatch is out of scope (benchmarked and removed, see `~/.claude/CLAUDE.md`). |
 | KAT-Coder-V2.5-Dev-OptiQ-4bit (`:8083`) | Ruled out, both roles | As primary: one win statistically indistinguishable from Qwen's own variance. As reviewer: structural failure (220s+, never completes), not a tunable timeout. |
@@ -92,27 +92,32 @@ Detail, including the pair-4 concurrency-bug deep-dive, in
 Condensed from the full todo list (`pi-harness-history.md` has the complete,
 evidence-cited version of each):
 
-- **Background-process kills** (two unattended `/goal` runs killed
-  mid-round): root-caused as far as the mechanism class — a client-side
-  network-idle timeout on the primary model path, same shape as an
-  already-fixed reviewer-timeout bug — but the exact enforcing code isn't
-  traced yet. `nohup ... & disown` fully-detached launch is a tested,
-  working mitigation in the meantime, not a fix for the underlying cause.
+- **Background-process kills** (now four unattended `/goal` runs killed
+  mid-round, the latest two on 2026-08-12): root-caused as far as the
+  mechanism class — a client-side network-idle timeout on the primary
+  model path, same shape as an already-fixed reviewer-timeout bug — but
+  the exact enforcing code isn't traced yet. `nohup ... & disown`
+  fully-detached launch is a tested, working mitigation in the meantime,
+  not a fix for the underlying cause. New unconfirmed lead: the latest two
+  kills both happened under a deliberately aggressive compaction setting
+  (forcing frequent, longer prefills) — 2/2 correlation, not yet a
+  confirmed trigger; see `pi-harness-history.md`'s 2026-08-12 live-testing
+  entry.
 - **`session_compact` mid-goal reminder**: shipped, unit-tested, still not
-  live-exercised while a goal is active (every forced compaction so far
-  landed after the goal had already completed).
-- **"Many nudge rounds" endurance**: closed out as a negative finding for
-  this model on tasks tried so far (n=7, all `rounds: 0` or `1`), not an
-  open gap — but a harder task class or a different model might still
-  produce a genuine many-round case, and multi-restart endurance (surviving
-  an actual process kill, not just nudge rounds within one process) is
-  separate and still untested.
-- **`makefile-scaffold-nudge.ts` / `error-leak-guard.ts`**: revised designs
-  not yet live-tested (only the superseded versions were).
-- **`cross-model-review.ts` settlement trigger**: needs a live battery run
-  against a task whose verification command never runs inside the model's
-  own session (e.g. `local-model-bench`) to confirm a clean round, not just
-  that it fires.
+  live-exercised while a goal is active. Two dedicated attempts on
+  2026-08-12 (forcing compaction via an aggressive threshold) both hit the
+  background-kill bug above before producing a result — still open, now
+  with a specific repro lead to chase for the kill bug itself.
+- **"Many nudge rounds" / multi-round corrective recovery endurance**:
+  closed out as a negative finding for this model on tasks tried so far —
+  `goal-gate.ts` n=7 (all `rounds: 0` or `1`) and now `build_app.py` n=5
+  (all single-round successes, including three deliberate traps) — not an
+  open gap in the mechanisms themselves, both of which remain unit-tested
+  and logically sound but never exercised end-to-end against a real
+  multi-round failure. A harder task class or a different (weaker) model
+  might still produce a genuine many-round case, and multi-restart
+  endurance (surviving an actual process kill, not just corrective rounds
+  within one process) is separate and still untested.
 - **Reviewer-candidate batteries**: pair 4 (go-flutter/bookmarks-app) needs
   a full paired rerun, not just an isolated bug repro, before any
   candidate-model claim beyond n=1; TypeScript/JS task fixtures still need
@@ -122,6 +127,11 @@ evidence-cited version of each):
 - **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
   the plan's 20% screening threshold — needs either a reduction or an
   evidenced revision to the threshold itself.
+- **`quality-gate.ts` corrective follow-up under `pi -p`**: confirmed (n=2,
+  9 and 30 turns) that the follow-up gets queued correctly but the process
+  exits before a second turn runs it — a real fix is needed, not just more
+  observation. The one working case so far is a small, few-turn scratch
+  repo; what specifically differs at depth isn't isolated yet.
 - Misc smaller items (DayTrix skill placement, `findings[]` severity-aware
   retry prioritization, OS/container boundary for unattended runs): see
   history for detail.

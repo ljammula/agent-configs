@@ -2469,6 +2469,194 @@ via `registerTool` (previously a no-op stub; no prior test in this repo
 exercised a tool's renderer functions in isolation). `npm test`: 159/159.
 `tsc --noEmit`: clean. Commit `ac187ef`.
 
+## Update 2026-08-12 (live-testing pass on remaining acceptance-boundary items): three clean confirmations, one reproducible kill under forced compaction
+
+Ran live `pi -p` trials against the specific items `pi-harness-validation-
+status.md` still listed as untested, scoped to Go (the stack with battery
+coverage), one at a time.
+
+**Three clean confirmations**, each read from the actual `--mode json`
+event log rather than assumed:
+
+- `artifact-guard.ts` primary `tool_result` path: fresh Go repo, task ran
+  `go build -o bin/app ./cmd/app` verbatim. `pi-harness-trace` shows
+  `extension:"artifact-guard", event:"nudge", outcome:"flagged",
+  metadata:{"trigger":"build-command"}` firing in-band on that exact tool
+  result, with `bin/app` still untracked (`git status`) — i.e. before any
+  commit could have hidden it. Distinct from the already-confirmed
+  `agent_settled` backstop.
+- `error-leak-guard.ts` redesigned `tool_result` path: task wrote
+  `handler.go` containing `http.Error(w, err.Error(),
+  http.StatusInternalServerError)` verbatim. The `write` tool's own
+  `tool_result` carried the nudge text immediately, confirmed by a
+  `nudge`/`flagged` trace keyed to the file's absolute path. Model left
+  the leak unfixed, so the `agent_settled` backstop also fired on the same
+  finding afterward — both layers exercised in one run.
+- `makefile-scaffold-nudge.ts` redesigned `tool_result`/`turn_end` path:
+  empty directory, task ran `go mod init` via bash (not the write tool) as
+  its first action, matching this fix's exact motivating scenario. Log
+  sequence: bash `go mod init` → `turn_end` → the fully-resolved-command
+  nudge text queued in `followUp` → delivered as the next user message.
+  Model responded by adding a Makefile despite being told not to,
+  confirming the nudge changed behavior, not just that it fired.
+
+**`goal-gate.ts`'s `session_compact` mid-goal reminder: still not
+live-exercised — two attempts, two silent kills, no result either way.**
+To force compaction to land *while* a goal is active (every prior run's
+compaction happened after goal completion, never during), temporarily
+edited `~/.pi/agent/settings.json`'s `compaction` block from
+`{reserveTokens:16384, keepRecentTokens:24000}` to
+`{reserveTokens:45000, keepRecentTokens:2000}` for the duration of each
+trial only, restoring the original file immediately after each run
+(confirmed restored both times — no lasting config drift). Task: a
+`/goal go build ./... and go vet ./... both succeed` five-file Go CLI
+build, chosen to need enough turns to plausibly cross the now-tiny
+~4k-token compaction line mid-goal.
+
+Both attempts (fresh dirs, `nohup ... < /dev/null > log 2>&1 & disown`,
+matching the documented detached-launch pattern) died identically: no
+`pi-harness-trace`, no `--mode json` output file at all (not even
+partial), no `pi-run.stderr.log` content, process gone from `ps`, no
+session file located under `~/.pi`. In both cases the working tree still
+showed real, substantial progress (attempt 1: all 5 requested files
+written, 376 lines total) — the model was actively mid-task when
+whatever killed it landed, consistent in shape with the two prior
+documented `stream_closed_before_completion` kills traced to
+`kannasmacstudio.lan`'s own server logs (client-side idle timeout on a
+long prefill, not a parent-shell-exit/detachment problem — that hypothesis
+was already ruled out).
+
+**New, not-yet-confirmed lead worth checking next time this bug is
+chased**: both kills this round happened specifically under the
+artificially-aggressive compaction setting, 2/2. Forcing compaction to
+fire far more often plausibly means more, and more frequent, long
+prefills (each compaction cycle re-primes context from a paraphrased
+summary) — exactly the trigger shape the two originally-traced kills
+had (121s/155s prefills on 35k/43k-token prompts). This is a
+correlation from n=2 under a deliberately abnormal setting, not a
+confirmed mechanism; the original two kills happened under normal
+thresholds, so aggressive compaction is not necessary for the bug, only
+possibly a reliable way to reproduce it. Worth deliberately re-testing
+the `session_compact` mid-goal reminder with a gentler, naturally-sized
+task instead of the forced-threshold hack before concluding anything
+stronger.
+
+Net: `pi-harness-validation-status.md`'s acceptance-boundary table should
+move `artifact-guard.ts`, `error-leak-guard.ts`, and
+`makefile-scaffold-nudge.ts` to live-confirmed. `goal-gate.ts`'s
+`session_compact` reminder stays exactly as open as before, plus this
+possible repro lead for the kill bug.
+
+## Update 2026-08-12 (continued): quality-gate's corrective follow-up confirmed not firing at depth, n=2
+
+The 2026-08-05 finding (isolated small repo: corrective follow-up fires,
+real chunk-3 session at nine assistant turns: it doesn't) was left as
+"context-dependent, needs a repro closer to a real chunk's shape" rather
+than a settled conclusion. Built that repro deliberately: a fresh Go
+scratch repo, an 8-step task (six source/test files plus a CLI entrypoint
+and README, `go build`/`go vet` after each step) followed by one final
+instructed step — add an unused import to force a real compile failure —
+with an explicit instruction never to fix it.
+
+The run reached 30 `turn_end` events (more than triple the original
+9-turn case) before the deliberate failure. `quality-gate`'s
+`agent_settled` handler ran correctly and did everything the source says
+it should: logged `event:"verification", outcome:"fail"` with the real
+`go vet`-reported line, incremented to `attempt 1/3`, and queued the
+exact corrective message via `sendUserMessage(..., {deliverAs:
+"followUp"})` — visible verbatim in the `--mode json` stream's final
+`queue_update.followUp`. Immediately after that queue_update, the stream
+ends: one `agent_settled` event total in the whole 948-line log, one
+`agent_end`, no second turn, no second verification attempt, process
+exited. The unused-import error is still uncorrected in the working tree.
+
+This is now n=2 for "corrective follow-up silently doesn't fire in a
+real deep `pi -p` session" (9 turns and 30 turns), n=1 for "fires
+correctly" (the original isolated few-turn scratch repo from
+2026-08-05). Turn count alone doesn't cleanly explain it either, since
+30 turns is well past 9 and the mechanism (queuing via
+`deliverAs:"followUp"`) is identical in both failing cases and the one
+working case — the actual trigger for whether `pi -p` processes a
+queued follow-up after `agent_settled` vs. just exiting is still not
+isolated. What's now solid: this is a real, reproducible correctness gap
+in `pi -p` mode specifically (every automated/`build_app.py`/CI-style
+invocation of this harness), not a fluke of one build's concurrent-
+process contention — the false "it's just resource contention" theory
+from 2026-08-05 doesn't cover this controlled, isolated, otherwise-clean
+run.
+
+Downgrading `pi-harness-validation-status.md`'s framing from "still
+unresolved" (implying uncertain) to "confirmed not to fire at depth,
+mechanism not yet isolated" — a settled negative finding pending a fix,
+not an open question about whether the bug is real.
+
+## Update 2026-08-12 (continued): cross-model-review's settlement trigger gets a clean confirmed round
+
+The remaining gap on the settlement-time backstop trigger (added to cover
+suites whose verification command never runs inside the model's own
+session, e.g. `local-model-bench`) was that its one live fire so far
+returned `outcome: "transient", reason: "model-rejected"` — an HTTP-level
+failure from the reviewer route itself, not proof the trigger produces a
+real, working review.
+
+Built the specific condition deliberately: fresh Go scratch repo, task
+implements a token-bucket rate limiter, explicitly instructed to run only
+`go build ./...` and `go vet ./...` — never `go test`, never `make
+test`/`verify`/`check`, no Makefile created at all. None of those match
+`BROAD_VERIFICATION_PATTERNS`, so the reactive `tool_result` trigger had
+no way to fire; the only path left was the `agent_settled` backstop.
+
+It fired (`trigger:"settlement", round:1`) and came back `outcome:
+"flagged"` — a real structured finding from the reviewer model, not a
+transport error: it correctly identified that `Allow()` resets `lastTime`
+to `now` on every call, silently discarding fractional token accumulation
+whenever called more often than the bucket's fill interval. A genuine,
+plausible bug, not a hallucinated or generic complaint. This is the clean
+confirmed round the open item was waiting on — the settlement trigger is
+now demonstrated to both fire under the exact structurally-blind condition
+it was built for, and to complete a real, useful review round-trip when
+it does.
+
+## Update 2026-08-12 (continued): build_app.py — --containment confirmed, multi-round corrective recovery still unexercised despite three deliberate attempts
+
+`--containment`: ran it against a trivial one-file spec. Confirmed exactly
+the documented refusal — exit code 1, no `BUILD_REPORT.md`, immediate
+(no round attempted), message pointing at `pi/containment/README.md`'s
+network-denied section. This is working as designed, not a gap; the
+script's own docstring already says this is deliberate.
+
+Multi-round corrective recovery: three separate attempts to force a real
+external verify failure on round 1, each escalating in difficulty, all
+ended `SUCCEEDED -- verification passed` at `Rounds run: 1`:
+
+1. A calc package with a hidden hard requirement (compile-time sentinel
+   error). Discarded before running — `go vet` type-checks test files, so
+   a compile-time mismatch would be caught by the model's own permitted
+   `go vet ./...` step, not a genuine external-verification-only failure.
+2. A calc package with a hidden *runtime-only* behavioral contract (floor
+   division on negative operands — Go's native `/` truncates toward zero,
+   undocumented in the spec). The model read the pre-existing test file
+   itself and matched the exact undocumented contract (its own doc
+   comment states "rounds toward negative infinity" verbatim) — legitimate
+   round-1 success via reading available tests as a spec, not luck.
+3. A concurrent-counter package verified with `go test -race -count=5`,
+   modeled directly on this repo's own documented concurrency-bug
+   precedent (pair 4, 2/5 unaided). The spec's explicit "supports
+   concurrent use from multiple goroutines" language was apparently
+   sufficient signal — the model used a plain `sync.Mutex` correctly on
+   the first attempt.
+
+Combined with the two original smoke runs, that's 5/5 single-round
+successes for this model on Go tasks of this shape and complexity through
+`build_app.py`. Reading this together with `goal-gate.ts`'s own n=7
+`rounds: 0`/`1` finding: this looks like the same real, model-specific
+negative result recurring in a second, independently-built mechanism, not
+a testing gap. The corrective `--continue` loop itself remains logically
+sound and unit-tested but has never been exercised end-to-end against a
+real verification failure — a harder task class (larger surface area,
+more interacting components, or a weaker model) would be needed to force
+it, not more attempts at this same difficulty tier.
+
 ## Todo
 
 - **Stall-escalation: done, live-confirmed** (`goal-gate-live-test-7`,
