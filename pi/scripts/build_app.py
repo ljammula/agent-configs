@@ -52,7 +52,7 @@ from pathlib import Path
 PI_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PI_ROOT.parent
 CONTAINMENT_DIR = PI_ROOT / "containment"
-MODEL = "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit"
+MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit"
 
 # Tried in this order against the workspace root. Mirrors
 # lib/verification.ts's makefileVerificationCommand priority (verify > test >

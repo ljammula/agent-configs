@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pipe a diff to the local ai-stack code model (port 8080, ThinkingCap
-# Qwen3.6-27B 8-bit) for an adversarial second opinion before commit/PR.
+# Qwen3.8-27B 8-bit) for an adversarial second opinion before commit/PR.
 # Output is evidence for Claude to triage, never an authoritative finding
 # list -- this model self-corrects mechanical mistakes but not logic bugs,
 # so it can *notice*

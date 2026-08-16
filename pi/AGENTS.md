@@ -100,7 +100,7 @@ Read-only local services are still worth using. The served endpoints are:
 
 | Port | Slot | Use |
 |---|---|---|
-| 8080 | ThinkingCap-Qwen3.6-27B-MLX-8bit ("code", resident) | code review, editing, log triage |
+| 8080 | Qwen3.8-27B-8bit ("code", resident) | code review, editing, log triage |
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host

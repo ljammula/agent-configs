@@ -29,7 +29,7 @@ REPO_ROOT = PI_ROOT.parent
 TASK_ROOT = REPO_ROOT.parent / "local-model-bench" / "tasks"
 PROVIDER_EXTENSION = PI_ROOT / "extensions" / "ai-stack-local.ts"
 INSTALLED_AGENT_DIR = Path.home() / ".pi" / "agent"
-MODEL = "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit"
+MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit"
 DEFAULT_SEED = 20260802
 
 # Three difficulty strata, both primary languages, and both full-stack tasks.

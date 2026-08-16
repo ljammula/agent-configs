@@ -1,6 +1,6 @@
 # pi harness — consolidated validation status
 
-**Current as of 2026-08-12.** This file states only what's true right now,
+**Current as of 2026-08-16.** This file states only what's true right now,
 extension by extension, kept deliberately short and high-level. The full
 dated investigation — what was tried, what broke, what got fixed, live-run
 counts, superseded results — lives in `pi-harness-history.md`; nothing here
@@ -11,7 +11,7 @@ is understandable-only-with-history, but that file is where the "why" and
 
 ## Current configuration
 
-Pi 0.83.0 has two resident inference routes: `ThinkingCap-Qwen3.6-27B-MLX-8bit`
+Pi 0.83.0 has two resident inference routes: `Qwen3.8-27B-8bit`
 on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
 `:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`/
 `AI_STACK_HOST` live in `~/.zshenv` (sourced by every zsh invocation,
@@ -20,6 +20,18 @@ interactive or not — see `pi-harness-history.md` for why this moved out of
 `independent-review`. `AI_REVIEW_MODEL` must be the exact id `GET
 :8081/v1/models` returns, not a short form — a stale short id silently
 disabled the reviewer once already (see history).
+
+The Qwen3.8 migration was live-validated on 2026-08-16. Before the active
+provider and Pi settings were updated, a default `pi -p` request reached the
+LAN proxy but failed with HTTP 400 `model_mismatch` because it still sent the
+Qwen3.6 path. With the exact Qwen3.8 id installed, a fresh default-provider
+request completed successfully. A committed scratch Go task then exercised
+the full read/edit/test loop: Pi reproduced three failing assertions, made the
+minimal `strings.Fields` fix, and reached 4/4 passing tests. The settlement
+quality gate independently reran the canonical check and recorded `pass` (so
+the model's earlier shell-masked test command was not accepted as evidence),
+and the distinct Gemma reviewer recorded `clean`. The maintained harness also
+typechecked and passed all 159 deterministic tests in the same validation run.
 
 Same-primary review still requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
 `blind-self-review`, never cross-model, if ever pointed back at the same
