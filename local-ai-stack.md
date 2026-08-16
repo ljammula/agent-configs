@@ -9,14 +9,39 @@ facts agent configurations need when choosing or calling a local route.
 
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
-| `:8080/v1` | `Qwen3.8-27B-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | not yet measured |
-| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05 |
+| `:8080/v1` | `Qwen3.8-27B-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | 51.1 tok/s median, short context (see table below) |
+| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05, 118.1 tok/s solo short-context (2026-08-16) |
+
+**`:8080` decode throughput by context length (2026-08-16, 3 runs/point,
+median shown, 256-token forced completions, temp 0, solo load):**
+
+| Prompt tokens | Median decode tok/s |
+|---:|---:|
+| ~86 | 51.1 |
+| ~2,036 | 49.3 |
+| ~10,036 | 44.9 |
+| ~30,036 | 41.2 |
+
+Gradual degradation with context length (~19% from near-empty to 30K), not a
+cliff -- consistent with attention-cost scaling rather than a KV-cache or MTP
+regression. Roughly in line with the prior Qwen3.6-27B-8bit checkpoint's
+short-context numbers (43.2-43.4 tok/s in ai-stack's PLAN.md at similar
+settings, 51.76-51.95 tok/s under this repo's own methodology), so 3.8 is not
+obviously slower or faster than 3.6 at the low end.
+
+**Concurrent-load check (2026-08-16, short context, both routes fired
+simultaneously, 2 runs):** `:8080` dropped from 51.1 to ~46.2 tok/s median
+(-10%); `:8081` dropped from 118.1 to ~49.8 tok/s median (-58%). Both routes
+still complete correctly under concurrency; this is the same single-GPU
+time-slicing effect documented in ai-stack's PLAN.md for the prior checkpoint
+pairing, not a regression specific to Qwen3.8.
 
 The previous Qwen3.6 `:8080` rate came from sequential live requests using 256
-generated tokens per sample. Those samples were 51.76-51.95 tok/s and do not
-establish Qwen3.8 throughput. `:8081` has 15/15
+generated tokens per sample. Those samples were 51.76-51.95 tok/s and are
+consistent with, but do not by themselves establish, Qwen3.8 throughput --
+see the measured table above. `:8081` has 15/15
 planted-bug catches plus 9/9 correct-code controls (see
-`pi-harness-validation-status.md`) and no throughput measurement yet.
+`pi-harness-validation-status.md`).
 
 `AI_REVIEW_MODEL` briefly went stale after the `:8082`→`:8081` move: the
 route's served model id gained a `-4bit` suffix and a full path
