@@ -418,17 +418,22 @@ that; it's a review step you still own.
 
 ## Settings this machine expects
 
-`~/.pi/agent/settings.json` is **not** symlinked from this repo: pi rewrites it
-itself (`/settings`, package installs, `lastChangelogVersion`), so a symlink
-would mean pi editing tracked files behind your back. Set these by hand:
+[`settings.json`](settings.json) records the complete current configuration,
+but `~/.pi/agent/settings.json` is **not** symlinked from this repo: pi rewrites
+it itself (`/settings`, package installs, `lastChangelogVersion`), so a symlink
+would mean pi editing tracked files behind your back. Copy changes deliberately
+rather than linking the file.
 
 ```json
 {
+  "lastChangelogVersion": "0.83.0",
+  "theme": "dark",
   "defaultProvider": "ai-stack-local",
   "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
   "defaultThinkingLevel": "off",
   "enabledModels": ["Qwen3.8-27B-8bit"],
-  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 }
+  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 },
+  "hideThinkingBlock": false
 }
 ```
 
