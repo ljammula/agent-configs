@@ -17,11 +17,11 @@ see `../pi-harness-validation-status.md`. This file below documents what
 each extension does; that one documents what's actually been proven about
 whether it works.
 
-Current-machine state (audited 2026-08-03): Pi 0.83.0 has one resident
-ThinkingCap Qwen3.6-27B route. `cross-model-review.ts` therefore disables
-itself unless a distinct `AI_REVIEW_BASE_URL` and `AI_REVIEW_MODEL` are set;
-same-primary review requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
-`blind-self-review`, never cross-model. The write/edit guard resolves symlinks,
+Current-machine state (audited 2026-08-16): Pi 0.83.0 uses the resident
+Qwen3.8-27B route, with a distinct Gemma reviewer configured through
+`AI_REVIEW_BASE_URL` and `AI_REVIEW_MODEL`. Same-primary review requires
+`AI_REVIEW_ALLOW_SELF=1` and is labeled `blind-self-review`, never cross-model.
+The write/edit guard resolves symlinks,
 and an external-effect guard blocks deploy, publish, infrastructure, production
 database, Kafka-admin, and Kubernetes mutations without an explicit category
 opt-in. Whole-process confinement remains the job of `containment/`; Docker is
@@ -97,7 +97,7 @@ configuration is supplied.
 Written here:
 
 - **`ai-stack-local.ts`** — registers ai-stack's resident provider:
-  `ai-stack-local` (:8080, ThinkingCap-Qwen3.6-27B-MLX-8bit, "code"). It
+  `ai-stack-local` (:8080, Qwen3.8-27B-8bit, "code"). It
   follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
@@ -425,17 +425,17 @@ would mean pi editing tracked files behind your back. Set these by hand:
 ```json
 {
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
   "defaultThinkingLevel": "off",
-  "enabledModels": ["ThinkingCap-Qwen3.6-27B-MLX-8bit"],
+  "enabledModels": ["Qwen3.8-27B-8bit"],
   "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 }
 }
 ```
 
 - `defaultThinkingLevel: "off"` — the model reports `reasoning: false`.
 - `enabledModels` registers the resident code model for Ctrl+P selection.
-  Glob patterns (`*Qwen3.6*`) do **not** match these models; pi matches the
-  path-style IDs by substring, so list the basenames exactly as above.
+  Glob patterns (`*Qwen3.8*`) do **not** match these models; pi matches the
+  path-style IDs by substring, so list the basename exactly as above.
 - Compaction reserve is set to 16384 (= the models' `maxTokens`) to leave
   more of the available context for actual work.
 

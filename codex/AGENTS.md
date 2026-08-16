@@ -23,8 +23,8 @@ reachability checks and scripts resolve there; unset, it defaults to
 `127.0.0.1`. Set it once in the shell environment so all agents inherit it.
 
 Current route details and performance are recorded in
-`~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the ThinkingCap
-Qwen3.6-27B 8-bit code, review, and triage route, using mlx-vlm 0.6.8 with
+`~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the
+Qwen3.8-27B 8-bit code, review, and triage route, using mlx-vlm 0.6.8 with
 APC. Shell clients discover the current id from `/v1/models` because the public
 proxy rejects stale or omitted model ids.
 

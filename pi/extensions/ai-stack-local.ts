@@ -9,8 +9,8 @@ export default function (pi: ExtensionAPI) {
     api: "openai-completions",
     models: [
       {
-        id: "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
-        name: "ThinkingCap-Qwen3.6-27B-MLX-8bit",
+        id: "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
+        name: "Qwen3.8-27B-8bit",
         reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

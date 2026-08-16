@@ -49,7 +49,7 @@ export function resolveReviewerConfig(env: NodeJS.ProcessEnv = process.env): Rev
 	const primaryBaseUrl = normalizeUrl(
 		env.AI_PRIMARY_BASE_URL ?? `http://${env.AI_STACK_HOST || "127.0.0.1"}:8080/v1`,
 	);
-	const primaryModel = env.AI_PRIMARY_MODEL ?? "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit";
+	const primaryModel = env.AI_PRIMARY_MODEL ?? "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
 	const samePrimary = baseUrl === primaryBaseUrl && model === primaryModel;
 	if (samePrimary && env.AI_REVIEW_ALLOW_SELF !== "1") {
 		return { enabled: false, kind: "disabled", baseUrl, model, reason: "same-primary" };
