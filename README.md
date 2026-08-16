@@ -86,6 +86,7 @@ agent-configs/
 │
 └── pi/                        # pi coding agent — ~/.pi/agent/  (see pi/README.md)
     ├── AGENTS.md              # Global instructions, tuned for the local model (96K window)
+    ├── settings.json          # Tracked reference; intentionally not linked into ~/.pi/agent/
     ├── extensions/            # pi ships no MCP/plan-mode/todos/web-search; these add them
     │   ├── ai-stack-local.ts       # Resident ai-stack provider (:8080 code + triage)
     │   ├── full-stack-dev.ts       # Generic autonomous plan/chunk/test/debug workflow
@@ -137,8 +138,9 @@ agent-configs/
 | `pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
 | `pi/skills/<name>/` (whole dir) | `~/.pi/agent/skills/<name>` |
 
+`pi/settings.json` records the settings this machine expects, but
 `~/.pi/agent/settings.json` is deliberately not linked — pi rewrites it itself.
-See [pi/README.md](pi/README.md) for the settings this machine expects.
+See [pi/README.md](pi/README.md) for details.
 
 ## Skills
 
