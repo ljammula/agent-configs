@@ -33,26 +33,29 @@ the model's earlier shell-masked test command was not accepted as evidence),
 and the distinct Gemma reviewer recorded `clean`. The maintained harness also
 typechecked and passed all 159 deterministic tests in the same validation run.
 
-**First live claude-sonnet-5 comparison since the migration (2026-08-16,
-n=1, provisional):** a `local-model-bench` spot-check (`go/lru-cache`, one
-trial per arm, not a full suite run — see its `SPEC.md` for the full
-account) found `claude-sonnet-5` passing clean in 32.4s while `pi-local`
-(now Qwen3.8) had to be killed after 31m14s, past the suite's 30-minute
-default timeout. Not a simple regression: the frozen-at-kill-time code
-would have officially passed the task's own hidden tests (100% coverage) —
-those tests don't cover distinct key≠value eviction, a real gap in the task
-fixture, not in Pi. The model had actually found the real bug itself via a
-self-written test within 7 minutes, then spent the remaining ~24 minutes
-re-diagnosing the same already-found bug without ever re-editing the file —
-a new stuck-in-a-loop failure shape, distinct from the empty-content-stop
-and forward-looking-prose-abandonment patterns already tracked above and in
-history. Early in the same run, three connection failures (`terminated`,
-two `502 upstream_unavailable`) were auto-retried successfully by Pi's own
-retry logic before the stuck loop began — a separate, already-mitigated
-finding, not the cause of the timeout. Single task, single trial: this is a
-lead to replicate (on this task again, and across the rest of the suite),
-not yet a verdict on Qwen3.8 itself. Full write-up:
-`local-model-bench/SPEC.md`'s 2026-08-16 report, indexed in its `STATUS.md`.
+**Post-migration claude-sonnet-5 comparison, 4 live trials (2026-08-16):**
+`claude-sonnet-5` (this session's own CLI) passed `go/lru-cache` clean in
+32.4s, one shot — 3/3 all-time on this exact task per `local-model-bench`'s
+history. `pi-local` (Qwen3.8) went **0/4** across four repeated live trials,
+producing the identical bug every time (a key/value-confusion in eviction),
+and `cross-model-review.ts` independently caught that same bug 4/4 times
+without the model ever acting on the diagnosis. Along the way: a real gap
+in the task's own hidden tests was found and fixed (every eviction test
+used `key == value`, so this exact bug scored a false "pass"); two real
+bugs were found and fixed live in the two new extensions built in response
+(`progress-stall-guard.ts`, `wall-clock-budget-nudge.ts` — see their table
+rows below); a third extension gap was found and left honestly
+unfixed (the stall guard's repeated-failure fingerprint is too strict
+against varied scratch-test content); and the dominant early contention
+turned out to be self-inflicted (leftover processes from earlier trials,
+not fully killed, still contending for the shared local-model route).
+Evidence points to `defaultThinkingLevel: "off"` as a likely contributing
+factor — across all four trials the model produced exactly one turn of
+narrated reasoning text out of 265 tool calls — untested as a fix.
+Full account, trial-by-trial: `pi-harness-history.md`'s "Post-Qwen3.8-
+migration claude-sonnet-5 comparison" entry (2026-08-16). Task-suite
+detail: `local-model-bench/SPEC.md`'s 2026-08-16 report, indexed in its
+`STATUS.md`.
 
 Same-primary review still requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
 `blind-self-review`, never cross-model, if ever pointed back at the same
@@ -115,8 +118,8 @@ Detail, including the pair-4 concurrency-bug deep-dive, in
 | `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks. Redesigned `tool_result` write-scan live-confirmed (fired instantly on a planted `http.Error(w, err.Error(), ...)` leak); `agent_settled` backstop also confirmed in the same run. |
 | `goal-gate.ts` (`/goal` command) | Adopted, on by default | Session-scoped `/goal <condition>` with a literal `GOAL COMPLETE: <evidence>` marker gated on the most recent broad verification passing against the *current* diff hash (diff-hash-bound, not self-report). Live-confirmed: kickoff race fixed, false-rejection-after-nudge fixed, stall-escalation fixed and live-confirmed (real stall → escalated nudge → recovery), `session_compact` mid-goal reminder shipped but not yet live-exercised. n=7 organic single-process runs, all converged at `rounds: 0` or `1` — "many nudge rounds" behavior not yet seen from this model, treated as a real (if provisional) negative finding, not a gap. Full account, including two real production runs against `personal-budget-simplifier`, in history. |
 | `build_app.py` (zero-human build orchestrator) | Live-tested | Drives bounded `pi -p` corrective rounds outside chat, always writes `BUILD_REPORT.md`. `--containment` confirmed refusing exactly as documented (exit 1, no report, no round attempted). Multi-round corrective recovery: 5/5 single-round successes across every attempt so far, including three deliberate traps (a hidden runtime-only behavioral contract, a concurrency-bug class this model class sometimes misses unaided) — same shape as `goal-gate.ts`'s n=7 negative finding, not a testing gap; the `--continue` loop itself is unit-tested but still never exercised against a real failure. Non-Go stacks unexercised. |
-| `progress-stall-guard.ts` | New, trace-only, source-tested | Detects the 2026-08-16 stuck-loop finding below: repeated tool calls (re-running a self-written test) with no source edit and an unchanged failure fingerprint. 7 deterministic tests, including a direct repro of the observed transcript shape. Ships logging every fire via `appendEntry`; the actual nudge (`PI_STALL_GUARD_NUDGE=1`) is not yet enabled by default, pending a live catch to measure its false-positive rate against. |
-| `wall-clock-budget-nudge.ts` | New, on by default | Warns once near 75% of an externally-supplied `PI_HARNESS_TIMEOUT_MINUTES` deadline ("land your diagnosed fix now"). Inert unless that env var is set; `local-model-bench`'s runner now sets it from each task's `harness_timeout_minutes`. 5 deterministic tests. Not yet live-exercised against a real near-timeout run. |
+| `progress-stall-guard.ts` | Trace-only, two live-found bugs fixed, one live-found gap open | Detects repeated tool calls (re-running a self-written test) with no source edit and an unchanged failure fingerprint. Two real bugs found and fixed across trials 3-4 (2026-08-16): missing `make (?:verify\|test\|check)` pattern, and `agent_start` resetting state on every internal auto-retry instead of only the true first start. Both confirmed fixed live in trial 4 (single `agent_start`, correct trace behavior throughout a real 30-minute run). Open gap, found live, not yet fixed: the repeated-failure fingerprint is too strict against varied scratch-test content written outside the `write`/`edit` tool path (e.g. `bash cat > /tmp/x_test.go <<EOF`) — trial 4 reached 61 stall rounds (~26 min, zero source edits) without ever firing. 9 deterministic tests. Nudge (`PI_STALL_GUARD_NUDGE=1`) still not enabled by default, pending resolution of the fingerprint gap. Full account: `pi-harness-history.md`'s 2026-08-16 entry. |
+| `wall-clock-budget-nudge.ts` | Adopted, on by default, live-confirmed | Warns once near 75% of an externally-supplied `PI_HARNESS_TIMEOUT_MINUTES` deadline ("land your diagnosed fix now"). Inert unless that env var is set; `local-model-bench`'s runner sets it from each task's `harness_timeout_minutes`. One bug found and fixed live (2026-08-16): `agent_start` resetting `startedAt` on every internal auto-retry, so a retried run's deadline never accumulated real elapsed time; fixed to anchor on only the true first `agent_start`. Confirmed live in trial 4: fired exactly once, at the correct point (23 of 30 minutes), zero false resets across a real run. 5 deterministic tests. |
 | `todo.ts` (built-in TUI tool) | Fixed | A malformed model tool-call (validator-rejected `todo` args) hit a missing `default:` case in `renderResult`, returning `undefined` into the TUI's render tree and crashing the interactive session. Root-caused from the actual crashed session log, deterministically reproduced standalone, fixed with an explicit default case. Universal bug class (any model that trips arg validation on `todo`), not local-model-specific. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Aider dispatch is out of scope (benchmarked and removed, see `~/.claude/CLAUDE.md`). |
 | KAT-Coder-V2.5-Dev-OptiQ-4bit (`:8083`) | Ruled out, both roles | As primary: one win statistically indistinguishable from Qwen's own variance. As reviewer: structural failure (220s+, never completes), not a tunable timeout. |

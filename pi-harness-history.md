@@ -2964,3 +2964,165 @@ than re-running blind.
 
 Full investigation history — dated narrative, superseded partial results,
 live-run-by-live-run detail — is in `pi-harness-history.md`.
+
+## Post-Qwen3.8-migration claude-sonnet-5 comparison, 4 live trials, and the diagnose-but-don't-act failure mode, 2026-08-16
+
+Four live `pi -p` trials against `local-model-bench`'s `go/lru-cache` task
+(Qwen3.8-27B via `pi-local`), run to check the harness against the existing
+`claude-sonnet-5` baseline after the Qwen3.6→3.8 migration. Same task every
+time for direct comparability. **claude-sonnet-5 (this session's own CLI,
+solo): passed clean, 100% coverage, 32.4s, ~2.6k output tokens, one shot** —
+the correct fix (proper key-based `touch`/evict via `container/list`).
+**pi-local: 0/4.** Every trial produced the identical bug: `Put` stores the
+list node's `.Value` as the cache *value*, and eviction later reads that
+same field back out as if it were the *key* (`oldest := c.order.Remove(...).
+(int); delete(c.data, oldest)`), so eviction silently targets the wrong (or
+a nonexistent) map entry whenever a key differs from its value. Checking
+`local-model-bench/SPEC.md`'s history, `claude-sonnet-5` is now 3/3 on this
+exact task across every recorded report (2026-07-23, 2026-07-26, this
+session) — this is not a one-off.
+
+**A real gap in the task's own test suite was found and fixed first.**
+Every existing `go/lru-cache` hidden test used `key == value`
+(`Put(1, 1)`), which cannot distinguish evict-by-key from evict-by-value.
+Trial 1's frozen-at-kill-time code would have officially scored a clean
+pass (100% coverage) despite the real bug. Added `TestEvictsByKeyNotValue`
+(distinct keys/values throughout) to `local-model-bench/tasks/go/lru-cache/
+tests/lru_test.go`; confirmed it passes the correct fix and fails the buggy
+one, and leaves the starter's own pre-existing failures unaffected (it
+doesn't happen to touch the *recency* bug the starter has, only the
+key-vs-value one). Every one of the four trials now scores an honest
+failure against this test.
+
+**Trial 1** (see `pi-harness-validation-status.md`'s prior "First live
+claude-sonnet-5 comparison" entry, now superseded by this one): killed after
+31m14s past the suite's 30-minute default timeout, ~452.8k tokens. The model
+self-diagnosed the exact bug via its own written test
+(`TestEvictionWithDistinctKeysAndValues`) within 7 minutes, then spent the
+remaining ~24 minutes re-running near-identical variants of that same test
+against the unedited file. This became the design case for two new
+extensions, below.
+
+**`progress-stall-guard.ts` and `wall-clock-budget-nudge.ts` built in
+response**, design-reviewed by an Opus subagent before implementation (its
+key contribution: `goal-gate.ts`'s existing stall detector hashes the whole
+untracked diff, so a model rewriting a near-identical scratch test every
+round would defeat it too — any fix needed to be scoped to production-file
+edits specifically, not "did the diff change at all"). `progress-stall-guard.ts`
+ships trace-only (`appendEntry` on every fire; the actual nudge stays behind
+`PI_STALL_GUARD_NUDGE=1`) on the recommendation that this repo's own
+precedent (`continuation-nudge.ts` shipped, and was each later widened, off
+single real occurrences) argues for building now rather than waiting for
+replication, but that the nudge itself should earn a live catch before
+being trusted un-flagged. `wall-clock-budget-nudge.ts` ships on by default
+as the lower-risk piece: it warns once near 75% of a caller-supplied
+`PI_HARNESS_TIMEOUT_MINUTES`, closing the specific gap that let trial 1 die
+with zero warning despite already having the right diagnosis in hand.
+
+**Trial 2** (15-minute artificial cutoff, not the real suite default —
+a deliberate choice to see behavior sooner): `cross-model-review.ts` (the
+Gemma reviewer) independently caught the exact same bug at ~11:46, with
+an accurate description of the broken line. The model did not act on it —
+instead it wrote its own verification test to check the reviewer's claim,
+confirmed it, and the run was cut before it could act further.
+`wall-clock-budget-nudge.ts` fired correctly at ~13:34 ("used approximately
+14 of 15 available minutes... land it now"). Neither signal produced an
+edit to `lru.go` (unedited since ~7 minutes in, for the whole 17-minute run).
+
+**Trial 3 surfaced two real bugs in the two new extensions, both found
+live, not by inspection.** Given a real 30-minute budget: (1)
+`progress-stall-guard.ts`'s `TEST_EXECUTION_PATTERNS` didn't match `make
+verify` — the model built its own `Makefile` mid-task and switched to
+running that instead of a direct `go test`, going invisible to the stall
+counter even though `lib/verification.ts`'s `BROAD_VERIFICATION_PATTERNS`
+already covers exactly that indirection. (2) Both new extensions reset
+their internal state (`startedAt`, `sourcelessRounds`, etc.) on every
+`agent_start` — which turned out to fire on **every internal auto-retry**
+after a transient provider error (`503`/`502`), not once per `pi -p`
+invocation. This trial alone hit 16 `agent_start` events from repeated
+`503 Server busy` retries, so both extensions' clocks/counters kept
+getting silently wiped mid-run. Root cause of the retries themselves:
+real generations were taking 200-213s (visible directly in ai-stack's
+`kv_proxy.log`), against the proxy's deliberate 60s `QUEUE_TIMEOUT_S`
+("fail queued requests promptly" — a real design choice, not a bug, see
+`ai-stack/scripts/kv_concurrency_proxy.py`), so pi's client-side auto-retry
+kept firing new requests while the original was still running upstream,
+compounding load against the 2-slot cap.
+
+**A second, larger contributor to that contention was found afterward:
+three of my own processes from trials 1 and 2 were still running.**
+Killing the outer `/usr/bin/time -p pi -p ...` wrapper had not killed the
+`pi` child process underneath it — `ps aux` later showed all of trial 1,
+2, and 3's actual `pi` processes alive simultaneously (up to 1h52m elapsed
+on the oldest), all still contending for the same 2-slot route. This, not
+a single trial's retries alone, was the dominant source of the observed
+200s+ generation times and repeated 503s. Killing all four processes and
+waiting for `/proxy/health` to report `active: 0` (in-flight requests from
+killed clients keep running server-side and don't cancel on client
+disconnect) confirmed a clean baseline before further trials.
+
+**Decision on the proxy-vs-client tradeoff**: given a choice between
+raising the shared proxy's `QUEUE_TIMEOUT_S` (affects every client on the
+route — Open WebUI, Copilot, Claude-dispatch — not just Pi) versus fixing
+it client-side, chose client-side: `settings.json`'s `retry.baseDelayMs`
+raised from pi's default `2000` to `30000` (both the tracked
+`pi/settings.json` and the live `~/.pi/agent/settings.json`, which are
+deliberately not symlinked — see README's "Settings this machine expects").
+`ai-stack`'s proxy timeout was left untouched.
+
+**Both extension bugs fixed and confirmed live in trial 4** (clean single
+process, confirmed `active: 0` before starting, real 30-minute budget):
+`agent_start` count stayed at 1 for the full run (no retries — the
+`baseDelayMs` change plus a genuinely idle route meant none were needed),
+and `wall-clock-budget-nudge.ts` fired exactly once at the correct point
+(23 of 30 minutes). `cross-model-review.ts` caught the bug a fourth
+consecutive time, in round 1.
+
+**Trial 4 also found a third, real gap, left unfixed and documented rather
+than patched mid-investigation**: the model wrote its scratch tests via
+`bash cat > /tmp/lru-debug/main_dbg_test.go <<EOF` heredocs -- outside the
+task's working directory and outside the `write`/`edit` tool path entirely
+-- varying the file's content enough each round that the exact-text failure
+fingerprint never repeated. `sourcelessRounds` climbed to 61 (~26 minutes
+with zero edits to the real file) while `sameFailure` stayed at 0 for the
+entire run, so the stall guard's AND-conjunction (both a round threshold
+and a repeated-fingerprint threshold must hold) never fired, even though
+the underlying behavior -- diagnosed and reproduced, never acted on -- is
+exactly the pattern it exists to catch. The trace-only telemetry recorded
+the whole thing accurately; only the nudge condition itself is too strict
+against this specific evasion. Not fixed here: a looser signal (e.g.
+sourcelessRounds alone past a higher bound, or a coarser/structural
+fingerprint instead of near-exact text) would need its own false-positive
+read before adoption, same discipline as the rest of this investigation.
+
+**Why the model doesn't act on a diagnosis it already has, evidenced not
+speculated**: across all four trials combined (265 tool calls total),
+there was exactly **one** turn of narrated reasoning text -- trial 1's
+final "Done" summary, which confidently (and wrongly) claims a fully
+verified correct fix, citing its own tests passing. `reasoning: 0` in every
+recorded usage line across all four trials confirms this isn't a rendering
+gap: `defaultThinkingLevel: "off"` in `settings.json` means the model
+genuinely has no chain-of-thought scratchpad between tool calls. The
+working hypothesis, not yet tested: without an explicit reasoning trace
+turning "this test fails" into an articulated "therefore the fix is X,"
+the model's default fallback under uncertainty is more verification
+scaffolding (another probe test, a Makefile, a README) rather than a
+targeted edit -- and its confidence that it's already finished (trial 1)
+comes from its own imperfect self-written tests, which is also how the
+official suite's key-vs-value gap went undetected for as long as it did.
+**Untested**: whether `defaultThinkingLevel: "low"`/`"medium"` changes this
+behavior on the same task. Proposed as the next experiment, not yet run.
+
+**Net status**: `pi-local` is 0/4 on this task post-migration, all four
+failures the same bug, `cross-model-review.ts` 4/4 on independently
+catching it. This is now a real, replicated finding about model
+follow-through under this harness's default (no-thinking) configuration --
+not model capability in the reasoning sense (it diagnosed correctly every
+time), and not a harness defect in the sense of missing signal (the
+reviewer caught it every time too). Both new extensions are adopted
+on-by-default (`wall-clock-budget-nudge.ts`) or trace-only pending a live
+catch (`progress-stall-guard.ts`), per `pi-harness-validation-status.md`'s
+extension table. Full task suite (beyond this one repeated task) not
+re-run; `pi-local` has been competitive with `claude-sonnet-5` on other
+tasks in earlier reports (6/7 vs 6/7 twice) -- this is a specific,
+well-evidenced failure mode on one task, not a suite-wide verdict.
