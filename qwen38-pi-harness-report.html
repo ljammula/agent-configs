@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qwen3.8-27B on pi.dev: from 0/4 to 4/4</title>
+<meta name="description" content="How the local pi.dev coding-agent harness went from a replicated 0/4 failure to a replicated 4/4 pass by fixing three default settings.">
+<style>
+  :root {
+    --ground: #f5f3ee;
+    --surface: #ffffff;
+    --surface-2: #ece8de;
+    --ink: #201c15;
+    --ink-soft: #6e6656;
+    --ink-faint: #a39a86;
+    --accent: #a85a1c;
+    --accent-ink: #ffffff;
+    --accent-soft: #ecdcc4;
+    --line: #ded8c8;
+    --pass: #2f6b4f;
+    --pass-soft: #dfebe3;
+    --fail: #a23b2e;
+    --fail-soft: #f4dfda;
+    --warn: #92701c;
+    --warn-soft: #f0e4c3;
+    --pending: #6e6656;
+    --pending-soft: #e9e5da;
+    --code-bg: #efeade;
+    --shadow: 0 1px 2px rgba(32, 28, 21, 0.06), 0 6px 20px rgba(32, 28, 21, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17150f;
+      --surface: #1e1b14;
+      --surface-2: #262219;
+      --ink: #ede7d8;
+      --ink-soft: #b0a690;
+      --ink-faint: #7a7161;
+      --accent: #dd9a4c;
+      --accent-ink: #201505;
+      --accent-soft: #3c2c15;
+      --line: #362f21;
+      --pass: #7cbf9c;
+      --pass-soft: #223228;
+      --fail: #e08a7c;
+      --fail-soft: #3a2420;
+      --warn: #d8b969;
+      --warn-soft: #372d17;
+      --pending: #a79b83;
+      --pending-soft: #2a251b;
+      --code-bg: #221e15;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17150f;
+    --surface: #1e1b14;
+    --surface-2: #262219;
+    --ink: #ede7d8;
+    --ink-soft: #b0a690;
+    --ink-faint: #7a7161;
+    --accent: #dd9a4c;
+    --accent-ink: #201505;
+    --accent-soft: #3c2c15;
+    --line: #362f21;
+    --pass: #7cbf9c;
+    --pass-soft: #223228;
+    --fail: #e08a7c;
+    --fail-soft: #3a2420;
+    --warn: #d8b969;
+    --warn-soft: #372d17;
+    --pending: #a79b83;
+    --pending-soft: #2a251b;
+    --code-bg: #221e15;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  }
+
+  .page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  /* ---- masthead ---- */
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: 34px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 10px 0 6px;
+    text-wrap: balance;
+  }
+
+  .dek {
+    color: var(--ink-soft);
+    font-size: 17px;
+    max-width: 62ch;
+    margin: 0 0 24px;
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--ink-faint);
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 36px;
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  .living-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 100px;
+    padding: 3px 10px 3px 8px;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .living-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* ---- scoreline ---- */
+  .scoreline {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin-bottom: 40px;
+    box-shadow: var(--shadow);
+  }
+  .score-block { text-align: center; }
+  .score-num {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 40px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .score-block.baseline .score-num { color: var(--fail); }
+  .score-block.current .score-num { color: var(--pass); }
+  .score-label {
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .score-arrow {
+    color: var(--ink-faint);
+    font-size: 22px;
+  }
+
+  /* ---- section ---- */
+  section { margin-bottom: 44px; }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-weight: 700;
+    margin: 0 0 16px;
+  }
+  h3 {
+    font-size: 19px;
+    margin: 0 0 8px;
+    letter-spacing: -0.005em;
+  }
+  p { margin: 0 0 14px; }
+  section > p:last-child { margin-bottom: 0; }
+
+  /* ---- timeline strip ---- */
+  .timeline-scroll {
+    overflow-x: auto;
+    margin: 0 -24px;
+    padding: 4px 24px 12px;
+  }
+  .timeline {
+    display: flex;
+    gap: 10px;
+    min-width: max-content;
+  }
+  .trial-chip {
+    width: 108px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+    padding: 12px 12px 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .trial-chip .n {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .trial-chip .verdict {
+    font-weight: 700;
+    font-size: 14px;
+    margin-top: 4px;
+  }
+  .trial-chip .detail {
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    margin-top: 5px;
+    line-height: 1.4;
+  }
+  .trial-chip.fail { background: var(--fail-soft); border-color: transparent; }
+  .trial-chip.fail .verdict { color: var(--fail); }
+  .trial-chip.warn { background: var(--warn-soft); border-color: transparent; }
+  .trial-chip.warn .verdict { color: var(--warn); }
+  .trial-chip.pass { background: var(--pass-soft); border-color: transparent; }
+  .trial-chip.pass .verdict { color: var(--pass); }
+  .trial-chip.pending { background: var(--pending-soft); border-color: transparent; border-style: dashed; border-width: 1px; }
+  .trial-chip.pending .verdict { color: var(--pending); }
+
+  .timeline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+  }
+  .timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+
+  /* ---- cause cards ---- */
+  .causes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 620px) { .causes { grid-template-columns: 1fr; } }
+  .cause-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .cause-tag {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fail);
+    background: var(--fail-soft);
+    border-radius: 5px;
+    padding: 2px 7px;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .cause-card p { font-size: 14.5px; color: var(--ink-soft); }
+  .cause-card code { color: var(--ink); }
+
+  code, pre {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 13px;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 0;
+  }
+  pre code { background: none; padding: 0; }
+
+  /* ---- config diff ---- */
+  .diff-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 620px) { .diff-grid { grid-template-columns: 1fr; } }
+  .diff-col-label {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .diff-col-label.before { color: var(--fail); }
+  .diff-col-label.after { color: var(--pass); }
+  .diff-grid pre { font-size: 12.3px; height: 100%; }
+
+  /* ---- table ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); font-weight: 700; }
+  td.status { font-weight: 700; }
+  td.status.pass { color: var(--pass); }
+  td.status.fail { color: var(--fail); }
+  .table-scroll { overflow-x: auto; }
+
+  /* ---- callout ---- */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .callout b { color: var(--accent); }
+
+  /* ---- next steps ---- */
+  .steps { display: flex; flex-direction: column; gap: 10px; }
+  .step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .step .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink-faint);
+    margin-top: 7px;
+    flex: 0 0 auto;
+  }
+  .step.open .dot { background: var(--warn); }
+  .step p { margin: 0; font-size: 14.5px; }
+  .step .tag { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="eyebrow">pi.dev local coding-agent harness</div>
+  <h1>Qwen3.8-27B: from 0/4 to 3/3</h1>
+  <p class="dek">
+    A local Qwen3.8-27B route was consistently landing the wrong fix on a
+    controlled Go task, then never converting its own correct diagnosis into
+    a code change. Three default settings turned out to be responsible —
+    finding and fixing them flipped the result.
+  </p>
+  <div class="meta-row">
+    <span class="living-badge">living doc — updated as we learn more</span>
+    <span><b>Host</b> kannasmacstudio.lan · Qwen3.8-27B-8bit, mlx-vlm</span>
+    <span><b>Task</b> local-model-bench <code class="mono">go/lru-cache</code></span>
+    <span><b>Last updated</b> 2026-08-17 · 4/4 replicated</span>
+  </div>
+
+  <div class="scoreline">
+    <div class="score-block baseline">
+      <div class="score-num">0 / 4</div>
+      <div class="score-label">Baseline · thinking off</div>
+    </div>
+    <div class="score-arrow">→</div>
+    <div class="score-block current">
+      <div class="score-num">4 / 4</div>
+      <div class="score-label">Post-fix · thinking on</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>What was happening</h2>
+    <p>
+      Every one of four earlier trials produced the exact same bug: the
+      eviction logic confused a cache <em>value</em> for a cache
+      <em>key</em>, deleting the wrong (or a nonexistent) map entry. An
+      independent reviewer model caught the bug correctly all four times.
+      The primary model never acted on it — instead it re-verified its own
+      diagnosis over and over, in one case for 26 minutes straight, without
+      ever landing the one-line fix it had already found.
+    </p>
+    <p>
+      That gap — <b>correct diagnosis, no follow-through</b> — is the thing
+      this investigation chased down.
+    </p>
+  </section>
+
+  <section>
+    <h2>Trial timeline</h2>
+    <div class="timeline-scroll">
+      <div class="timeline">
+        <div class="trial-chip fail"><div class="n">TRIAL 1</div><div class="verdict">Fail</div><div class="detail">Diagnosed correctly, 24 min re-verifying, never fixed</div></div>
+        <div class="trial-chip fail"><div class="n">TRIAL 2</div><div class="verdict">Fail</div><div class="detail">Reviewer caught it; model still didn't act</div></div>
+        <div class="trial-chip fail"><div class="n">TRIAL 3</div><div class="verdict">Fail</div><div class="detail">Same bug; harness retry-storm found &amp; fixed</div></div>
+        <div class="trial-chip fail"><div class="n">TRIAL 4</div><div class="verdict">Fail</div><div class="detail">Same bug again — baseline called replicated</div></div>
+        <div class="trial-chip warn"><div class="n">TRIAL 5</div><div class="verdict">Regressed</div><div class="detail">Thinking on, but a role bug 503'd every turn — zero diff</div></div>
+        <div class="trial-chip pass"><div class="n">TRIAL 6</div><div class="verdict">Pass</div><div class="detail">Role bug fixed. Correct fix, but built its own scaffold</div></div>
+        <div class="trial-chip pass"><div class="n">TRIAL 7</div><div class="verdict">Pass</div><div class="detail">+ temperature fix. Clean, ~4 min, no retries</div></div>
+        <div class="trial-chip pass"><div class="n">TRIAL 8</div><div class="verdict">Pass</div><div class="detail">Same config. Clean, 100% coverage</div></div>
+        <div class="trial-chip pass"><div class="n">TRIAL 9</div><div class="verdict">Pass</div><div class="detail">Ran under real GPU contention from an unrelated process — slower, still correct</div></div>
+      </div>
+    </div>
+    <div class="timeline-legend">
+      <span><span class="swatch" style="background:var(--fail)"></span>Pre-fix baseline</span>
+      <span><span class="swatch" style="background:var(--warn)"></span>Regression found mid-fix</span>
+      <span><span class="swatch" style="background:var(--pass)"></span>Post-fix</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Two root causes, both config defaults</h2>
+    <div class="causes">
+      <div class="cause-card">
+        <span class="cause-tag">Cause 1</span>
+        <h3>Thinking was silently off</h3>
+        <p>
+          Qwen3.8-27B is a hybrid-reasoning model — it's meant to think
+          before answering. The harness's model entry had
+          <code>reasoning: false</code>, which suppressed every
+          thinking-control field the client would otherwise send. Not an
+          explicit "off" — an unset one, discovered only by checking what
+          the server actually returned.
+        </p>
+      </div>
+      <div class="cause-card">
+        <span class="cause-tag">Cause 2</span>
+        <h3>Requests ran fully greedy</h3>
+        <p>
+          The harness has no temperature setting anywhere — no CLI flag, no
+          config field. The inference server defaults to
+          <code>temperature 0</code> (greedy decoding) whenever it's
+          omitted, and it separately ignores the model's own recommended
+          defaults. Every trial, including the first four, ran deterministic
+          greedy decode on what's meant to be a temperature-1.0 reasoning
+          model.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="callout">
+      <b>A third bug appeared the moment we fixed the first one.</b>
+      Turning thinking on has a side effect on generic OpenAI-compatible
+      endpoints: the client switches the system prompt from role
+      <code>"system"</code> to role <code>"developer"</code>. This server's
+      tokenizer rejects that role outright — every turn failed with a 503,
+      burning all retries, and the trial ended with <b>zero</b> code
+      changes, worse than doing nothing. Caught immediately by checking the
+      run's own transcript rather than assuming the fix had worked, and
+      fixed with one explicit config flag.
+    </div>
+  </section>
+
+  <section>
+    <h2>What changed</h2>
+    <div class="diff-grid">
+      <div>
+        <div class="diff-col-label before">Before</div>
+        <pre><code>reasoning: false
+defaultThinkingLevel: "off"
+temperature: <span style="color:var(--ink-faint)">(unset → greedy)</span></code></pre>
+      </div>
+      <div>
+        <div class="diff-col-label after">After</div>
+        <pre><code>reasoning: true
+compat.thinkingFormat: "qwen"
+compat.supportsDeveloperRole: false
+defaultThinkingLevel: "medium"
+temperature: 0.6 <span style="color:var(--ink-faint)">(injected client-side)</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Results so far</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Trial</th><th>Config</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1 – 4</td><td>Thinking off (original default)</td><td class="status fail">0 / 4 — identical wrong fix every time</td></tr>
+          <tr><td>5</td><td>Thinking on, temp unset</td><td class="status fail">Regression — role bug, zero diff</td></tr>
+          <tr><td>6 – 9</td><td>Thinking on (medium) + role fix + temp 0.6</td><td class="status pass">4 / 4 — correct fix, 100% coverage each time</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 14px; font-size: 13.5px; color: var(--ink-faint);">
+      4/4 matches the exact repeat count the original 0/4 baseline needed
+      before it was called replicated rather than suggestive — we're
+      calling this replicated by the same bar, not a looser one. Trial 9
+      ran while an unrelated process was independently contending for the
+      same inference route (confirmed via <code>/proxy/health</code> and
+      the other process's own source) and still passed, just slower — a
+      small extra data point that the fix isn't fragile to load.
+    </p>
+  </section>
+
+  <section>
+    <h2>Open questions</h2>
+    <div class="steps">
+      <div class="step open">
+        <div class="dot"></div>
+        <div>
+          <p>Run the fix against a broader slice of the task suite, not just this one repeated task, before calling it a general verdict.</p>
+          <span class="tag">not started</span>
+        </div>
+      </div>
+      <div class="step open">
+        <div class="dot"></div>
+        <div>
+          <p><code>preserve_thinking</code> is reported elsewhere as the fix for agentic re-planning loops — this exact failure shape — but the request format in use here doesn't send it. Flagged as the next thing to check if a future trial regresses.</p>
+          <span class="tag">not yet tested</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Full research trail: <code class="mono">qwen38-agentic-coding-tuning-research.md</code> · dated history: <code class="mono">pi-harness-history.md</code></span>
+    <span>agent-configs repo</span>
+  </footer>
+
+</div>
+</body>
+</html>

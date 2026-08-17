@@ -1,7 +1,8 @@
 # Qwen3.8-27B agentic-coding tuning research and recommendations
 
-Colleague-facing summary: [Qwen3.8-27B on pi.dev: from 0/4 to 4/4](https://claude.ai/code/artifact/fa91409d-8422-4c86-be89-d2c36787d8d2)
-(kept in sync with this file — update both when new trials land).
+Colleague-facing summary: `qwen38-pi-harness-report.html` (repo root,
+self-contained — open directly in a browser; kept in sync with this file,
+update both when new trials land).
 
 Research date: 2026-08-17, revised after Opus review same day. Scope:
 validate `pi.dev` local harness's Qwen3.8-27B route (`:8080`, see

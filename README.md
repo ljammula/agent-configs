@@ -12,7 +12,8 @@ way) flipped a replicated 0/4 result on a controlled task to a replicated
 4/4.
 Full research trail: [qwen38-agentic-coding-tuning-research.md](qwen38-agentic-coding-tuning-research.md).
 Narrative entry: [pi-harness-history.md](pi-harness-history.md).
-Colleague-facing writeup: [Qwen3.8-27B on pi.dev: from 0/4 to 4/4](https://claude.ai/code/artifact/fa91409d-8422-4c86-be89-d2c36787d8d2).
+Colleague-facing writeup: [qwen38-pi-harness-report.html](qwen38-pi-harness-report.html)
+(self-contained, open directly in a browser).
 
 **Current-machine Pi audit (2026-08-03):** the hardening plan is implemented
 locally. Pi 0.83.0 now has a pinned TypeScript contract suite, current-diff
