@@ -5,6 +5,13 @@ Agent instructions and skills used on this machine, organized by agent.
 **pi harness validation status** (what's adopted vs. not, and why): see
 [pi-harness-validation-status.md](pi-harness-validation-status.md).
 
+**Qwen3.8-27B thinking/temperature tuning (2026-08-17):** the local
+Qwen3.8 route was running with thinking disabled and undocumented greedy
+decoding; fixing both (plus a developer-role regression found along the
+way) flipped a replicated 0/4 result on a controlled task to 3/3 so far.
+Full research trail: [qwen38-agentic-coding-tuning-research.md](qwen38-agentic-coding-tuning-research.md).
+Narrative entry: [pi-harness-history.md](pi-harness-history.md).
+
 **Current-machine Pi audit (2026-08-03):** the hardening plan is implemented
 locally. Pi 0.83.0 now has a pinned TypeScript contract suite, current-diff
 quality gate, truthful reviewer configuration, project-scoped DayTrix overlay,
