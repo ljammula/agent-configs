@@ -1,5 +1,8 @@
 # Qwen3.8-27B agentic-coding tuning research and recommendations
 
+Colleague-facing summary: [Qwen3.8-27B on pi.dev: from 0/4 to 4/4](https://claude.ai/code/artifact/fa91409d-8422-4c86-be89-d2c36787d8d2)
+(kept in sync with this file — update both when new trials land).
+
 Research date: 2026-08-17, revised after Opus review same day. Scope:
 validate `pi.dev` local harness's Qwen3.8-27B route (`:8080`, see
 `local-ai-stack.md`) against vendor documentation for agentic coding, and
@@ -310,12 +313,23 @@ transcript is intact for comparison since that run errored out before
 reaching any file-writing turns. **Write the capture file outside the
 task working directory in future trials.**
 
-**n=1 against a 4-trial 0/4 baseline is a real, hidden-test-verified
-success, not yet a replicated finding.** This repo's own standard (the
-original 0/4 result itself needed 4 consistent repeats before being
-called "replicated") argues for re-running trial 6's exact configuration
-several more times before treating this as fixed rather than lucky. Not
-done here.
+**Trials 7-9: three more repeats, all pass.** Trial 7 added
+`temperature: 0.6` (see below) and converged cleanly in ~4 minutes, no
+retries, no self-built scaffold — noticeably cleaner than trial 6.
+Trial 8 passed the same way. Trial 9 ran under real, log-confirmed GPU
+contention from an unrelated concurrent process (`docwriter.ts`, verified
+via its own source to default to the same `:8080` route — `/proxy/health`
+showed `active: 2` and `queue_wait_seconds: 13.7`, decode rate crashed to
+~15 tok/s from the 51.1 tok/s solo baseline) and still passed cleanly once
+it finished, just slower. All three: correct key-based fix, all 5 hidden
+tests pass including `TestEvictsByKeyNotValue`, 100% statement coverage.
+
+**Net: 4/4 post-fix (trials 6-9) against a 4/4-replicated pre-fix 0/4
+baseline.** Same repeat count this repo's own prior finding needed before
+being called replicated. This is now a real, replicated reversal on this
+one task, not a lucky n=1 — though broader task coverage beyond this one
+repeated task is still open (see below) before calling it a general
+verdict rather than a well-evidenced result on one task.
 
 Re-run the exact `go/lru-cache` task from the 4-trial report for direct
 comparability. Given this repo's own standard of evidence (seeded, paired

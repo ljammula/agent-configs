@@ -3186,9 +3186,9 @@ outright. Step 1's curls missed this because none of them included a
 system-role message. Fixed with `supportsDeveloperRole: false`;
 re-verified via curl before re-running anything.
 
-**Trials 6-8: 3/3 pass, post-fix.** Same task, same clean-baseline
+**Trials 6-9: 4/4 pass, post-fix.** Same task, same clean-baseline
 discipline (checked `/proxy/health` `active: 0` and no stray `pi`
-processes before each). All three produced a correct, key-based
+processes before each). All four produced a correct, key-based
 `touch()`-style fix and passed the full hidden suite including
 `TestEvictsByKeyNotValue` -- the regression test added specifically
 because all four original trials shared the value-as-key eviction bug --
@@ -3197,7 +3197,14 @@ at 100% statement coverage each time. Trial 6 built its own scaffold
 in doing so, deleted the transcript capture file this investigation had
 placed inside its own working directory -- a methodology fix (capture
 file moved outside the task workdir) landed before trial 7, which then
-ran cleanly with no scaffold detour.
+ran cleanly with no scaffold detour. Trial 9 ran under real, log-confirmed
+GPU contention from an unrelated concurrent process (`docwriter.ts`,
+independent in-progress work on this machine, confirmed via its own
+source to default to the same `:8080` route -- `/proxy/health` showed
+`active: 2` and `queue_wait_seconds: 13.7`, decode rate crashed to ~15
+tok/s from the 51.1 tok/s solo baseline) and still passed cleanly once it
+finished, just slower -- the fix held up under real contention, not only
+in a clean isolated environment.
 
 **Temperature, separately investigated and fixed.** `pi-coding-agent` has
 no `--temperature` flag or `settings.json` field at all (confirmed by
@@ -3233,11 +3240,14 @@ anyway, but that default is unconfirmed for this specific mlx-vlm
 deployment. **Flagged as the next thing to check if a future trial
 regresses to the old diagnose-but-don't-act pattern.**
 
-**Net status, still forming**: 3/3 post-fix against a 0/4 pre-fix
-baseline on one task is a real, hidden-test-verified reversal, not yet a
-replicated finding -- this file's own bar for the original 0/4 result
-was 4 consistent repeats. More trials in progress. A real regression
-(trial 5) was found and fixed along the way, which is itself evidence
-this investigation's verification discipline (live curl checks, clean
-baselines, debug-verified config changes) is doing its job rather than
-rubber-stamping the first plausible-looking config.
+**Net status: replicated.** 4/4 post-fix against a 0/4 pre-fix baseline on
+one task, matching this file's own bar for the original 0/4 result (4
+consistent repeats) before calling a finding replicated rather than
+suggestive. A real regression (trial 5) was found and fixed along the
+way, which is itself evidence this investigation's verification
+discipline (live curl checks, clean baselines, debug-verified config
+changes) is doing its job rather than rubber-stamping the first
+plausible-looking config. Still open: this is one task, repeated;
+broader task-suite coverage (beyond `go/lru-cache`) hasn't been re-run
+under the new config, and `preserve_thinking` (flagged above) remains
+unactioned pending a future regression that would motivate it.

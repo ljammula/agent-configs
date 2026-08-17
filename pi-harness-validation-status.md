@@ -69,12 +69,13 @@ regression first (`supportsDeveloperRole` defaults true for reasoning
 models on generic OpenAI-compatible endpoints; this route's tokenizer
 rejects the resulting `"developer"`-role message with a 503 on every
 turn, producing a zero-diff run worse than the 0/4 baseline), fixed by
-forcing that compat flag off. With both fixes in place: **3/3 on
-`go/lru-cache`** (trials 6-8), correct key-based fix, 100% coverage,
-matching the exact regression test (`TestEvictsByKeyNotValue`) added
-because of this file's own 0/4 finding — not yet the ~4-repeat bar this
-file's own prior finding needed before being called replicated, more
-trials in progress. Full trail: `qwen38-agentic-coding-tuning-research.md`
+forcing that compat flag off. With both fixes in place: **4/4 on
+`go/lru-cache`** (trials 6-9), correct key-based fix, 100% coverage each
+time, matching the exact regression test (`TestEvictsByKeyNotValue`)
+added because of this file's own 0/4 finding — the same ~4-repeat bar
+this file's own prior finding needed before being called replicated
+(trial 9 ran under real, log-confirmed GPU contention from an unrelated
+process and still passed). Full trail: `qwen38-agentic-coding-tuning-research.md`
 (repo root) and `pi-harness-history.md`'s "untested `defaultThinkingLevel`
 hypothesis, tested" entry (2026-08-17).
 

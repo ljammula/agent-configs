@@ -8,9 +8,11 @@ Agent instructions and skills used on this machine, organized by agent.
 **Qwen3.8-27B thinking/temperature tuning (2026-08-17):** the local
 Qwen3.8 route was running with thinking disabled and undocumented greedy
 decoding; fixing both (plus a developer-role regression found along the
-way) flipped a replicated 0/4 result on a controlled task to 3/3 so far.
+way) flipped a replicated 0/4 result on a controlled task to a replicated
+4/4.
 Full research trail: [qwen38-agentic-coding-tuning-research.md](qwen38-agentic-coding-tuning-research.md).
 Narrative entry: [pi-harness-history.md](pi-harness-history.md).
+Colleague-facing writeup: [Qwen3.8-27B on pi.dev: from 0/4 to 4/4](https://claude.ai/code/artifact/fa91409d-8422-4c86-be89-d2c36787d8d2).
 
 **Current-machine Pi audit (2026-08-03):** the hardening plan is implemented
 locally. Pi 0.83.0 now has a pinned TypeScript contract suite, current-diff
