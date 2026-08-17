@@ -107,13 +107,40 @@ absence, network denial, `/tmp` noexec, capabilities, no-new-privileges).
 ## Current battery result
 
 A completed nine-pair randomized screen (seed `20260802`, stock Pi vs. the
-installed harness) is the current operational-hardening evidence: hidden-test
-success baseline 7/9, harness 8/9 (its one loss was a shared baseline failure,
-not a harness defect); zero extension errors across all eighteen runs; median
-paired runtime overhead 100.3%, above the plan's 20% screening threshold —
-the honestly-measured cost of quality-gate's nested-manifest verification and
-corrective-follow-up loop running on every pair. Full record:
-`pi/evals/full-screening-2026-08-03.json`; runner: `pi/evals/run_screening.py`.
+installed harness) is the pre-hardening operational-hardening evidence:
+hidden-test success baseline 7/9, harness 8/9 (its one loss was a shared
+baseline failure, not a harness defect); zero extension errors across all
+eighteen runs; median paired runtime overhead 100.3%, above the plan's 20%
+screening threshold — the honestly-measured cost of quality-gate's
+nested-manifest verification and corrective-follow-up loop running on every
+pair. Full record: `pi/evals/full-screening-2026-08-03.json`; runner:
+`pi/evals/run_screening.py`. This battery predates the 2026-08-17 thinking/
+temperature hardening (it ran with thinking off, matching the runner's
+still-current determinism pin) and remains valid evidence for that config.
+
+**Hardened-config rerun (2026-08-17), 7/9 tasks** (seed `20260802`,
+`go/lru-cache` skipped — it already has separate 4/4 hardened-config live
+evidence, see above): baseline 7/7 valid and passed; harness only 4/7 valid,
+though every valid harness run passed (4/4), matching baseline's quality.
+The gap is reliability, not correctness: 3/7 harness arms (43%) failed to
+complete inside their existing per-task timeout budgets (30/45 min,
+unchanged since before thinking was enabled) — two genuine timeouts
+(`go-flutter/bookmarks-app`: 45 min, zero diff, zero turns, unresolved;
+`dart/sequential-runner`: 30 min, but the diff it had already made passes
+hidden tests — quality-gate's loop didn't settle in time, matching the
+already-documented `pair4-rerun-2026-08-13` failure shape) and one real,
+now-fixed extension defect (`git-checkpoint.ts` crashed on a stale-context
+error mid-run; see its table row below). Median paired runtime overhead
+across the 4 fully-valid pairs was ~312% (vs. 100.3% pre-hardening) —
+thinking-enabled turns cost substantially more wall-clock time per turn, as
+expected; the real finding is that the fixed timeout budgets haven't been
+revisited to match. This run also surfaced and fixed two harness-runner
+reliability issues unrelated to Pi itself — a self-inflicted duplicate
+process from assuming a silent `ps` meant a launch had died, and a sandbox
+background-task kill hitting the operating agent's own tool calls at a fixed
+~10-13 minute mark (mitigated with a detached `nohup … & disown` launch).
+Full record: `pi/evals/hardened-screening-2026-08-17.json`; narrative:
+`pi-harness-history.md`'s 2026-08-17 "hardened-config battery rerun" entry.
 Detail, including the pair-4 concurrency-bug deep-dive, in
 `pi-harness-history.md`.
 
@@ -124,7 +151,7 @@ Detail, including the pair-4 concurrency-bug deep-dive, in
 | `protected-paths.ts` | Adopted, on by default | Tool guard on Pi `write`/`edit`, not `bash`, symlink escapes, or OS-level confinement. Deterministic tests + 1 live catch. |
 | `format-on-edit.ts` | Adopted, on by default | Deterministic gofmt/dart-format/prettier-if-present pass. |
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
-| `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. |
+| `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. Live-found and fixed 2026-08-17 (hardened battery, pair 7, `go/notes-api`): `turn_start`'s first ctx call could throw Pi's documented stale-context error (a session reload/compaction/fork landing before the handler ran), crashing the turn — `stack-router.ts`/`quality-gate.ts` already guarded against this exact class via `lib/stale-context.ts`, `git-checkpoint.ts` had not. Fixed with the same guard; 4 new deterministic tests, including one reproducing the exact crash. Not yet re-observed live post-fix (the race is timing-dependent, not reliably reproducible on demand). |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
 | `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up under `pi -p` is a **confirmed real gap, not just a suspicion**: fires in a small isolated repro (n=1) but silently doesn't in two independent deep sessions (9 turns real, 30 turns deliberate repro) — queues the follow-up correctly, then the process exits with no second turn. Mechanism not yet isolated; see history. |
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Only Go/Dart routes have battery coverage; rest are unit-tested only. |
@@ -152,6 +179,18 @@ Detail, including the pair-4 concurrency-bug deep-dive, in
 Condensed from the full todo list (`pi-harness-history.md` has the complete,
 evidence-cited version of each):
 
+- **Per-task timeout budgets vs. thinking-enabled turn cost**: the
+  2026-08-17 hardened-config battery rerun found 3/7 harness arms (43%)
+  failing to complete inside their existing `harness_timeout_minutes`
+  budgets (30/45 min), which predate thinking being enabled and haven't been
+  revisited. One (`dart/sequential-runner`) had already produced a
+  hidden-test-passing diff before running out of time — a pure
+  budget/settlement-speed problem, not a correctness one, and the second
+  live occurrence of the exact failure shape from `pair4-rerun-2026-08-13`.
+  The other (`go-flutter/bookmarks-app`) produced zero diff and zero turns
+  in the full 45 minutes — a genuine stall, not yet root-caused. Needs
+  either raised budgets or a quality-gate settlement-speed fix before this
+  can be called resolved; see `pi/evals/hardened-screening-2026-08-17.json`.
 - **Background-process kills** (now four unattended `/goal` runs killed
   mid-round, the latest two on 2026-08-12): root-caused as far as the
   mechanism class — a client-side network-idle timeout on the primary

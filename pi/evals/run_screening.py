@@ -74,14 +74,18 @@ def run(
     )
 
 
-def schedule(seed: int) -> list[ScheduledPair]:
+def schedule(seed: int, skip_tasks: frozenset[str] = frozenset()) -> list[ScheduledPair]:
     rng = random.Random(seed)
     tasks = TASKS.copy()
     rng.shuffle(tasks)
     result: list[ScheduledPair] = []
-    for index, task in enumerate(tasks, start=1):
+    index = 0
+    for task in tasks:
         arms = list(ARMS)
         rng.shuffle(arms)
+        if task in skip_tasks:
+            continue
+        index += 1
         result.append(ScheduledPair(index, task, (arms[0], arms[1])))
     return result
 
@@ -381,51 +385,105 @@ def main() -> int:
     parser.add_argument("--host", default=os.environ.get("AI_STACK_HOST", "192.168.1.233"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--plan", action="store_true", help="print the randomized schedule and exit")
-    parser.add_argument("--max-pairs", type=int, default=len(TASKS), help="run a schedule prefix for runner validation")
+    parser.add_argument("--max-pairs", type=int, default=None, help="run a schedule prefix for runner validation")
+    parser.add_argument(
+        "--skip-task",
+        action="append",
+        default=[],
+        help="task id (e.g. go/lru-cache) to omit from the schedule; repeatable. "
+        "Use for tasks with existing, separately-recorded evidence at the current "
+        "runtime config so they aren't re-run from scratch.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an interrupted run found at --output: reuse its manifest's "
+        "seed and skipped tasks (ignoring --seed/--skip-task), and skip any "
+        "(pair, arm) that already has a valid record in its results.jsonl instead "
+        "of re-running or duplicating it.",
+    )
     args = parser.parse_args()
 
-    planned = schedule(args.seed)
+    resumed_valid: set[tuple[int, str]] = set()
+    if args.resume:
+        if args.output is None:
+            parser.error("--resume requires --output pointing at the run to continue")
+        manifest_path = args.output / "manifest.json"
+        results_path = args.output / "results.jsonl"
+        if not manifest_path.exists():
+            parser.error(f"--resume found no manifest at {manifest_path}")
+        prior_manifest = json.loads(manifest_path.read_text())
+        args.seed = prior_manifest["seed"]
+        skip_tasks = frozenset(prior_manifest.get("skipped_tasks", []))
+        if results_path.exists():
+            for line in results_path.read_text().splitlines():
+                record = json.loads(line)
+                if record["valid"]:
+                    resumed_valid.add((record["pair"], record["arm"]))
+    else:
+        skip_tasks = frozenset(args.skip_task)
+        unknown_skips = skip_tasks - frozenset(TASKS)
+        if unknown_skips:
+            parser.error(f"--skip-task not in TASKS: {sorted(unknown_skips)}")
+
+    planned = schedule(args.seed, skip_tasks)
+    if args.max_pairs is None:
+        args.max_pairs = len(planned)
     if args.plan:
         print(json.dumps([asdict(pair) for pair in planned], indent=2))
         return 0
 
-    if not 1 <= args.max_pairs <= len(TASKS):
-        parser.error(f"--max-pairs must be between 1 and {len(TASKS)}")
+    if not planned:
+        parser.error("--skip-task removed every scheduled pair")
+    if not 1 <= args.max_pairs <= len(planned):
+        parser.error(f"--max-pairs must be between 1 and {len(planned)}")
     model_payload = model_identity(args.host)
     pi_version = run(["pi", "--version"]).stdout.strip()
     if pi_version != "0.83.0":
         raise RuntimeError(f"expected Pi 0.83.0, found {pi_version!r}")
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    artifact_root = (args.output or Path(tempfile.mkdtemp(prefix=f"pi-screening-{timestamp}-", dir="/tmp"))).resolve()
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    baseline_agent_dir = artifact_root / "baseline-agent"
-    baseline_agent_dir.mkdir()
-    manifest = {
-        "schema_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "seed": args.seed,
-        "pi_version": pi_version,
-        "agent_configs_revision": git_revision(REPO_ROOT),
-        "model": MODEL,
-        "model_endpoint": f"http://{args.host}:8080/v1",
-        "model_response": model_payload,
-        "baseline": "stock Pi; provider shim only; extensions, skills, and prompt templates disabled",
-        "harness": str(INSTALLED_AGENT_DIR),
-        "installed_runtime": installed_runtime_identity(),
-        "security_scoring": "out of scope",
-        "schedule": [asdict(pair) for pair in planned],
-    }
-    (artifact_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"ARTIFACT_ROOT={artifact_root}", flush=True)
+    if args.resume:
+        artifact_root = args.output.resolve()
+        baseline_agent_dir = artifact_root / "baseline-agent"
+        print(
+            f"ARTIFACT_ROOT={artifact_root} RESUMED valid_so_far={len(resumed_valid)}",
+            flush=True,
+        )
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        artifact_root = (args.output or Path(tempfile.mkdtemp(prefix=f"pi-screening-{timestamp}-", dir="/tmp"))).resolve()
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        baseline_agent_dir = artifact_root / "baseline-agent"
+        baseline_agent_dir.mkdir()
+        manifest = {
+            "schema_version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "seed": args.seed,
+            "skipped_tasks": sorted(skip_tasks),
+            "pi_version": pi_version,
+            "agent_configs_revision": git_revision(REPO_ROOT),
+            "model": MODEL,
+            "model_endpoint": f"http://{args.host}:8080/v1",
+            "model_response": model_payload,
+            "baseline": "stock Pi; provider shim only; extensions, skills, and prompt templates disabled",
+            "harness": str(INSTALLED_AGENT_DIR),
+            "installed_runtime": installed_runtime_identity(),
+            "security_scoring": "out of scope",
+            "schedule": [asdict(pair) for pair in planned],
+        }
+        (artifact_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"ARTIFACT_ROOT={artifact_root}", flush=True)
 
     records: list[dict[str, Any]] = []
     for pair in planned[: args.max_pairs]:
         print(
-            f"PAIR={pair.pair}/9 TASK={pair.task} ORDER={','.join(pair.arm_order)}",
+            f"PAIR={pair.pair}/{len(planned)} TASK={pair.task} ORDER={','.join(pair.arm_order)}",
             flush=True,
         )
         for arm in pair.arm_order:
+            if (pair.pair, arm) in resumed_valid:
+                print(f"PAIR={pair.pair} ARM={arm} SKIPPED (already valid)", flush=True)
+                continue
             record = execute_arm(
                 pair, arm, artifact_root, baseline_agent_dir, args.host
             )
@@ -436,15 +494,20 @@ def main() -> int:
                 flush=True,
             )
 
-    valid_records = [record for record in records if record["valid"]]
+    # Summarize from the full results.jsonl, not just this invocation's `records`,
+    # so a resumed run's summary reflects every pair/arm ever recorded for it.
+    all_records = [
+        json.loads(line) for line in (artifact_root / "results.jsonl").read_text().splitlines()
+    ]
+    valid_records = [record for record in all_records if record["valid"]]
     summary = {
-        "runs_attempted": len(records),
+        "runs_attempted": len(all_records),
         "valid_runs": len(valid_records),
-        "invalid_runs": len(records) - len(valid_records),
+        "invalid_runs": len(all_records) - len(valid_records),
         "valid_pairs": sum(
             1
             for pair in planned[: args.max_pairs]
-            if sum(record["pair"] == pair.pair and record["valid"] for record in records) == 2
+            if sum(record["pair"] == pair.pair and record["valid"] for record in all_records) == 2
         ),
         "passes": {
             arm: sum(record["passed"] for record in valid_records if record["arm"] == arm)

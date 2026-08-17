@@ -369,6 +369,8 @@
     flex: 0 0 auto;
   }
   .step.open .dot { background: var(--warn); }
+  .step.done .dot { background: var(--pass); }
+  .step.fail .dot { background: var(--fail); }
   .step p { margin: 0; font-size: 14.5px; }
   .step .tag { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
 
@@ -550,13 +552,64 @@ temperature: 0.6 <span style="color:var(--ink-faint)">(injected client-side)</sp
   </section>
 
   <section>
+    <h2>Broader battery (2026-08-17): quality held, reliability didn't</h2>
+    <p style="font-size: 14.5px; color: var(--ink-faint); max-width: 68ch;">
+      With the fix replicated on one repeated task, the next question was
+      whether it held across the wider multi-stack suite the harness's
+      original nine-pair baseline-vs-harness battery already covered.
+      Reran it (same seed, same task pool minus <code>go/lru-cache</code> —
+      already separately proven) at the hardened config: 7 pairs, stock Pi
+      vs. the installed harness.
+    </p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Arm</th><th>Valid runs</th><th>Passed</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Baseline</td><td class="status pass">7 / 7</td><td class="status pass">7 / 7</td><td>Every run completed and passed.</td></tr>
+          <tr><td>Harness (hardened)</td><td class="status fail">4 / 7</td><td class="status pass">4 / 4 of valid</td><td>Every run that finished passed — the gap is completion, not correctness.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 14px; font-size: 13.5px; color: var(--ink-faint); max-width: 68ch;">
+      Median paired runtime overhead on the four fully-valid pairs was
+      <b>~312%</b>, up from 100.3% pre-hardening — the expected cost of
+      thinking-enabled turns. The real, actionable finding: 3 of 7 harness
+      arms (43%) didn't finish inside per-task timeout budgets that were
+      sized before thinking was turned on and haven't been revisited
+      since. Two were genuine timeouts (one had already produced a
+      hidden-test-passing fix before running out the clock — a pure
+      settlement-speed problem, not a wrong answer); one was a real,
+      now-fixed extension bug (<code>git-checkpoint.ts</code> crashed on a
+      documented Pi stale-context error two sibling extensions already
+      guarded against — added the same guard, 4 new tests, full 179-test
+      suite green). Full record: <code class="mono">pi/evals/hardened-screening-2026-08-17.json</code>.
+    </p>
+  </section>
+
+  <section>
     <h2>Open questions</h2>
     <div class="steps">
-      <div class="step open">
+      <div class="step done">
         <div class="dot"></div>
         <div>
           <p>Run the fix against a broader slice of the task suite, not just this one repeated task, before calling it a general verdict.</p>
-          <span class="tag">not started</span>
+          <span class="tag">done 2026-08-17 — quality held (4/4 of completed harness runs passed); see battery results above</span>
+        </div>
+      </div>
+      <div class="step open">
+        <div class="dot"></div>
+        <div>
+          <p>Per-task timeout budgets (30/45 min) predate thinking being enabled and weren't sized for the ~3x wall-clock cost it adds. Need either raised budgets or a quality-gate settlement-speed fix.</p>
+          <span class="tag">new, 2026-08-17 — 43% of harness arms in the broader battery ran out of time</span>
+        </div>
+      </div>
+      <div class="step open">
+        <div class="dot"></div>
+        <div>
+          <p>One task (<code>go-flutter/bookmarks-app</code>) produced zero diff and zero turns across a full 45-minute uninterrupted run under the hardened config — a genuine stall, mechanism not yet isolated.</p>
+          <span class="tag">new, 2026-08-17 — unresolved</span>
         </div>
       </div>
       <div class="step open">

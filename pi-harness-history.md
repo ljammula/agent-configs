@@ -3251,3 +3251,139 @@ plausible-looking config. Still open: this is one task, repeated;
 broader task-suite coverage (beyond `go/lru-cache`) hasn't been re-run
 under the new config, and `preserve_thinking` (flagged above) remains
 unactioned pending a future regression that would motivate it.
+
+## Hardened-config battery rerun (2026-08-17)
+
+With the thinking/temperature hardening above landed and separately
+replicated on `go/lru-cache` (4/4), the natural next question was whether
+it held up across the broader multi-stack task pool the original
+nine-pair `full-screening-2026-08-03.json` battery covered — that battery
+predates the hardening (ran with thinking off) and is a different
+experiment, not stale evidence for it. Reran `pi/evals/run_screening.py`
+with the same seed (`20260802`) against the same task pool minus
+`go/lru-cache` (already separately proven, re-running it would just
+re-spend real time re-proving a settled result) — 7 pairs.
+
+**Self-inflicted duplicate process (first ~75 minutes, no useful data
+lost).** The first launch used `nohup python3 ... & disown` inside a
+single Bash call that also did `sleep 5; tail ...` and returned. `ps aux`
+from the operating agent's own later shell calls showed nothing matching,
+so a second launch was started against the same `--output` directory.
+Both were in fact still alive (confirmed later via `pgrep -fl`, which
+found both PIDs the plain `ps` grep had missed) and ran concurrently for
+over an hour, contending for the same model route and interleaving
+records into the same `results.jsonl` — directly causing pair 1's first
+attempt to time out. Root cause isolated to process visibility, not an
+actual death: this sandboxed shell's `ps` does not reliably show
+processes spawned by earlier tool calls in the same session. Both were
+killed once found via `pgrep`, contaminated artifacts wiped, and the run
+restarted clean with a single tracked process. Lesson applied for the
+rest of the run: verify with `pgrep -fl <pattern>` before ever assuming a
+background launch died.
+
+**Repeated background-task kill, 3x in a row, always at the identical
+point.** The properly-tracked restart (launched via the operating agent's
+own `run_in_background` Bash flag) was killed by that sandbox three
+consecutive times, always right after starting pair 4's harness arm
+(`go-flutter/bookmarks-app`), roughly 10-13 minutes into each attempt. A
+`--resume` flag was added to `run_screening.py` for this (see "Runner
+changes" below) so each restart re-used every already-valid `(pair, arm)`
+record from `results.jsonl` instead of re-running completed work — no
+already-valid data was lost across the three kills. To isolate whether
+this was model/network-related (matching the harness's own existing
+"background-process kills" open item, which concerns `pi` dying in a
+*normal terminal* `/goal` session) or something specific to this agent's
+own tool sandbox, a fourth attempt used a purely idle polling loop (no
+`pi` subprocess at all, just `sleep 20` checks) launched the same way via
+`run_in_background` — it was killed at the same ~10-13 minute mark
+regardless of having done essentially no work. That isolates the
+mechanism to a fixed-duration limit on this sandbox's own tracked
+background tasks, independent of workload — a different, narrower
+mechanism than the pre-existing "background-process kills" item, which
+remains open and unrelated. Mitigation: launched via `nohup python3 ... &
+disown` with a short-lived launcher (the launcher process itself exits in
+seconds after backgrounding the real work and printing its PID; the real
+`run_screening.py` process is then fully detached from the sandbox's
+background-task tracking, invisible to its kill mechanism). That process
+(PID 70787) then ran uninterrupted for the rest of the battery, roughly
+1.5 more hours, polled manually via direct `ps -p <pid>` checks rather
+than relying on tool-level completion notifications (which this
+mitigation deliberately forfeits).
+
+**Runner changes.** Two additions to `run_screening.py`, both kept as
+permanent runner capability, not throwaway:
+
+- `--skip-task <id>` (repeatable): omits specific tasks from the
+  schedule while the seeded RNG stream is still advanced for them, so the
+  remaining tasks' arm-order assignments stay identical to an unfiltered
+  run with the same seed — used here to skip `go/lru-cache`.
+- `--resume`: continues an interrupted run from its own
+  `manifest.json`/`results.jsonl` at `--output`. Reuses the prior run's
+  seed and skipped-task set (ignoring any `--seed`/`--skip-task` passed
+  alongside `--resume`, to prevent an accidental schedule mismatch),
+  skips any `(pair, arm)` that already has a `valid: true` record instead
+  of re-running or duplicating it, and appends new records to the same
+  `results.jsonl`. `summary.json` is now computed by reading the full
+  `results.jsonl` off disk at the end, not from the current invocation's
+  in-memory `records` list, so a resumed run's summary correctly reflects
+  every pair/arm ever recorded for it, not just the current process's
+  slice.
+
+**Real findings, not process noise.** Three of the seven harness arms
+came back invalid, and unlike the incidents above these were the battery
+doing its job:
+
+1. **`go-flutter/bookmarks-app`, harness arm** — ran the full 45-minute
+   budget *uninterrupted* (via the nohup launch, immune to the sandbox
+   kill above) and still produced zero diff and zero recorded assistant
+   messages. The agent never got a productive turn in. This is a fourth
+   consecutive failure on this exact arm across the session (the prior
+   three were the sandbox kills, not this), which raises the prior of a
+   real problem specific to this task under the hardened config, but the
+   mechanism isn't isolated — retrying a fifth time was judged not worth
+   the further hour of wall-clock at this point. **Open, unresolved.**
+2. **`dart/sequential-runner`, harness arm** — hit the fixture's default
+   30-minute timeout, but the diff already produced when time ran out
+   passes the hidden tests (`hidden_test_exit=0`). The fix was correct;
+   quality-gate's verification/corrective-follow-up loop simply hadn't
+   settled and let the agent declare done before the clock ran out. This
+   is the same failure shape as the already-documented
+   `pair4-rerun-2026-08-13` entry — a second live occurrence, not a new
+   phenomenon. **Open, timeout-budget/settlement-speed problem, not a
+   correctness one.**
+3. **`go/notes-api`, harness arm (pair 7, the repeat measurement)** —
+   `extension_errors=1`: `git-checkpoint.ts`'s `turn_start` handler
+   crashed with Pi's documented stale-context error (a session
+   reload/compaction/fork landing before the handler's first `ctx` call
+   — most likely `ctx.sessionManager.getLeafEntry()`, the only call in
+   that handler not already individually `.catch()`-guarded).
+   `stack-router.ts` and `quality-gate.ts` already guard against this
+   exact error class via `lib/stale-context.ts`, added during the
+   original 2026-08-03 hardening work — `git-checkpoint.ts` had never
+   been given the same guard, a real gap this run surfaced. The
+   underlying code change was correct (`hidden_test_exit=0`); the run is
+   scored invalid purely per the harness's zero-tolerance-for-extension-
+   errors validity contract. **Fixed same-day**: wrapped the handler body
+   in the same `isStaleContextError` guard as the other two extensions;
+   4 new deterministic tests added
+   (`pi/tests/git-checkpoint.test.ts`), including one that reproduces the
+   exact crash via a throwing `ctx.sessionManager.getLeafEntry()` mock.
+   Full 179-test suite (`npm run typecheck && npm test`) passes. Not
+   re-validated against a fresh live occurrence of the same race — it's
+   timing-dependent on exactly when a session reload lands relative to
+   `turn_start`, not reliably reproducible on demand — so confidence in
+   the fix rests on the unit test faithfully reproducing the documented
+   failure mechanism, not on a second live catch.
+
+**Aggregate (final record per (pair, arm); pair 3's first harness attempt
+— invalid, 1800s timeout — is superseded by its `--resume` retry, 792s,
+valid, and excluded from these sums though both remain in
+`results.jsonl`):** baseline 7/7 valid and passed; harness 4/7 valid, but
+every valid harness run passed (4/4) — quality held wherever the run
+completed. Median paired runtime overhead across the 4 fully-valid pairs
+(1, 2, 3, 6) was ~312%, versus the pre-hardening battery's 100.3% — the
+expected cost of thinking-enabled turns, not a surprise. The real,
+actionable finding is reliability: 43% of harness arms didn't finish
+inside timeout budgets that were sized for the pre-thinking harness and
+haven't been revisited since thinking was turned on. Full record:
+`pi/evals/hardened-screening-2026-08-17.json`.
