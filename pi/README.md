@@ -294,6 +294,31 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 - **`notify.ts`** — terminal notification when the agent finishes. Vendored
   change: gated on `hasUI`, since in `-p` mode the raw OSC escape would
   otherwise corrupt captured stdout.
+- **`progress-stall-guard.ts`** — **new; ships trace-only, no live catch
+  yet.** Detects a failure mode `continuation-nudge.ts` can't see: the model
+  keeps making tool calls (writing and re-running its own scratch tests)
+  while never editing the source file it already diagnosed the bug in.
+  Live-observed 2026-08-16 (`local-model-bench`, `go/lru-cache`, Qwen3.8 via
+  `pi-local`): the model correctly self-diagnosed a real eviction bug within
+  7 minutes, then spent ~24 more minutes re-running near-identical debug
+  tests against the same unedited file until an external harness timeout
+  killed it. Fires when a threshold of consecutive test-running turns pass
+  with no non-test-file edit *and* the failure's fingerprint hasn't changed
+  — see the file's own header for the full heuristic and its accepted
+  false-positive case. Every fire is logged via `appendEntry` regardless of
+  whether the nudge itself runs; set `PI_STALL_GUARD_NUDGE=1` to have it
+  actually intervene. Full account and design rationale:
+  `pi-harness-validation-status.md`'s 2026-08-16 entry,
+  `local-model-bench/SPEC.md`'s 2026-08-16 report.
+- **`wall-clock-budget-nudge.ts`** — **new, low-risk, on by default.**
+  Closes the specific gap that let the `progress-stall-guard.ts` run above
+  end in a silent kill: Pi has no notion of an external caller's timeout, so
+  when one exists (e.g. `local-model-bench`'s `harness_timeout_minutes`,
+  passed in via `PI_HARNESS_TIMEOUT_MINUTES`), this warns once near 75% of
+  it — "land what you've diagnosed now" — rather than letting the process
+  die with no chance to act. Inert (no listeners registered) unless that env
+  var is set to a positive number, so normal interactive/`-p` use without an
+  external deadline is unaffected.
 
 ### Prompt templates
 

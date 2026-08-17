@@ -30,6 +30,12 @@ test("installer removes managed DayTrix and stack-skill globals, installs portab
 	assert.equal(await readlink(join(skills, "before-done")), join(repo, "pi/skills/before-done"));
 	assert.equal(await readlink(join(extensions, "quality-gate.ts")), join(repo, "pi/extensions/quality-gate.ts"));
 	assert.equal(await readlink(join(extensions, "stack-skill-overlay.ts")), join(repo, "pi/extensions/stack-skill-overlay.ts"));
+	// Both new detectors ship on-by-default (progress-stall-guard.ts in
+	// trace-only mode until PI_STALL_GUARD_NUDGE=1; wall-clock-budget-nudge.ts
+	// is inert unless a caller sets PI_HARNESS_TIMEOUT_MINUTES) -- neither is
+	// listed in install.sh's DISABLED_PI_EXTENSIONS.
+	assert.equal(await readlink(join(extensions, "progress-stall-guard.ts")), join(repo, "pi/extensions/progress-stall-guard.ts"));
+	assert.equal(await readlink(join(extensions, "wall-clock-budget-nudge.ts")), join(repo, "pi/extensions/wall-clock-budget-nudge.ts"));
 });
 
 test("ordinary upgrades replace known legacy core skill links", async () => {
