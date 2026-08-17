@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi.dev local coding-agent harness</title>
+<meta name="description" content="Hardening a local pi.dev coding agent on Apple Silicon: extension battery results, model tuning, and reports.">
+<style>
+  :root {
+    --ground: #f5f3ee;
+    --surface: #ffffff;
+    --surface-2: #ece8de;
+    --ink: #201c15;
+    --ink-soft: #6e6656;
+    --ink-faint: #a39a86;
+    --accent: #a85a1c;
+    --accent-ink: #ffffff;
+    --accent-soft: #ecdcc4;
+    --line: #ded8c8;
+    --pass: #2f6b4f;
+    --pass-soft: #dfebe3;
+    --fail: #a23b2e;
+    --fail-soft: #f4dfda;
+    --warn: #92701c;
+    --warn-soft: #f0e4c3;
+    --pending: #6e6656;
+    --pending-soft: #e9e5da;
+    --code-bg: #efeade;
+    --shadow: 0 1px 2px rgba(32, 28, 21, 0.06), 0 6px 20px rgba(32, 28, 21, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17150f;
+      --surface: #1e1b14;
+      --surface-2: #262219;
+      --ink: #ede7d8;
+      --ink-soft: #b0a690;
+      --ink-faint: #7a7161;
+      --accent: #dd9a4c;
+      --accent-ink: #201505;
+      --accent-soft: #3c2c15;
+      --line: #362f21;
+      --pass: #7cbf9c;
+      --pass-soft: #223228;
+      --fail: #e08a7c;
+      --fail-soft: #3a2420;
+      --warn: #d8b969;
+      --warn-soft: #372d17;
+      --pending: #a79b83;
+      --pending-soft: #2a251b;
+      --code-bg: #221e15;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17150f;
+    --surface: #1e1b14;
+    --surface-2: #262219;
+    --ink: #ede7d8;
+    --ink-soft: #b0a690;
+    --ink-faint: #7a7161;
+    --accent: #dd9a4c;
+    --accent-ink: #201505;
+    --accent-soft: #3c2c15;
+    --line: #362f21;
+    --pass: #7cbf9c;
+    --pass-soft: #223228;
+    --fail: #e08a7c;
+    --fail-soft: #3a2420;
+    --warn: #d8b969;
+    --warn-soft: #372d17;
+    --pending: #a79b83;
+    --pending-soft: #2a251b;
+    --code-bg: #221e15;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono { font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace; }
+
+  .page { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 { font-size: 36px; line-height: 1.15; letter-spacing: -0.01em; margin: 10px 0 6px; text-wrap: balance; }
+
+  .dek { color: var(--ink-soft); font-size: 17.5px; max-width: 66ch; margin: 0 0 24px; }
+
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center;
+    font-size: 13px; color: var(--ink-faint); padding-bottom: 28px;
+    border-bottom: 1px solid var(--line); margin-bottom: 36px;
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---- stat strip ---- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  @media (max-width: 700px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    box-shadow: var(--shadow);
+  }
+  .stat .num {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--accent);
+  }
+  .stat .label { margin-top: 6px; font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
+
+  section { margin-bottom: 46px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); font-weight: 700; margin: 0 0 16px; }
+  h3 { font-size: 19px; margin: 0 0 6px; letter-spacing: -0.005em; }
+  p { margin: 0 0 14px; }
+  section > p:last-child { margin-bottom: 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* ---- report cards ---- */
+  .report-card {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+    text-decoration: none;
+    color: var(--ink);
+    box-shadow: var(--shadow);
+    transition: border-color 0.15s ease;
+  }
+  .report-card:hover { border-color: var(--accent); }
+  .report-card + .report-card { margin-top: 14px; }
+  .report-card .kicker {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--pass); background: var(--pass-soft);
+    border-radius: 5px; padding: 2px 7px; margin-bottom: 10px; font-weight: 700;
+  }
+  .report-card h3 { color: var(--ink); }
+  .report-card p { color: var(--ink-soft); font-size: 14.5px; margin-bottom: 0; }
+  .report-card .go {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--accent);
+  }
+
+  .report-card.placeholder {
+    border-style: dashed;
+    box-shadow: none;
+    cursor: default;
+  }
+  .report-card.placeholder:hover { border-color: var(--line); }
+  .report-card.placeholder .kicker { color: var(--pending); background: var(--pending-soft); }
+
+  /* ---- extension status groups ---- */
+  .status-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 620px) { .status-groups { grid-template-columns: 1fr; } }
+  .status-group {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .status-group .count {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-weight: 700;
+    font-size: 22px;
+  }
+  .status-group.on .count { color: var(--pass); }
+  .status-group.trace .count { color: var(--warn); }
+  .status-group.off .count { color: var(--ink-faint); }
+  .status-group.ruled-out .count { color: var(--fail); }
+  .status-group .glabel { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); margin: 2px 0 10px; }
+  .status-group ul { margin: 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--ink-soft); }
+  .status-group li { padding: 3px 0; }
+  .status-group code { font-size: 0.85em; }
+
+  /* ---- open items ---- */
+  .steps { display: flex; flex-direction: column; gap: 10px; }
+  .step {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 16px;
+  }
+  .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-top: 7px; flex: 0 0 auto; }
+  .step p { margin: 0; font-size: 14.5px; }
+
+  footer {
+    margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-faint);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="eyebrow">local infrastructure · agent-configs repo</div>
+  <h1>Hardening a local coding agent</h1>
+  <p class="dek">
+    <code>pi.dev</code> running against a local Qwen3.8-27B route on Apple
+    Silicon, wrapped in ~25 harness extensions for safety, verification, and
+    review. This page is the entry point — headline results below, full
+    detail and dated history linked at the bottom, deep-dive reports linked
+    as their own pages.
+  </p>
+  <div class="meta-row">
+    <span><b>Host</b> kannasmacstudio.lan · mlx-vlm</span>
+    <span><b>Harness</b> pi 0.83.0</span>
+    <span><b>Last updated</b> 2026-08-17</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, paired battery</div></div>
+    <div class="stat"><div class="num">0</div><div class="label">Extension errors across 18 battery runs</div></div>
+    <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
+    <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix: Qwen3.8 thinking + temperature tuning</div></div>
+  </div>
+
+  <section>
+    <h2>Reports</h2>
+    <a class="report-card" href="reports/qwen38-pi-harness-report.html">
+      <span class="kicker">Replicated finding</span>
+      <h3>Qwen3.8-27B: from 0/4 to 4/4</h3>
+      <p>
+        The local model was silently running with thinking disabled and
+        undocumented greedy decoding. Fixing both — plus a role-name
+        regression found along the way — flipped a replicated failure into
+        a replicated pass on a controlled task.
+      </p>
+      <span class="go">Read the report →</span>
+    </a>
+    <div class="report-card placeholder">
+      <span class="kicker">Next up</span>
+      <h3>More reports land here as investigations complete</h3>
+      <p>Each self-contained deep dive gets linked from this page when it's done — this section grows over time, not a one-off list.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Extension status</h2>
+    <div class="status-groups">
+      <div class="status-group on">
+        <div class="count">~14</div>
+        <div class="glabel">Adopted, on by default</div>
+        <ul>
+          <li><code>quality-gate.ts</code></li>
+          <li><code>cross-model-review.ts</code></li>
+          <li><code>goal-gate.ts</code> (<code>/goal</code>)</li>
+          <li><code>protected-paths.ts</code></li>
+          <li><code>artifact-guard.ts</code>, <code>error-leak-guard.ts</code></li>
+          <li><code>wall-clock-budget-nudge.ts</code></li>
+          <li>+ format/rtk/checkpoint/safety/scaffold guards</li>
+        </ul>
+      </div>
+      <div class="status-group trace">
+        <div class="count">1</div>
+        <div class="glabel">Trace-only, pending a fix</div>
+        <ul>
+          <li><code>progress-stall-guard.ts</code> — real bugs found &amp; fixed; one detection gap still open (varied scratch-test evasion)</li>
+        </ul>
+      </div>
+      <div class="status-group off">
+        <div class="count">3</div>
+        <div class="glabel">Default-disabled, source-tested only</div>
+        <ul>
+          <li><code>co-change-suggest.ts</code></li>
+          <li><code>continuation-nudge.ts</code></li>
+          <li><code>codebase-memory-mcp</code></li>
+        </ul>
+      </div>
+      <div class="status-group ruled-out">
+        <div class="count">2</div>
+        <div class="glabel">Model candidates ruled out</div>
+        <ul>
+          <li>KAT-Coder-V2.5-Dev-OptiQ-4bit — both roles</li>
+          <li>GLM-4.7-Flash-4bit — reviewer role, 0/3 catches</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open items</h2>
+    <div class="steps">
+      <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — mechanism class identified, exact enforcing code not yet traced.</p></div>
+      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> corrective follow-up under <code>pi -p</code> confirmed to silently not fire in some real sessions (n=2) — a real fix is needed, not just more observation.</p></div>
+      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> runtime overhead (median 100.3%) is still above the plan's 20% screening threshold.</p></div>
+      <div class="step"><div class="dot"></div><p>TypeScript/JS task fixtures still need battery coverage — routed and unit-tested only so far.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>
+      Full status: <code class="mono">pi-harness-validation-status.md</code> ·
+      Dated history: <code class="mono">pi-harness-history.md</code>
+    </span>
+    <span>agent-configs repo</span>
+  </footer>
+
+</div>
+</body>
+</html>

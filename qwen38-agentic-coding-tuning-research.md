@@ -1,7 +1,8 @@
 # Qwen3.8-27B agentic-coding tuning research and recommendations
 
-Colleague-facing summary: `qwen38-pi-harness-report.html` (repo root,
-self-contained — open directly in a browser; kept in sync with this file,
+Colleague-facing summary: `reports/qwen38-pi-harness-report.html`
+(self-contained — open directly in a browser, or via GitHub Pages linked
+from the project overview at `index.html`; kept in sync with this file,
 update both when new trials land).
 
 Research date: 2026-08-17, revised after Opus review same day. Scope:
