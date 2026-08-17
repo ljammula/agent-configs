@@ -85,6 +85,14 @@ opens an actual TCP connection to the configured host — see
 | `extensions/*.ts`, `extensions/*/` | `~/.pi/agent/extensions/…` | Loaded unconditionally at startup |
 | `disabled-extensions/*.ts` | *(not linked)* | Built, code-reviewed, kept for reference — not loaded by default; see below |
 
+Adding a new customization: extension if it needs to intercept a tool call
+or hold state across turns (`git-safety.ts`, `goal-gate.ts`); skill if it's
+reusable procedure that should only cost context when relevance-gated
+(`stack-skill-overlay.ts`'s routed skills); prompt if it's a fixed,
+deterministic one-shot invocation (`/review`, `/before-done`). See `/goal`
+vs. `/review` under "Prompt templates" below for the prompt/extension
+boundary case.
+
 `continuation-nudge.ts` and `co-change-suggest.ts` also remain beside their
 tests under `extensions/`, but the installer explicitly removes/skips their
 runtime links. Their existing evidence does not meet the hardening plan's
