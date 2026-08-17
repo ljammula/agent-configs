@@ -3126,3 +3126,118 @@ extension table. Full task suite (beyond this one repeated task) not
 re-run; `pi-local` has been competitive with `claude-sonnet-5` on other
 tasks in earlier reports (6/7 vs 6/7 twice) -- this is a specific,
 well-evidenced failure mode on one task, not a suite-wide verdict.
+
+## The untested `defaultThinkingLevel` hypothesis, tested: a real regression found and fixed, then 3/3 on `go/lru-cache` post-fix, 2026-08-17
+
+Follow-up to the entry above's explicit open item ("untested: whether
+`defaultThinkingLevel: "low"`/`"medium"` changes this behavior"). Full
+research trail is in `qwen38-agentic-coding-tuning-research.md`
+(repo root); this entry is the narrative summary.
+
+**Research phase.** Read the Qwen3.8-27B model card and vendor docs:
+it's a hybrid-thinking model that reasons by default at
+`reasoning_effort: xhigh`, and `ai-stack-local.ts`'s `reasoning: false`
+was suppressing every thinking-control field pi-ai would otherwise send
+(not an explicit "off" -- an unset one; `model.reasoning` gates every
+branch in `buildParams`). First draft of the research doc overclaimed
+this as "thinking forced off at two layers" -- an Opus subagent review
+caught that this was backwards (nothing forces it off; the served
+default was actually unverified) and also caught that the `reasoning: 0`
+usage-counter evidence in the entry above is likely a structural null on
+this route, not proof of anything: mlx-vlm doesn't populate
+`completion_tokens_details.reasoning_tokens`, so that field reads 0
+whether or not the model reasoned. Both corrections are folded into the
+research doc rather than kept as a separate errata section.
+
+**Step 1, live-verified before any config change**: three direct curls to
+`:8080/v1/chat/completions`. A bare request (mirroring the harness
+exactly) returned no reasoning content -- confirming thinking really was
+off, not just unconfirmed. Top-level `enable_thinking`/`reasoning_effort`
+(pi-ai's `"qwen"` `thinkingFormat`) produced a populated
+`reasoning_content` block. The nested `chat_template_kwargs` shape --
+the one that worked for forcing thinking on GLM on this same stack (see
+"GLM-4.7-Flash-4bit ruled out as reviewer candidate" earlier in this
+file) -- did **not** trigger thinking here. That precedent doesn't
+transfer within this stack; don't assume it does elsewhere either.
+
+**Step 2, applied**: `reasoning: true`, `compat: { thinkingFormat: "qwen",
+supportsReasoningEffort: true }`, and a `thinkingLevelMap` copied from
+pi-ai's bundled `qwen3.8-max-preview` entry, in `ai-stack-local.ts`.
+`defaultThinkingLevel` changed from `"off"` to `"medium"` in both
+`pi/settings.json` and the live, deliberately-unsymlinked
+`~/.pi/agent/settings.json` (missed the second file on the first pass;
+`/usr/bin/diff` caught it after the `rtk`-wrapped `diff` falsely reported
+the two files identical -- worth a separate look, not chased here).
+
+**Trial 5: a real regression, not a fix.** First live re-run of
+`go/lru-cache` under the new config produced **zero diff** -- worse than
+the 0/4 baseline, which at least edited the file every time. Every turn
+in round 1 came back `stopReason: "error"`, `503 tokenizer_unavailable:
+"Unexpected message role"`, immediately, on the very first turn (0 input
+tokens -- not a multi-turn history problem). All 3 client-side retries
+exhausted twice (~7 minutes burned) before the agent settled with no
+code changes; `cross-model-review.ts` and `quality-gate.ts` both
+correctly flagged the failure. Root cause, confirmed live via direct
+curl: pi-ai's `detectCompat` defaults `supportsDeveloperRole: true` for
+any generic OpenAI-compatible `baseUrl` once `model.reasoning` is `true`,
+so pi silently switched the system prompt from role `"system"` to
+`"developer"` -- and this route's tokenizer rejects `"developer"`
+outright. Step 1's curls missed this because none of them included a
+system-role message. Fixed with `supportsDeveloperRole: false`;
+re-verified via curl before re-running anything.
+
+**Trials 6-8: 3/3 pass, post-fix.** Same task, same clean-baseline
+discipline (checked `/proxy/health` `active: 0` and no stray `pi`
+processes before each). All three produced a correct, key-based
+`touch()`-style fix and passed the full hidden suite including
+`TestEvictsByKeyNotValue` -- the regression test added specifically
+because all four original trials shared the value-as-key eviction bug --
+at 100% statement coverage each time. Trial 6 built its own scaffold
+(`.gitignore`, `Makefile`, `README.md`, a self-authored test file) and,
+in doing so, deleted the transcript capture file this investigation had
+placed inside its own working directory -- a methodology fix (capture
+file moved outside the task workdir) landed before trial 7, which then
+ran cleanly with no scaffold detour.
+
+**Temperature, separately investigated and fixed.** `pi-coding-agent` has
+no `--temperature` flag or `settings.json` field at all (confirmed by
+grepping its source), and mlx-vlm has a documented bug ignoring the
+model's own `generation_config.json` (independently reported for the
+Gemma route on this same stack too), so every trial including 1-6 above
+ran at mlx-vlm's undocumented-but-confirmed server default of
+`temperature: 0.0` -- fully greedy, below the vendor's own thinking-mode
+recommendation of 1.0 (or 0.6 for Qwen3.6's "precise coding" preset).
+No client-side lever existed to change it, so one was added: a
+`before_provider_request` hook in `ai-stack-local.ts`, scoped to this
+model id only, injecting `temperature: 0.6`. Verified live with a
+temporary debug line (confirmed `payload.temperature = 0.6` actually
+went out) before removing it. Trial 7 (temperature 0.6) converged in
+~4 minutes with zero retries and no scaffold detour, versus trial 6's
+8+ minutes with a self-built scaffold at the old greedy default --
+suggestive, not proof, that greedy decoding was contributing to the
+over-verification pattern this file's earlier entries describe.
+
+**Community cross-check (2026-08-17), after the config change**: found
+independent, converging support for `"medium"` over the vendor's
+`"xhigh"` default (Simon Willison's write-up: 21 minutes / 22,276
+reasoning tokens on a trivial prompt at `xhigh`, vs. 137 seconds with
+thinking off; an HF commenter separately endorsing `"medium"` as
+"better"). Also found a specific, relevant caveat not yet acted on here:
+community reports describe `preserve_thinking` as the actual fix for
+agentic re-planning loops (wrong tool-call arguments repeated
+indefinitely, resolved by enabling it) -- and confirmed by reading the
+code that the `"qwen"` `thinkingFormat` branch this fix uses does **not**
+send `preserve_thinking` at all (unlike `"qwen-chat-template"`, which
+hardcodes it true). The model card says the server defaults it on
+anyway, but that default is unconfirmed for this specific mlx-vlm
+deployment. **Flagged as the next thing to check if a future trial
+regresses to the old diagnose-but-don't-act pattern.**
+
+**Net status, still forming**: 3/3 post-fix against a 0/4 pre-fix
+baseline on one task is a real, hidden-test-verified reversal, not yet a
+replicated finding -- this file's own bar for the original 0/4 result
+was 4 consistent repeats. More trials in progress. A real regression
+(trial 5) was found and fixed along the way, which is itself evidence
+this investigation's verification discipline (live curl checks, clean
+baselines, debug-verified config changes) is doing its job rather than
+rubber-stamping the first plausible-looking config.

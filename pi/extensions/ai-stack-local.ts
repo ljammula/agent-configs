@@ -1,7 +1,42 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
+// mlx-vlm's OpenAI-compatible server defaults temperature to 0.0 (greedy
+// decoding) whenever a request omits it, and pi-coding-agent has no
+// --temperature flag or settings.json field at all (confirmed by grepping
+// its dist/ for the string -- zero hits), so every request from this
+// harness was running fully greedy regardless of settings.json. mlx-vlm
+// also does not respect the model's own generation_config.json (a known
+// upstream bug, reported independently for the Gemma route on this same
+// stack), so there is no server-side default to fix either -- this must be
+// injected client-side. 0.6 matches Qwen3.6's own "precise coding" thinking
+// preset rather than the vendor's general thinking-mode default of 1.0,
+// chosen for lower variance on a coding-agent harness that also wants
+// reproducible trial comparisons. See
+// qwen38-agentic-coding-tuning-research.md's "Effective temperature during
+// all trials, resolved" section for the full trace of how this was found.
+const QWEN38_TEMPERATURE = 0.6;
+
 export default function (pi: ExtensionAPI) {
   const host = process.env.AI_STACK_HOST || "127.0.0.1";
+
+  // before_provider_request fires for every provider/model this harness
+  // calls, not just this one -- so this must check the model id before
+  // touching the payload. Mutates in place (same convention documented for
+  // the sibling before_provider_headers hook); returning nothing is
+  // intentional, not an oversight.
+  pi.on("before_provider_request", (event) => {
+    const payload = event.payload as Record<string, unknown> | undefined;
+    if (
+      payload &&
+      typeof payload === "object" &&
+      payload.model === QWEN38_MODEL_ID &&
+      payload.temperature === undefined
+    ) {
+      payload.temperature = QWEN38_TEMPERATURE;
+    }
+  });
+
   pi.registerProvider("ai-stack-local", {
     name: "ai-stack local",
     baseUrl: `http://${host}:8080/v1`,
@@ -11,7 +46,51 @@ export default function (pi: ExtensionAPI) {
       {
         id: "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
         name: "Qwen3.8-27B-8bit",
-        reasoning: false,
+        // Was `reasoning: false`, which made pi send no thinking-control
+        // field at all (every thinkingFormat branch in pi-ai's buildParams
+        // is gated on model.reasoning) -- not an explicit "thinking off",
+        // an unset one. Live-verified 2026-08-17 against :8080 directly
+        // (see qwen38-agentic-coding-tuning-research.md "Step 1"): a bare
+        // request with no thinking fields returns null reasoning_content
+        // (2 completion tokens); `enable_thinking`/`reasoning_effort` sent
+        // top-level (compat.thinkingFormat "qwen") returns a populated
+        // reasoning_content block (40 completion tokens). The nested
+        // `chat_template_kwargs` shape (the one that worked for GLM on this
+        // same stack per pi-harness-history.md) was also tried live and did
+        // NOT trigger thinking on this route -- do not switch to
+        // "chat-template"/"qwen-chat-template" without re-verifying live.
+        reasoning: true,
+        compat: {
+          thinkingFormat: "qwen",
+          supportsReasoningEffort: true,
+          // Without this, pi-ai's detectCompat defaults
+          // supportsDeveloperRole to true for any generic openai-compatible
+          // baseUrl once model.reasoning is true (openai-completions.js:793,
+          // 1160), so pi sends the system prompt as role "developer"
+          // instead of "system". This route's tokenizer rejects that
+          // outright with a 503 "Unexpected message role" on every single
+          // turn -- live-confirmed 2026-08-17 both via a direct curl and via
+          // a real pi -p trial that produced a zero-diff, all-retries-
+          // exhausted run (worse than the pre-thinking 0/4 baseline it was
+          // meant to fix). Force it off.
+          supportsDeveloperRole: false,
+        },
+        // Copied from pi-ai's bundled qwen3.8-max-preview entry
+        // (providers/data/qwen-token-plan.json). Note the `null` entries do
+        // NOT suppress those levels -- the "qwen" branch does
+        // `thinkingLevelMap?.[level] ?? options.reasoningEffort`, so `??`
+        // passes `"high"`/`"max"` through verbatim if ever selected. They're
+        // listed as null only because the vendor's 3 core reasoning levels
+        // are low/medium/xhigh; avoid selecting "high"/"max" via
+        // defaultThinkingLevel rather than relying on this map to block them.
+        thinkingLevelMap: {
+          minimal: null,
+          low: "low",
+          medium: "medium",
+          high: null,
+          xhigh: "xhigh",
+          max: null,
+        },
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         // contextWindow is the proxy's real admission budget (max_kv_size 65536

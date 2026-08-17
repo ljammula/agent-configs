@@ -57,6 +57,27 @@ migration claude-sonnet-5 comparison" entry (2026-08-16). Task-suite
 detail: `local-model-bench/SPEC.md`'s 2026-08-16 report, indexed in its
 `STATUS.md`.
 
+**That hypothesis is no longer untested (2026-08-17).** `ai-stack-local.ts`
+now sets `reasoning: true` (`compat.thinkingFormat: "qwen"`,
+`supportsDeveloperRole: false` — see below) and `defaultThinkingLevel` is
+`"medium"`, not `"off"`, in both `pi/settings.json` and the live
+`~/.pi/agent/settings.json`. A `before_provider_request` hook also now
+injects `temperature: 0.6` — mlx-vlm defaults to greedy (`0.0`) when
+unset, and `pi-coding-agent` has no `--temperature` flag or settings field
+of its own to override that. Enabling thinking alone caused a real
+regression first (`supportsDeveloperRole` defaults true for reasoning
+models on generic OpenAI-compatible endpoints; this route's tokenizer
+rejects the resulting `"developer"`-role message with a 503 on every
+turn, producing a zero-diff run worse than the 0/4 baseline), fixed by
+forcing that compat flag off. With both fixes in place: **3/3 on
+`go/lru-cache`** (trials 6-8), correct key-based fix, 100% coverage,
+matching the exact regression test (`TestEvictsByKeyNotValue`) added
+because of this file's own 0/4 finding — not yet the ~4-repeat bar this
+file's own prior finding needed before being called replicated, more
+trials in progress. Full trail: `qwen38-agentic-coding-tuning-research.md`
+(repo root) and `pi-harness-history.md`'s "untested `defaultThinkingLevel`
+hypothesis, tested" entry (2026-08-17).
+
 Same-primary review still requires `AI_REVIEW_ALLOW_SELF=1` and is labeled
 `blind-self-review`, never cross-model, if ever pointed back at the same
 route. Verification-command resolution (both `quality-gate.ts`'s settlement

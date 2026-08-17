@@ -3,7 +3,7 @@
   "theme": "dark",
   "defaultProvider": "ai-stack-local",
   "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
-  "defaultThinkingLevel": "off",
+  "defaultThinkingLevel": "medium",
   "enabledModels": [
     "Qwen3.8-27B-8bit"
   ],
