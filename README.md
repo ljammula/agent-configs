@@ -13,7 +13,9 @@ way) flipped a replicated 0/4 result on a controlled task to a replicated
 Full research trail: [qwen38-agentic-coding-tuning-research.md](qwen38-agentic-coding-tuning-research.md).
 Narrative entry: [pi-harness-history.md](pi-harness-history.md).
 Colleague-facing writeup: [qwen38-pi-harness-report.html](qwen38-pi-harness-report.html)
-(self-contained, open directly in a browser).
+(self-contained, open directly in a browser) — also live via GitHub Pages
+at https://ljammula.github.io/agent-configs/qwen38-pi-harness-report.html
+(public, since this repo is public).
 
 **Current-machine Pi audit (2026-08-03):** the hardening plan is implemented
 locally. Pi 0.83.0 now has a pinned TypeScript contract suite, current-diff
