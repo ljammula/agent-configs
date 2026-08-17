@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi.dev local coding-agent harness — timeline</title>
+<meta name="description" content="Dated timeline of the pi.dev local coding-agent harness project: what changed, what it proved, and links to the evidence.">
+<style>
+  :root {
+    --ground: #f5f3ee;
+    --surface: #ffffff;
+    --surface-2: #ece8de;
+    --ink: #201c15;
+    --ink-soft: #6e6656;
+    --ink-faint: #a39a86;
+    --accent: #a85a1c;
+    --accent-ink: #ffffff;
+    --accent-soft: #ecdcc4;
+    --line: #ded8c8;
+    --pass: #2f6b4f;
+    --pass-soft: #dfebe3;
+    --fail: #a23b2e;
+    --fail-soft: #f4dfda;
+    --warn: #92701c;
+    --warn-soft: #f0e4c3;
+    --pending: #6e6656;
+    --pending-soft: #e9e5da;
+    --code-bg: #efeade;
+    --shadow: 0 1px 2px rgba(32, 28, 21, 0.06), 0 6px 20px rgba(32, 28, 21, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17150f;
+      --surface: #1e1b14;
+      --surface-2: #262219;
+      --ink: #ede7d8;
+      --ink-soft: #b0a690;
+      --ink-faint: #7a7161;
+      --accent: #dd9a4c;
+      --accent-ink: #201505;
+      --accent-soft: #3c2c15;
+      --line: #362f21;
+      --pass: #7cbf9c;
+      --pass-soft: #223228;
+      --fail: #e08a7c;
+      --fail-soft: #3a2420;
+      --warn: #d8b969;
+      --warn-soft: #372d17;
+      --pending: #a79b83;
+      --pending-soft: #2a251b;
+      --code-bg: #221e15;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17150f;
+    --surface: #1e1b14;
+    --surface-2: #262219;
+    --ink: #ede7d8;
+    --ink-soft: #b0a690;
+    --ink-faint: #7a7161;
+    --accent: #dd9a4c;
+    --accent-ink: #201505;
+    --accent-soft: #3c2c15;
+    --line: #362f21;
+    --pass: #7cbf9c;
+    --pass-soft: #223228;
+    --fail: #e08a7c;
+    --fail-soft: #3a2420;
+    --warn: #d8b969;
+    --warn-soft: #372d17;
+    --pending: #a79b83;
+    --pending-soft: #2a251b;
+    --code-bg: #221e15;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono { font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace; }
+
+  .page { max-width: 900px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  .backlink {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; color: var(--ink-soft);
+    text-decoration: none; margin-bottom: 22px;
+  }
+  .backlink:hover { color: var(--accent); }
+
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 { font-size: 34px; line-height: 1.15; letter-spacing: -0.01em; margin: 10px 0 6px; text-wrap: balance; }
+
+  .dek { color: var(--ink-soft); font-size: 17px; max-width: 68ch; margin: 0 0 24px; }
+
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center;
+    font-size: 13px; color: var(--ink-faint); padding-bottom: 28px;
+    border-bottom: 1px solid var(--line); margin-bottom: 20px;
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---- stat strip (recap) ---- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 44px;
+  }
+  @media (max-width: 700px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    box-shadow: var(--shadow);
+  }
+  .stat .num {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 24px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--accent);
+  }
+  .stat .label { margin-top: 6px; font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
+
+  code {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  a { color: var(--accent); }
+
+  /* ---- timeline ---- */
+  .timeline-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-bottom: 20px;
+  }
+  .timeline-head h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-faint); font-weight: 700; margin: 0;
+  }
+  .timeline-head .span { font-size: 12.5px; color: var(--ink-faint); font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace; }
+
+  /* ---- filter chips ---- */
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+  .filter-chip {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 6px 13px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink-soft); cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .filter-chip .n { color: var(--ink-faint); }
+  .filter-chip:hover { border-color: var(--accent); color: var(--ink); }
+  .filter-chip[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  }
+  .filter-chip[aria-pressed="true"] .n { color: var(--accent-ink); opacity: 0.75; }
+
+  /* ---- chapters ---- */
+  .chapter { margin-bottom: 8px; }
+  .chapter-head {
+    padding-left: 134px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 620px) { .chapter-head { padding-left: 50px; } }
+  .chapter-head .act {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin-bottom: 4px;
+  }
+  .chapter-head h2 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.005em; color: var(--ink); text-transform: none; font-weight: 700; }
+  .chapter-head p { margin: 0; font-size: 14.5px; color: var(--ink-soft); max-width: 58ch; }
+
+  /* ---- scorecard (trial strip) ---- */
+  .scorecard {
+    margin: 14px 0 22px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .scorecard .sc-label { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 10px; }
+  .scorecard .sc-label b { color: var(--ink); font-weight: 600; }
+  .trial-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .trial {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12px; font-weight: 700;
+    flex: 0 0 auto;
+  }
+  .trial.fail { background: var(--fail-soft); color: var(--fail); }
+  .trial.regress { background: var(--warn-soft); color: var(--warn); }
+  .trial.pass { background: var(--pass-soft); color: var(--pass); }
+  .sc-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-faint); }
+  .sc-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sc-legend .sw { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+  .sc-legend .fail .sw { background: var(--fail); }
+  .sc-legend .regress .sw { background: var(--warn); }
+  .sc-legend .pass .sw { background: var(--pass); }
+
+  .timeline { position: relative; }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 91px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--line);
+  }
+  @media (max-width: 620px) {
+    .timeline::before { left: 15px; }
+  }
+
+  .entry { position: relative; display: grid; grid-template-columns: 78px 28px 1fr; gap: 0 14px; margin-bottom: 6px; }
+  @media (max-width: 620px) {
+    .entry { grid-template-columns: 0 22px 1fr; }
+    .entry .date { display: none; }
+  }
+
+  .entry .date {
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 22px;
+    white-space: nowrap;
+  }
+  .entry .rail { display: flex; justify-content: center; }
+  .entry .rail .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    margin-top: 21px;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    flex: 0 0 auto;
+    z-index: 1;
+  }
+  .entry.result-fail .rail .dot { border-color: var(--fail); }
+  .entry.result-fixed .rail .dot { border-color: var(--warn); }
+  .entry.result-pass .rail .dot { border-color: var(--pass); }
+  .entry.result-open .rail .dot { border-color: var(--pending); }
+  .entry.is-hidden { display: none; }
+  .chapter.is-hidden { display: none; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 22px 20px;
+    box-shadow: var(--shadow);
+    margin-bottom: 28px;
+  }
+  .card .date-mobile {
+    display: none;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 12px; color: var(--ink-faint); margin-bottom: 6px;
+  }
+  @media (max-width: 620px) { .card .date-mobile { display: block; } }
+
+  .card .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
+  .badge {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    border-radius: 5px; padding: 2px 7px; font-weight: 700;
+  }
+  .badge.pass { color: var(--pass); background: var(--pass-soft); }
+  .badge.fail { color: var(--fail); background: var(--fail-soft); }
+  .badge.fixed { color: var(--warn); background: var(--warn-soft); }
+  .badge.open { color: var(--pending); background: var(--pending-soft); }
+  .badge.ruled-out { color: var(--fail); background: var(--fail-soft); }
+
+  .card h3 { font-size: 18.5px; margin: 0 0 8px; letter-spacing: -0.005em; }
+  .card p { margin: 0 0 10px; color: var(--ink-soft); font-size: 14.5px; }
+  .card p:last-of-type { margin-bottom: 0; }
+  .card p.result-line { color: var(--ink); }
+  .card p.result-line b { font-weight: 600; }
+
+  .links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .links a {
+    font-size: 12.5px; font-weight: 600; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .links a:hover { text-decoration: underline; }
+  .links a::after { content: "→"; font-weight: 400; }
+
+  footer {
+    margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-faint);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="index.html">&larr; Project overview</a>
+
+  <div class="eyebrow">local infrastructure · agent-configs repo</div>
+  <h1>Timeline: hardening a local coding agent</h1>
+  <p class="dek">
+    Every dated milestone in the <code>pi.dev</code> harness project, in order —
+    what changed, what it proved or ruled out, and a link to the evidence
+    behind each claim. Fuller narrative for any entry lives in
+    <code>pi-harness-history.md</code>; this page is the fast way to see how
+    the project actually got here.
+  </p>
+  <div class="meta-row">
+    <span><b>Span</b> 2026-08-02 → 2026-08-17</span>
+    <span><b>Commits</b> 90+ across <code class="mono">pi/</code> and root docs</span>
+    <span><b>Host</b> kannasmacstudio.lan · mlx-vlm</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num">9</div><div class="label">Dated milestones below, spanning 16 days</div></div>
+    <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, paired battery</div></div>
+    <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
+    <div class="stat"><div class="num">0→4/4</div><div class="label">Qwen3.8 replicated failure flipped to a replicated pass</div></div>
+  </div>
+
+  <div class="timeline-head">
+    <h2>Chronological log</h2>
+    <span class="span">oldest → newest</span>
+  </div>
+
+  <div class="filters" role="group" aria-label="Filter by result">
+    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">9</span></button>
+    <button class="filter-chip" type="button" data-filter="pass" aria-pressed="false">Passed <span class="n">4</span></button>
+    <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">3</span></button>
+    <button class="filter-chip" type="button" data-filter="fail" aria-pressed="false">Failure <span class="n">1</span></button>
+    <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">1</span></button>
+  </div>
+
+  <!-- Act I -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act I · Aug 2–3</div>
+      <h2>Build it, then prove it beats doing nothing</h2>
+      <p>The hardening plan goes in, then gets checked against a stock baseline instead of taken on faith.</p>
+    </div>
+    <div class="timeline">
+
+      <div class="entry result-pass" data-result="pass">
+        <div class="date">Aug 2</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-02</div>
+          <div class="badges"><span class="badge pass">Shipped</span></div>
+          <h3>Hardening plan implemented, first partial battery run</h3>
+          <p>
+            Wrote and implemented the initial Pi hardening plan: extension
+            runtime and safety gates, a current-diff quality gate, redacted
+            telemetry, and an evidence-gated install. A first partial
+            randomized screen ran the same day (later superseded by the full
+            nine-pair battery on Aug 3).
+          </p>
+          <div class="links">
+            <a href="https://github.com/ljammula/agent-configs/blob/main/plans/pi-harness-hardening-plan.md">Hardening plan</a>
+            <a href="https://github.com/ljammula/agent-configs/blob/main/pi/evals/partial-screening-2026-08-02.json">Partial screen (superseded)</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-pass" data-result="pass">
+        <div class="date">Aug 3</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-03</div>
+          <div class="badges"><span class="badge pass">8/9 vs 7/9 baseline</span></div>
+          <h3>Nine-pair randomized battery completes; harness extended to TS/JS</h3>
+          <p>
+            Fixed two reliability gaps found by the Pi extension's own review
+            (nested-manifest and stale-context handling), then ran the
+            seed-<code>20260802</code> nine-pair screen to completion: hidden-test
+            baseline 7/9, harness 8/9 — its one loss traced to a shared baseline
+            failure, not a harness defect — with zero extension errors across
+            eighteen runs. Harness extended to route TypeScript/JavaScript the
+            same day. Median paired runtime overhead landed at 100.3%, well
+            above the plan's 20% screening threshold — flagged as open, still
+            unresolved.
+          </p>
+          <div class="links">
+            <a href="https://github.com/ljammula/agent-configs/blob/main/pi/evals/full-screening-2026-08-03.json">Full battery results</a>
+            <a href="https://github.com/ljammula/agent-configs/blob/main/pi/evals/pair4-race-condition-2026-08-03.json">Pair 4 concurrency deep-dive</a>
+            <a href="pi-harness-validation-status.md">Current status doc</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Act II -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act II · Aug 4–5</div>
+      <h2>Earn an independent reviewer, rule out two candidates</h2>
+      <p>The reviewer only counts if it's genuinely independent — and two other local models don't clear the bar.</p>
+    </div>
+    <div class="timeline">
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 4–5</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-04 – 2026-08-05</div>
+          <div class="badges">
+            <span class="badge fixed">2 real bugs fixed</span>
+            <span class="badge ruled-out">2 models ruled out</span>
+            <span class="badge pass">15/15 planted-bug catches</span>
+          </div>
+          <h3>Independent reviewer wired to a live route; two candidate models ruled out</h3>
+          <p>
+            <code>cross-model-review.ts</code> wired to a live Gemma route on
+            <code>:8081</code> and reached genuine <code>independent-review</code>
+            status, catching 15/15 planted bugs with 0/9 false positives on a
+            checked-in reviewer battery. Along the way: a schema-ordering
+            regression and a stale reviewer timeout were found and fixed.
+            KAT-Coder-V2.5 (<code>:8083</code>) was tried as both primary model
+            and reviewer and ruled out on both — statistically indistinguishable
+            as primary, structurally unable to complete a review as reviewer.
+            GLM-4.7-Flash was tried as reviewer and ruled out (0/3 catches vs.
+            Gemma's 3/3 on identical prompts). New hardening extensions shipped
+            the same window: <code>artifact-guard.ts</code>,
+            <code>error-leak-guard.ts</code>, <code>makefile-scaffold-nudge.ts</code>
+            — plus a real bug found and fixed live during the
+            <code>personal-budget-simplifier</code> build.
+          </p>
+          <div class="links">
+            <a href="https://github.com/ljammula/agent-configs/blob/main/pi/evals/reviewer-battery.ts">Reviewer battery</a>
+            <a href="https://github.com/ljammula/agent-configs/blob/main/history/pi-real-task-report-personal-budget-simplifier.md">Real-task report</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Act III -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act III · Aug 6–9</div>
+      <h2>Harden the infrastructure, then extend what it can gate on</h2>
+      <p>Containment gets proven live, a silent config bug gets caught, and the harness grows a goal command and an unattended build orchestrator.</p>
+    </div>
+    <div class="timeline">
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 6–7</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-06 – 2026-08-07</div>
+          <div class="badges"><span class="badge pass">17/17 containment checks</span><span class="badge fixed">Fixed</span></div>
+          <h3>Docker containment proven live; auto-compaction bug fixed</h3>
+          <p>
+            Docker containment verified live via Colima: image and launcher
+            build and run under Pi 0.83.0, and
+            <code>pi/containment/verify-live.sh</code> passes all 17 checks —
+            workspace-only writes, escape attempts, host-credential and
+            socket absence, network denial, <code>/tmp</code> noexec,
+            capabilities, no-new-privileges. Separately, <code>ai-stack-local.ts</code>'s
+            <code>contextWindow</code> was found mis-set above the route's real
+            admission budget, so Pi's own auto-compaction never fired on
+            overflow — fixed and live-confirmed (reward 1.0). Also: per-repo
+            stack skills now load only matching skill(s) instead of all eight
+            globally, a measured ~15% prompt-token reduction, and
+            <code>stack-router.ts</code> now finds manifests in monorepo
+            subdirectories.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Full account in history</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-pass" data-result="pass">
+        <div class="date">Aug 9</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-09</div>
+          <div class="badges"><span class="badge pass">Shipped</span></div>
+          <h3><code>/goal</code> command and the zero-human build orchestrator ship</h3>
+          <p>
+            Two new pieces of infrastructure landed the same day:
+            <code>goal-gate.ts</code>, a session-scoped <code>/goal &lt;condition&gt;</code>
+            command gated on the most recent broad verification actually
+            passing against the current diff (not self-report); and
+            <code>build_app.py</code>, an orchestrator that drives bounded
+            <code>pi -p</code> corrective rounds outside chat and always writes
+            a <code>BUILD_REPORT.md</code>. A settlement-time reviewer trigger
+            also shipped, mitigating <code>cross-model-review.ts</code>'s
+            blind spot on suites whose verification command never runs inside
+            the model's own session. Two kickoff-race and false-rejection bugs
+            in goal-gate were found and fixed the same day.
+          </p>
+          <div class="links">
+            <a href="pi-goal-gate-research.html">goal-gate research writeup</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Act IV -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act IV · Aug 10–13</div>
+      <h2>Harden further, then hit an honest dead end</h2>
+      <p>Three real bugs get root-caused and fixed; a pre-registered check comes back invalid by its own rule, and gets reported that way instead of stretched into a result.</p>
+    </div>
+    <div class="timeline">
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 10–12</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-10 – 2026-08-12</div>
+          <div class="badges"><span class="badge fixed">3 bugs fixed</span><span class="badge open">1 open</span></div>
+          <h3>goal-gate hardened against real failure modes; TUI crash root-caused</h3>
+          <p>
+            <code>goal-gate.ts</code>'s verification evidence was bound to the
+            diff hash it ran against, then hardened against models that never
+            emit the completion marker. Live multi-round testing followed:
+            stall-escalation confirmed working (real stall → escalated nudge →
+            recovery), n=7 organic runs all converging at <code>rounds: 0</code>
+            or <code>1</code>. Background-process kills on long unattended
+            <code>/goal</code> runs were root-caused as far as the mechanism
+            class (a client-side network-idle timeout) but the exact enforcing
+            code is still untraced — left honestly open. Separately, a crash in
+            the built-in TUI's <code>todo</code> tool was root-caused from a
+            real crashed-session log, reproduced standalone, and fixed (missing
+            <code>default:</code> case in <code>renderResult</code>). Root-level
+            docs split into a lightweight current-status file plus this
+            project's full dated history.
+          </p>
+          <div class="links">
+            <a href="pi-harness-validation-status.md">Current status doc</a>
+            <a href="pi-harness-history.md">Full dated history</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-open" data-result="open">
+        <div class="date">Aug 13</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-13</div>
+          <div class="badges"><span class="badge open">Invalid run — reopened</span></div>
+          <h3>Pair-4 reviewer mechanism check: pre-registered, then invalidated by its own rule</h3>
+          <p>
+            Scope narrowed (Opus-reviewed) from an infeasible candidate-model
+            capability claim to a pre-registered, n=1-decisive check of whether
+            <code>cross-model-review.ts</code>'s settlement trigger fires on the
+            go-flutter/bookmarks-app task under real battery methodology. The
+            run itself came back invalid per its own pre-registration — the
+            harness arm hit the fixture's 45-minute timeout mid-corrective-loop
+            after the code had already reached a passing state, so the reviewer
+            trace that did fire is deliberately not counted. Mechanism question
+            still open, honestly reported as inconclusive rather than
+            stretched into a result.
+          </p>
+          <div class="links">
+            <a href="https://github.com/ljammula/agent-configs/blob/main/plans/pair4-reviewer-mechanism-check-plan.md">Pre-registration plan</a>
+            <a href="https://github.com/ljammula/agent-configs/blob/main/pi/evals/pair4-rerun-2026-08-13.json">Run record (invalid)</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Act V — the climax -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act V · Aug 16–17</div>
+      <h2>A clean, replicated failure — then a replicated fix</h2>
+      <p>The same task, the same model class, nine live trials: four straight failures, one attempted fix that regresses further, then four straight passes once the real root cause is found.</p>
+    </div>
+
+    <div class="scorecard">
+      <div class="sc-label"><b>go/lru-cache</b> — 9 live trials against the migrated Qwen3.8 route, chronological</div>
+      <div class="trial-strip">
+        <div class="trial fail" title="Trial 1 — thinking off, greedy decoding: key/value-confusion bug">1</div>
+        <div class="trial fail" title="Trial 2 — same bug, replicated">2</div>
+        <div class="trial fail" title="Trial 3 — same bug, replicated">3</div>
+        <div class="trial fail" title="Trial 4 — same bug, replicated: 0/4 called">4</div>
+        <div class="trial regress" title="Trial 5 — thinking enabled alone: developer-role message rejected with a 503 every turn, zero-diff run">5</div>
+        <div class="trial pass" title="Trial 6 — thinking + temperature fix: correct key-based fix">6</div>
+        <div class="trial pass" title="Trial 7 — replicated">7</div>
+        <div class="trial pass" title="Trial 8 — replicated">8</div>
+        <div class="trial pass" title="Trial 9 — replicated under real GPU contention: 4/4 called">9</div>
+      </div>
+      <div class="sc-legend">
+        <span class="fail"><i class="sw"></i>0/4 — identical bug every time</span>
+        <span class="regress"><i class="sw"></i>1/1 — fix attempt regressed further</span>
+        <span class="pass"><i class="sw"></i>4/4 — replicated after root cause</span>
+      </div>
+    </div>
+
+    <div class="timeline">
+
+      <div class="entry result-fail" data-result="fail">
+        <div class="date">Aug 16</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-16</div>
+          <div class="badges"><span class="badge fail">0/4 replicated failure</span><span class="badge fixed">2 bugs fixed live</span></div>
+          <h3>Qwen3.8 migration lands; comparison finds a clean, replicated failure</h3>
+          <p>
+            The local provider migrated to Qwen3.8-27B-8bit, live-validated
+            end to end (read/edit/test loop, settlement gate, independent
+            reviewer, full deterministic suite). A same-day comparison against
+            <code>claude-sonnet-5</code> on <code>go/lru-cache</code> then found
+            a stark gap: Claude passed 3/3 all-time on this task; Qwen3.8 went
+            <b>0/4</b> across four live trials, producing the identical
+            key/value-confusion eviction bug every time — with
+            <code>cross-model-review.ts</code> independently catching that same
+            bug 4/4 times without the model acting on the diagnosis. Two new
+            extensions built in response, <code>progress-stall-guard.ts</code> and
+            <code>wall-clock-budget-nudge.ts</code>, each had a real bug found and
+            fixed live during the same trials. A genuine gap in the task's own
+            hidden tests was also found and fixed (every eviction test used
+            <code>key == value</code>, so this exact bug scored a false pass).
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Trial-by-trial account</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-pass" data-result="pass">
+        <div class="date">Aug 17</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-17</div>
+          <div class="badges"><span class="badge pass">4/4 replicated</span></div>
+          <h3>Root cause found: thinking was off, decoding was greedy — fix replicates 4/4</h3>
+          <p>
+            The Aug 16 failure's root cause: the Qwen3.8 route was silently
+            running with thinking disabled and undocumented greedy decoding
+            (mlx-vlm defaults to <code>temperature: 0.0</code> when unset, and
+            <code>pi-coding-agent</code> has no flag of its own to override it).
+            Enabling thinking alone caused a real regression first — a
+            developer-role message rejected with a 503 on every turn — fixed by
+            forcing the relevant compat flag off. With both fixes in place:
+            <b>4/4</b> on the exact same task (trials 6–9), correct key-based
+            fix, 100% coverage each time, matching the regression test added
+            because of the Aug 16 finding — trial 9 passed even under real,
+            log-confirmed GPU contention. Result written up as a standalone
+            report and the project's <a href="index.html">overview landing
+            page</a> shipped the same day.
+          </p>
+          <div class="links">
+            <a href="reports/qwen38-pi-harness-report.html">Full report</a>
+            <a href="qwen38-agentic-coding-tuning-research.md">Research trail</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <span>
+      Full status: <code class="mono">pi-harness-validation-status.md</code> ·
+      Dated history: <code class="mono">pi-harness-history.md</code>
+    </span>
+    <span>agent-configs repo</span>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var chips = document.querySelectorAll('.filter-chip');
+    var entries = document.querySelectorAll('.entry');
+    var chapters = document.querySelectorAll('.chapter');
+
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chips.forEach(function (c) { c.setAttribute('aria-pressed', 'false'); });
+        chip.setAttribute('aria-pressed', 'true');
+        var want = chip.getAttribute('data-filter');
+
+        entries.forEach(function (entry) {
+          var match = want === 'all' || entry.getAttribute('data-result') === want;
+          entry.classList.toggle('is-hidden', !match);
+        });
+
+        chapters.forEach(function (chapter) {
+          var visible = chapter.querySelectorAll('.entry:not(.is-hidden)').length > 0;
+          chapter.classList.toggle('is-hidden', !visible);
+        });
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

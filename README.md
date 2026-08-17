@@ -11,6 +11,9 @@ deep-dive reports: [index.html](index.html), also live via GitHub Pages at
 https://ljammula.github.io/agent-configs/ (public, since this repo is
 public). Individual reports live under [`reports/`](reports/); the current
 one is [reports/qwen38-pi-harness-report.html](reports/qwen38-pi-harness-report.html).
+A dated [timeline.html](timeline.html) walks every milestone from the
+project's start through the current state, each with its result and a link
+to the underlying evidence.
 
 **Qwen3.8-27B thinking/temperature tuning (2026-08-17):** the local
 Qwen3.8 route was running with thinking disabled and undocumented greedy
