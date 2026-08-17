@@ -4,6 +4,9 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type Source = { path: string; text: string };
+const MAX_SOURCE_CHARS = 12_000;
+const MAX_CONTEXT_CHARS = 44_000;
+const MAX_EXTRACT_OUTPUT_BYTES = 64 * 1024 * 1024;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TOOLS = join(ROOT, "scripts", "docwriter");
 const HOST = process.env.AI_STACK_HOST || "127.0.0.1";
@@ -31,6 +34,7 @@ function python(script: string, args: string[]): string {
     cwd: ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
+    maxBuffer: MAX_EXTRACT_OUTPUT_BYTES,
     timeout: 300_000,
     killSignal: "SIGTERM",
   });
@@ -43,7 +47,15 @@ function sources(directory: string): Source[] {
 }
 
 function sourceContext(items: Source[]): string {
-  return items.map((item) => `SOURCE: ${item.path}\n${item.text.slice(0, 12000)}`).join("\n\n---\n\n").slice(0, 44000);
+  const oversized = items.find((item) => item.text.length > MAX_SOURCE_CHARS);
+  if (oversized) {
+    throw new Error(`source is too large for the configured context limit: ${oversized.path} has ${oversized.text.length} characters; reduce it below ${MAX_SOURCE_CHARS} characters`);
+  }
+  const context = items.map((item) => `SOURCE: ${item.path}\n${item.text}`).join("\n\n---\n\n");
+  if (context.length > MAX_CONTEXT_CHARS) {
+    throw new Error(`source corpus is too large for the configured context limit: ${context.length} characters; reduce it below ${MAX_CONTEXT_CHARS} characters`);
+  }
+  return context;
 }
 
 async function model(prompt: string, thinkingLevel: string, temperature: number): Promise<string> {
@@ -83,7 +95,7 @@ async function outline(briefFile: string, sourceDir: string): Promise<string> {
 }
 
 async function draft(briefFile: string, sourceDir: string, outlineFile: string): Promise<string> {
-  return model(`Write the complete Markdown document described by this brief and outline. Use clear headings, short paragraphs, real Markdown lists, and tables only for comparable data. Do not invent missing facts.\n\n${briefAndSources(briefFile, sourceDir)}\n\nOUTLINE:\n${readFileSync(resolve(outlineFile), "utf8")}`, "medium", 0.25);
+  return model(`Write the complete Markdown document described by this brief and outline. Use clear headings no deeper than level 3, short paragraphs, real Markdown lists, and tables only for comparable data. Do not invent missing facts.\n\n${briefAndSources(briefFile, sourceDir)}\n\nOUTLINE:\n${readFileSync(resolve(outlineFile), "utf8")}`, "medium", 0.25);
 }
 
 async function review(sourceDir: string, draftFile: string): Promise<string> {

@@ -58,11 +58,15 @@ def add_rich_paragraph(document, text: str, style=None):
 
 def cell_margins(cell):
     props = cell._tc.get_or_add_tcPr()
-    margins = props.first_child_found_in("w:tcMar") or OxmlElement("w:tcMar")
-    if margins.getparent() is None:
-        props.append(margins)
+    margins = props.first_child_found_in("w:tcMar")
+    if margins is None:
+        margins = OxmlElement("w:tcMar")
+        if margins.getparent() is None:
+            props.append(margins)
     for side, value in (("top", 80), ("start", 120), ("bottom", 80), ("end", 120)):
-        node = margins.find(qn(f"w:{side}")) or OxmlElement(f"w:{side}")
+        node = margins.find(qn(f"w:{side}"))
+        if node is None:
+            node = OxmlElement(f"w:{side}")
         if node.getparent() is None:
             margins.append(node)
         node.set(qn("w:w"), str(value))
@@ -165,10 +169,10 @@ def render(document, markdown):
                 index += 1
             add_table(document, [rows[0], *rows[2:]])
             continue
-        heading = re.match(r"^(#{1,3})\s+(.+)$", line)
+        heading = re.match(r"^(#{1,6})\s+(.+)$", line)
         if heading:
             flush()
-            level, text = len(heading.group(1)), heading.group(2).strip()
+            level, text = min(len(heading.group(1)), 3), heading.group(2).strip()
             if level == 1 and not title_done:
                 p = document.add_paragraph(style="Title")
                 set_font(p.style.font, size=24, color=DARK_BLUE, bold=True)

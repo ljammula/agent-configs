@@ -18,6 +18,8 @@ def main() -> int:
     if not args.input_docx.is_file():
         raise SystemExit(f"input DOCX not found: {args.input_docx}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    for page in args.output_dir.glob("page-*.png"):
+        page.unlink()
     with tempfile.TemporaryDirectory(prefix="docwriter-render-") as temp:
         profile = Path(temp) / "lo-profile"
         pdf_dir = Path(temp) / "pdf"

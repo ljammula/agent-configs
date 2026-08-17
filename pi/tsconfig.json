@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts", "tests/**/*.test.ts", "scripts/docwriter.ts"]
+  "include": ["extensions/**/*.ts", "tests/**/*.ts", "scripts/docwriter.ts"]
 }
