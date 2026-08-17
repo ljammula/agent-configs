@@ -1,0 +1,3 @@
+Keep the brief, source extracts, draft, review findings, and final output for
+the duration of the project. Delete temporary render images after the final
+visual check unless they are needed for an audit.

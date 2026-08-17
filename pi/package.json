@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "docwriter": "tsx scripts/docwriter.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.83.0",
