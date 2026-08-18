@@ -3512,3 +3512,109 @@ Artifacts: `/tmp/pi-pair7-lru-cache-20260817T235523/` (manifest,
 results.jsonl, summary — not committed, local temp path); full session
 trace at `/private/tmp/pi-screen-07-harness-ij7svrq3/pi-output.jsonl`
 (also local temp, not committed).
+
+## 2026-08-17/18 (late evening) — quality-gate follow-up fix: diagnosis, attempt, and revert
+
+Prompted directly by the `go/lru-cache` trace above. Initial diagnosis:
+`goal-gate.ts`'s `/goal` command handler had already hit and fixed this
+exact-looking race once (`pi.sendUserMessage()` only queues a turn; under
+`pi -p` the process can exit before the queued turn starts unless the
+caller explicitly waits for it). `quality-gate.ts`'s and
+`cross-model-review.ts`'s `agent_settled` handlers call
+`sendUserMessage(..., {deliverAs:"followUp"})` without any such guard, so
+the fix extracted goal-gate's wait pattern into a shared
+`extensions/lib/wait-for-followup.ts` helper (`waitForNextAgentStart()` +
+poll `ctx.isIdle()`, since `ExtensionContext` — the type event handlers
+get, unlike `ExtensionCommandContext` — only exposes a synchronous
+`isIdle()`, not the awaitable `waitForIdle()` goal-gate's command handler
+uses) and applied it to both extensions' settlement paths.
+
+Typecheck and the full 179-test suite passed after fixing two tests that
+started hanging on the new wait (they emitted `agent_settled` without a
+matching `agent_start` to unblock it) and adding `isIdle()`/`setIdle()` to
+the test harness's fake `ExtensionContext`, which hadn't had it. Runtime
+dropped from ~60s (two tests hitting a 30s timeout each) to ~11s once
+fixed. All of this was still uncommitted when the next step happened.
+
+**Requested an independent Opus review of the diagnosis and fix before
+committing** (per this file's `~/.claude/CLAUDE.md`-adjacent practice of
+getting a second opinion on non-trivial changes). The review read the
+actual `pi-coding-agent` package source
+(`node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js`,
+`agent.js`) rather than trusting the extension-level comments, and found
+the diagnosis itself was wrong, not just risky in implementation:
+
+- By the time `agent_settled` fires, `_emitAgentSettled()` has already
+  set `_isAgentRunActive = false` (so `isStreaming`/`isIdle` already read
+  as idle). `sendUserMessage()` → `prompt()` only queues
+  `if (this.isStreaming)`; otherwise it falls through to
+  `await this._runAgentPrompt(messages)` directly. From `agent_settled`,
+  `deliverAs:"followUp"` is therefore dead — `sendUserMessage` doesn't
+  queue anything, it immediately starts a full **nested, re-entrant agent
+  run**. (It doesn't throw "already processing" because `finishRun()`
+  already cleared `activeRun` before the outer `agent.prompt()` call
+  resolves.)
+- The fix's `isIdle()` poll "worked" in testing only because of event
+  ordering luck (idle reads true from the very first tick of the handler,
+  independent of whether anything real was queued or drained) — not
+  because a queue-drain was actually being waited on.
+- The upstream code has an explicit comment identifying the real,
+  race-free seam: messages queued from **`agent_end`** (while the session
+  is still streaming) get drained automatically by the existing
+  `_handlePostAgentRun()` continuation loop, with no waiting or polling
+  needed. `agent_settled` was never the intended injection point.
+- The observed 213ms zero-token re-settle that started this investigation
+  has the signature of `handleRunFailure` — a nested run hitting an
+  immediate provider/preflight error and synthesizing an empty assistant
+  turn with `EMPTY_USAGE` — which the fix does not address at all, and
+  which neither extension can even detect, since neither awaits or
+  catches the `sendUserMessage` call's own promise (an error there
+  becomes an unhandled rejection).
+
+Beyond the wrong diagnosis, the review found concrete defects in the
+implementation itself: the fix's shared 10s deadline caps *both* "wait for
+the turn to start" and "wait for it to finish," so a real corrective turn
+(which can run 60s+, especially at the ~312% thinking-mode overhead this
+file already documents) would get cut off by `pi -p` exiting anyway,
+defeating the fix's own purpose; `quality-gate.ts`'s `settling` flag reset
+*after* the new wait instead of before, silently suppressing the
+re-entrant verification that was the only diagnostic signal available;
+and most seriously, `cross-model-review.ts`'s `agent_start` handler fully
+resets its review state (`reviewCount`, `settled`, `lastReviewedDiff`) on
+every `agent_start` including a nested one, with no depth counter — so
+the fix would make previously-unreachable **unbounded recursive review
+rounds** reachable in production, where before the process would already
+have exited. Test coverage was also confirmed inadequate: no dedicated
+test for the new helper, and `cross-model-review.test.ts`'s one relevant
+settlement test used a `"clean"` verdict, so the new code path there had
+never actually executed.
+
+**Verdict: would not ship as-is.** All changes (the new
+`extensions/lib/wait-for-followup.ts`, and edits to `quality-gate.ts`,
+`cross-model-review.ts`, `tests/extension-api-harness.ts`,
+`tests/quality-gate.test.ts`) were reverted via `git checkout`/`rm` before
+anything was committed. Confirmed clean: `git status --short` empty,
+179/179 tests passing on the unmodified tree.
+
+**What the review recommends instead, for the next attempt:** inject the
+settlement-time corrective/review follow-up from `agent_end`, not
+`agent_settled` — this removes the race, the nested run, the polling, and
+the timeout-tuning question in one move, since it's the seam
+`pi-coding-agent` already built and drains automatically. Before writing
+that fix, capture the nested run's actual `stopReason`/error/usage on a
+live occurrence to confirm the `handleRunFailure` hypothesis rather than
+assuming "didn't wait long enough" again. If any wait logic is still
+needed in some remaining case, it must have its own budget separate from
+any "did the turn start" wait (matching `ctx.waitForIdle()`'s unbounded
+semantics, not a shared deadline), `cross-model-review.ts` needs an
+explicit depth cap on settlement-triggered review rounds that survives a
+nested `agent_start`, and `quality-gate.ts`'s `settling` reset must happen
+before any wait, not after. Ship only with a dedicated
+`wait-for-followup.test.ts` (or equivalent for whatever the `agent_end`
+version ends up being) plus a `cross-model-review.test.ts` case that
+actually exercises a `"flagged"` verdict through settlement.
+
+Status: the corrective-follow-up gap itself remains **open**, now with a
+corrected understanding of the mechanism rather than a shipped-but-wrong
+fix. See `pi-harness-validation-status.md`'s updated
+`quality-gate.ts` / `cross-model-review.ts` corrective follow-up entry.

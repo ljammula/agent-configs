@@ -266,15 +266,46 @@ evidence-cited version of each):
 - **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
   the plan's 20% screening threshold — needs either a reduction or an
   evidenced revision to the threshold itself.
-- **`quality-gate.ts` corrective follow-up**: confirmed (n=3 now — two
-  `pi -p` sessions at 9 and 30 turns, plus a 2026-08-17-evening battery-script
-  catch on `go/lru-cache`) that the follow-up gets queued correctly but the
-  process exits before a second turn runs it — a real fix is needed, not
-  just more observation. The `go/lru-cache` occurrence is the cleanest trace
-  yet (`diffChanged: false`, immediate re-settle 213ms after the corrective
-  message was injected) and is a good lead for isolating the mechanism. The
-  one working case so far is a small, few-turn scratch repo; what
-  specifically differs at depth isn't isolated yet.
+- **`quality-gate.ts` / `cross-model-review.ts` corrective follow-up**:
+  confirmed (n=3 now — two `pi -p` sessions at 9 and 30 turns, plus a
+  2026-08-17-evening battery-script catch on `go/lru-cache`) that a
+  settlement-triggered `sendUserMessage(..., {deliverAs:"followUp"})`
+  doesn't reliably produce a second turn — a real fix is needed, not just
+  more observation. The `go/lru-cache` occurrence is the cleanest trace yet
+  (`diffChanged: false`, immediate re-settle 213ms after the corrective
+  message was injected) and prompted a same-day fix attempt.
+
+  **That attempt was reverted after an Opus second-opinion review found the
+  underlying mechanism diagnosis was wrong**, not just the implementation.
+  The originally-stated framing above — "the follow-up gets queued
+  correctly but the process exits before a second turn runs it" — is
+  itself inaccurate and superseded by this entry. Tracing the actual
+  `pi-coding-agent` runtime source: by the time `agent_settled` fires, the
+  session's `isStreaming` flag is already false, and
+  `deliverAs:"followUp"` only queues *while streaming*. From
+  `agent_settled` it does nothing of the kind — `sendUserMessage` instead
+  immediately starts a full **nested, re-entrant agent run**. The
+  documented, race-free injection seam for a settlement-time follow-up is
+  `agent_end` (whose queued messages the existing post-run drain loop
+  services automatically), not `agent_settled`. The observed 213ms
+  zero-token re-settle is consistent with `handleRunFailure` — the nested
+  run hitting an immediate provider/preflight error and synthesizing an
+  empty assistant turn — which no amount of "wait for the turn to start"
+  logic addresses, since neither extension awaits or catches the
+  `sendUserMessage` call's own promise. **Status: still open, and the
+  fix now needs to start from `agent_end` injection and capture the
+  nested run's actual `stopReason`/error before the next attempt** — not
+  from re-deriving a wait-for-`agent_start` guard, which was tried,
+  reviewed, and found to (a) not address the actual failure mode, (b) cap
+  a genuine corrective turn at a shared 10s deadline regardless of how
+  long it actually needs, (c) mask quality-gate's own diagnostic
+  re-verification by resetting its `settling` flag after the wait instead
+  of before, and (d) risk unbounded recursive review rounds in
+  `cross-model-review.ts` once its `agent_start` handler's full state
+  reset becomes reachable from a nested run that previously never landed.
+  Full trail, including the complete review verdict: `pi-harness-history.md`'s
+  2026-08-17/18 "quality-gate follow-up fix: diagnosis, attempt, and revert"
+  entry.
 - **`go/lru-cache` via the battery script vs. the earlier direct-scratch-task
   evidence**: 2026-08-17 evening, run through `run_single_pair.py` for the
   first time (previous 4/4 evidence used a different, direct scratch-task
