@@ -333,8 +333,27 @@ evidence-cited version of each):
   clear is that this specific harness mechanism silently ate the
   correction that would have fixed it. Baseline fixed it correctly and
   cleanly on the first attempt using the original slice-based structure,
-  for contrast. Worth a second battery-script rerun to see if the
-  first-attempt bug reproduces or was a one-off.
+  for contrast.
+
+  **Second rerun (2026-08-18), post `agent_end` fix**: baseline again clean
+  (42.6s); harness passed on the first turn (491.4s), no bug reintroduced —
+  it fixed a different latent bug (`Get` not updating recency) instead, with
+  clean `go vet`/`go test`/`go test -race`/`gofmt` evidence. Because the
+  diff was correct from the start, no corrective round was ever triggered,
+  so **the `agent_end` fix still hasn't been exercised live** — this run
+  answers "was the first-attempt bug a fluke" (looks like yes, normal
+  variance) but not "does a queued correction now produce a real second
+  turn." New finding instead: the reviewer returned `outcome: "transient",
+  reason: "malformed-verdict"` on both its in-band and settlement-triggered
+  calls this run — a parse failure never previously seen in
+  `cross-model-review.ts`'s history, with no behavioral consequence here
+  only because the diff happened to be correct. Full trace:
+  `pi-harness-history.md`'s 2026-08-18 "second go/lru-cache battery-script
+  rerun" entry. **Next steps, in order:** investigate the malformed-verdict
+  root cause (Gemma response shape vs. a `cross-model-review.ts` parsing
+  regression); then a third rerun, or a task more reliable at first-attempt
+  bug triggering, to get the corrective-follow-up mechanism's first genuine
+  live confirmation.
 - Misc smaller items (DayTrix skill placement, `findings[]` severity-aware
   retry prioritization, OS/container boundary for unattended runs): see
   history for detail.

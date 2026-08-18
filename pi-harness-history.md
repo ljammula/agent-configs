@@ -3762,3 +3762,61 @@ a corrective/review follow-up actually produces a second model turn with
 non-zero tokens — the exact signal that was missing when this investigation
 started. See `pi-harness-validation-status.md`'s updated corrective
 follow-up entry for the condensed version.
+
+## 2026-08-18 — second go/lru-cache battery-script rerun, post agent_end fix
+
+Direct follow-up to the 2026-08-17/18 evening entry above, per its own
+recommendation. Same methodology: `run_single_pair.py --seed 20260802
+--pair 7 --host kannasmacstudio.lan` (pair 7 of the *unskipped* schedule is
+`go/lru-cache`, arm order baseline-then-harness), on the freshly-preflighted
+stack (`:8080` Qwen3.8, `:8081` Gemma reviewer, both reachable and model-id
+matched before launch; Pi pinned at 0.83.0; installed `quality-gate.ts`
+confirmed to already carry the `agent_end` fix).
+
+**Result:**
+- **Baseline**: `valid: true`, `passed: true`, 42.6s (vs. 48.1s the prior
+  run) — clean, no corrective rounds.
+- **Harness**: `valid: true`, `passed: true`, 491.4s (~8.2 min, well inside
+  budget). Unlike the prior run, the model did **not** reintroduce the
+  key/value-confusion eviction bug — it found and fixed a different latent
+  bug in the fixture instead (`Get` not updating recency, so a just-read key
+  could still be evicted), added a `Makefile` (`test`/`lint`/`verify`
+  targets) and `README.md`, and its own reported evidence (`go vet`, `go
+  test`, `go test -race`, `gofmt -l`) all came back clean. The diff was
+  correct on the first turn — no correction was ever needed.
+- **Reviewer**: fired twice (in-band `tool_result` trigger and the
+  settlement trigger), both times returning `outcome: "transient",
+  reason: "malformed-verdict"` (202.9s and 178.8s respectively) — Gemma's
+  response didn't parse into a valid verdict either time.
+
+**Interpretation:** this run does *not* resolve the open corrective-
+follow-up validation question — since the harness's diff was correct from
+the start, the `agent_end` mechanism was never exercised (no bug, no
+correction needed, nothing to queue). Task-quality result is a clean pass,
+in contrast to the prior run's reintroduced bug, supporting the earlier
+run's own read that the first-attempt failure was normal variance rather
+than a new regression from the thinking/temperature change.
+
+What *is* new: a `malformed-verdict` reviewer failure, 2/2 attempts this
+run, not previously seen in this harness's `cross-model-review.ts` history
+(prior saga was a stale-model-id incident, a schema-ordering regression,
+and a timeout raise — never a parse failure on a well-formed response).
+Root cause not yet investigated — could be Gemma choking on this
+particular diff's shape/size, or a parsing regression in
+`cross-model-review.ts` itself. Since the diff was correct, the transient
+verdict had no behavioral consequence here, but it's a live gap: a
+`malformed-verdict` outcome on an actually-buggy diff would mean the
+reviewer silently fails to flag it.
+
+**Recommended next steps**, in order: (1) investigate the two
+`malformed-verdict` traces directly (raw Gemma response bodies aren't
+captured in the harness trace, only the outcome/reason/duration — may need
+a live repro with response logging enabled); (2) a third `go/lru-cache`
+rerun, or a different task known to reliably trigger a first-attempt bug,
+still needed to get the corrective-follow-up mechanism's first live
+confirmation.
+
+Artifacts: `/tmp/pi-pair7-lru-cache-rerun-20260818T012503Z/` (manifest,
+summary.json — not committed, local temp path); full session trace at
+`/private/tmp/pi-screen-07-harness-9nt6gh4d/session/*.jsonl` (also local
+temp, not committed).
