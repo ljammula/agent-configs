@@ -250,9 +250,9 @@
 
   <div class="stats">
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, pre-hardening paired battery</div></div>
-    <div class="stat"><div class="num">5/5</div><div class="label">Hardened-config rerun: every completed harness run has passed (pair 4's timeout resolved as contention-caused, not a stall)</div></div>
+    <div class="stat"><div class="num">5/6</div><div class="label">Hardened-config rerun: completed harness runs passing (pair 4's timeout resolved as contention-caused; go/lru-cache's new failure traces to a harness gap, not the fix)</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
-    <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix: Qwen3.8 thinking + temperature tuning</div></div>
+    <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix, direct scratch-task trials: Qwen3.8 thinking + temperature tuning</div></div>
   </div>
 
   <section>
@@ -324,7 +324,7 @@
     <div class="steps">
       <div class="step"><div class="dot"></div><p>Per-task timeout budgets (30/45 min) predate thinking being enabled and haven't been revisited — the 8/17 hardened-config rerun found 3/7 harness arms (43%) failing to complete inside them. That run's 2:15-4:46 PM window overlapped with other local inference contesting the same host's resources; a clean-restart rerun of the worst case (<code>go-flutter/bookmarks-app</code>, zero diff/zero turns originally) passed cleanly in 18 min with a real 328-line diff — <b>resolved as contention-caused</b>, not a genuine stall. <code>dart/sequential-runner</code>'s settlement-speed timeout and the ~312% overhead figure are not yet re-isolated the same way.</p></div>
       <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — mechanism class identified, exact enforcing code not yet traced; a 2/2 correlation with aggressive compaction settings is a new, unconfirmed lead.</p></div>
-      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> corrective follow-up under <code>pi -p</code> confirmed to silently not fire in some real sessions (n=2) — a real fix is needed, not just more observation.</p></div>
+      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> corrective follow-up confirmed to silently not fire (n=3 now — two <code>pi -p</code> sessions plus a fresh <code>go/lru-cache</code> battery-script catch) — a real fix is needed, not just more observation. The new occurrence has the cleanest trace yet: the reviewer correctly caught the model's key/value eviction bug, a corrective round was queued, but the very next verification shows <code>diffChanged: false</code> and an immediate re-settle 213ms later — no second model turn ever ran. This, not a regression of the thinking/temperature fix, is why that harness run failed.</p></div>
       <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> runtime overhead was median 100.3% pre-hardening, still above the plan's 20% screening threshold — now ~312% on thinking-enabled turns (not yet re-isolated from the contention window above), sharpening the same open question.</p></div>
       <div class="step"><div class="dot"></div><p>TypeScript/JS task fixtures still need battery coverage — routed and unit-tested only so far.</p></div>
     </div>

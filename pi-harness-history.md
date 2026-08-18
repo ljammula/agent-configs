@@ -3438,3 +3438,77 @@ does the ~312% median overhead figure, since neither has had its own
 clean-contention rerun. Artifact: `record.json` under
 `/tmp/pi-pair4-harness-only-clean-20260817T232159/` (not committed, local
 temp path).
+
+## 2026-08-17/18 (late evening) — go/lru-cache run through the battery script for the first time
+
+Prompted by a question about why the 8/17 rerun's "9 pairs" only covered
+7 distinct tasks: `go/lru-cache` and `go/notes-api` are each scheduled
+twice on purpose (stochasticity), and the 8/17 rerun happened to skip
+both `go/lru-cache` repeats (it already had separate 4/4 evidence — see
+this file's 2026-08-17 "untested `defaultThinkingLevel` hypothesis,
+tested" entry) while keeping both `go/notes-api` repeats. To properly
+account for every unique task inside this exact battery script/fixture
+format, pair 7 of the *unskipped* schedule (`go/lru-cache`, arm order
+baseline-then-harness) was run in full via `run_single_pair.py --pair 7`
+on the same freshly-restarted, contention-clear stack as the pair-4 rerun
+above.
+
+**Caution on pair numbering:** this run's "pair 7" is *not* the same
+pair 7 as the 8/17 battery's (`go/notes-api`, the git-checkpoint crash) —
+that battery used `skip_tasks={'go/lru-cache'}`, which shifts every
+index after the skip. `run_single_pair.py` always uses the unskipped
+schedule, where pair 7 is `go/lru-cache`. Referring to tasks by name, not
+pair number, avoids this collision.
+
+**Result:**
+- **Baseline**: `valid: true`, `passed: true`, 48.1s, clean 21-line diff.
+  Correctly fixed eviction by adding a `touch(key)` helper that reorders
+  the existing `[]int` slice on both `Get` and `Put`, deleting by key on
+  eviction (`delete(c.data, oldest)`) — straightforward, no corrective
+  rounds needed.
+- **Harness**: `valid: true`, `passed: false`, 163.4s (well inside
+  budget, no timeout). Diff rewrote the eviction structure to
+  `container/list`, but reintroduced the *exact bug class* the original
+  0/4 finding documented: `Put` stores `value` (not `key`) as the list
+  element's payload, so eviction does `delete(c.data,
+  oldest.Value.(int))` — deleting by value, not key. Hidden test
+  `TestEvictsByKeyNotValue` failed as expected
+  (`lru_test.go:69: expected key 10 to be evicted`).
+- **`cross-model-review.ts` worked exactly as designed**: a
+  settlement-triggered review (the model had already called `agent_end`)
+  correctly flagged the precise bug — *"The `Put` method stores the
+  `value` in the list element instead of the `key`... this is incorrect
+  unless `key == value`"* — matching its established catch rate.
+- **But the correction never landed — the cleanest trace yet of the
+  already-documented `quality-gate.ts` corrective-follow-up gap.** A
+  corrective round was queued (`round 1/3`, injected as a new user
+  turn), but the trace shows: `agent_start` → `turn_start` →
+  message_start/message_end (the injected correction message) →
+  immediately a `quality-gate` `verification` entry with `outcome: pass`,
+  `diffChanged: false`, 213ms later → `agent_settled`. No assistant
+  response, no tool call, nothing — the model was never actually given a
+  turn to act on the correction. This is the third confirmed occurrence
+  of this gap (previously n=2 across two `pi -p` sessions, 9 and 30
+  turns), now with byte-level evidence (`diffChanged: false` plus the
+  213ms gap) pointing at the corrective-turn dispatch itself, not the
+  model's response to it.
+
+**Interpretation, precisely stated:** this is *not* evidence that the
+2026-08-17 thinking/temperature fix regressed. The model's first attempt
+on `go/lru-cache` needing one correction round is not itself surprising —
+whether the earlier 4/4 direct-scratch-task trials needed correction
+rounds to land this same task was never recorded, so this may be normal
+first-attempt variance rather than a new failure mode. What *is* new and
+solid: `go/lru-cache` had never been run through this exact battery
+script/fixture before, and doing so surfaced a clean, reproducible
+instance of the corrective-follow-up gap — sharpening that open item from
+n=2 to n=3 with the best trace evidence yet. Recommend a second
+battery-script rerun of `go/lru-cache` to see whether the first-attempt
+bug reproduces (a real weak spot) or was a one-off, now that the
+corrective-follow-up gap is the suspected root cause of the failing score
+rather than the underlying fix.
+
+Artifacts: `/tmp/pi-pair7-lru-cache-20260817T235523/` (manifest,
+results.jsonl, summary — not committed, local temp path); full session
+trace at `/private/tmp/pi-screen-07-harness-ij7svrq3/pi-output.jsonl`
+(also local temp, not committed).

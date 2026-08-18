@@ -178,7 +178,7 @@ entry.
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. Live-found and fixed 2026-08-17 (hardened battery, pair 7, `go/notes-api`): `turn_start`'s first ctx call could throw Pi's documented stale-context error (a session reload/compaction/fork landing before the handler ran), crashing the turn — `stack-router.ts`/`quality-gate.ts` already guarded against this exact class via `lib/stale-context.ts`, `git-checkpoint.ts` had not. Fixed with the same guard; 4 new deterministic tests, including one reproducing the exact crash. Not yet re-observed live post-fix (the race is timing-dependent, not reliably reproducible on demand). |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up under `pi -p` is a **confirmed real gap, not just a suspicion**: fires in a small isolated repro (n=1) but silently doesn't in two independent deep sessions (9 turns real, 30 turns deliberate repro) — queues the follow-up correctly, then the process exits with no second turn. Mechanism not yet isolated; see history. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up is a **confirmed real gap, not just a suspicion**: fires in a small isolated repro (n=1) but silently doesn't in three independent occurrences now — two deep `pi -p` sessions (9 turns real, 30 turns deliberate repro) plus a clean battery-script catch (2026-08-17 evening, `go/lru-cache` pair, cleanest trace yet: reviewer correctly flagged the model's key/value eviction bug post-settlement, a corrective round was queued, but the very next `quality-gate` entry shows `diffChanged: false` and an immediate re-settle 213ms later — no second model turn ever ran). Queues the follow-up correctly every time; the process just exits without giving the model a real second turn. Mechanism not yet isolated; see history. |
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Only Go/Dart routes have battery coverage; rest are unit-tested only. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target #1 of 8) short of the adoption threshold. Live validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic tests pass; widened trigger has zero real-trial field evidence. |
@@ -266,11 +266,33 @@ evidence-cited version of each):
 - **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
   the plan's 20% screening threshold — needs either a reduction or an
   evidenced revision to the threshold itself.
-- **`quality-gate.ts` corrective follow-up under `pi -p`**: confirmed (n=2,
-  9 and 30 turns) that the follow-up gets queued correctly but the process
-  exits before a second turn runs it — a real fix is needed, not just more
-  observation. The one working case so far is a small, few-turn scratch
-  repo; what specifically differs at depth isn't isolated yet.
+- **`quality-gate.ts` corrective follow-up**: confirmed (n=3 now — two
+  `pi -p` sessions at 9 and 30 turns, plus a 2026-08-17-evening battery-script
+  catch on `go/lru-cache`) that the follow-up gets queued correctly but the
+  process exits before a second turn runs it — a real fix is needed, not
+  just more observation. The `go/lru-cache` occurrence is the cleanest trace
+  yet (`diffChanged: false`, immediate re-settle 213ms after the corrective
+  message was injected) and is a good lead for isolating the mechanism. The
+  one working case so far is a small, few-turn scratch repo; what
+  specifically differs at depth isn't isolated yet.
+- **`go/lru-cache` via the battery script vs. the earlier direct-scratch-task
+  evidence**: 2026-08-17 evening, run through `run_single_pair.py` for the
+  first time (previous 4/4 evidence used a different, direct scratch-task
+  methodology, not this fixture). Baseline passed cleanly (48s). Harness's
+  first attempt reintroduced the *same bug class* the original 0/4 finding
+  documented — `container/list`-based eviction deleting by `oldest.Value`
+  (the cache value) instead of the key — and `cross-model-review.ts` caught
+  it correctly (matches its established catch rate). But the corrective
+  follow-up never actually ran (see the gap above), so the run scored
+  `passed: false`. **Not conclusive evidence the thinking/temperature fix
+  itself regressed** — whether the original 4/4 trials needed correction
+  rounds to land this task isn't recorded, so this could be normal
+  first-attempt variance rather than a new failure mode; what's new and
+  clear is that this specific harness mechanism silently ate the
+  correction that would have fixed it. Baseline fixed it correctly and
+  cleanly on the first attempt using the original slice-based structure,
+  for contrast. Worth a second battery-script rerun to see if the
+  first-attempt bug reproduces or was a one-off.
 - Misc smaller items (DayTrix skill placement, `findings[]` severity-aware
   retry prioritization, OS/container boundary for unattended runs): see
   history for detail.
