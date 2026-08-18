@@ -4131,3 +4131,90 @@ A third reviewer call recorded `outcome: "blocked"` — the pre-existing "same d
 **Net**: this is the first live confirmation that the 2026-08-19 decoupling behaves as designed end-to-end — no injected `followUp` messages, reviewer/quality-gate findings preserved purely as trace metadata, and the session settles honestly as a real, cleanly-reported failure with the reviewer's correct diagnosis intact rather than lost. The underlying model behavior (reintroducing the bug, not self-correcting without a nudge) is unchanged and expected — that's the traded-away capability, not a new defect.
 
 Artifacts: `/private/tmp/pi-arm-20260818T194329Z-ulzhygvg/` (manifest, summary.json); full run artifacts at `/private/tmp/pi-screen-07-harness-jzi03ex6/` (work/, session/, pi-output.jsonl — all local temp, not committed).
+## 2026-08-18 — progress-stall-guard stable scratch-loop signature and nudge removal
+
+The open fingerprint gap was fixed with a deliberately two-part diagnostic
+signature: the command is canonicalized while replacing heredoc bodies with a
+placeholder (preserving the scratch target and executable), and the failure is
+reduced to a category (`go-test:<name>`, panic/error class, or the existing
+normalized-output fingerprint fallback). This keeps the original conjunction
+meaningful: no non-test source edit is still required, and a different
+diagnostic target or failure category breaks the streak. The accepted tradeoff
+is that two genuinely different assertion failures under the same Go test name
+and command shape can now be conflated when their only difference is in the
+assertion details.
+
+The new deterministic regression reproduces the observed shape exactly:
+three failing `cat > /tmp/lru-dbg/main.go <<'EOF'` plus `go run` rounds with
+different heredoc contents and key values. It reaches `sameFailure: 2` and
+`stalled: true`. The nudge was removed entirely, including
+`PI_STALL_GUARD_NUDGE`, `MAX_NUDGES_PER_RUN`, and `nudges`; the extension is
+trace-only because `deliverAs: "followUp"` cannot interrupt a model that keeps
+calling tools, following the established `cross-model-review.ts` and
+`quality-gate.ts` precedent.
+
+Verification: `npm run typecheck` clean. The canonical `npm test` command
+cannot start in this sandbox because `tsx` receives `listen EPERM` creating its
+IPC socket. The equivalent `node --import tsx/esm --test tests/*.test.ts`
+suite passed **190/190** after redirecting uv's cache to a writable temporary
+directory. The required live preflight confirmed Pi `0.83.0` and the
+`~/.pi/agent/extensions/progress-stall-guard.ts` symlink to this working tree,
+but both route curls failed with DNS resolution for `kannasmacstudio.lan`; the
+exact `run_single_arm.py` command consequently failed before creating a live
+session (`reviewer route unreachable`). No stochastic live stall result is
+claimed; that remains open pending a host with route/DNS access.
+
+This work was delegated to Codex (`codex exec`, `workspace-write` sandbox,
+`-a never`) with an explicit prompt scoping the fix, requiring both a
+deterministic scratch-loop test and live confirmation, and forbidding a
+commit. Reviewed and re-verified directly afterward, not taken on trust:
+`npm run typecheck` and `npm test` re-run outside Codex's sandbox on this
+host, confirming **190/190 passing** canonically (the sandbox limitation was
+real, not a cover for a failure). `git status` confirmed no commit had been
+made.
+
+## 2026-08-19 — two live pair-7 reruns post-fix: neither reproduced the target stall
+
+Closed the live-confirmation gap Codex's sandbox couldn't reach, using this
+host's real route access (`kannasmacstudio.lan`, both `:8080`/`:8081`
+reachable). Ran `run_single_arm.py --seed 20260802 --pair 7 --arm harness`
+twice in direct succession against the fixed code (still uncommitted,
+working-tree-symlinked as usual).
+
+- **First rerun**: `valid: true, passed: true`, 270.8s. The model produced a
+  correct fix without ever needing repeated diagnostic probing --
+  `pi-stall-trace` shows `sourcelessRounds` resetting to 0 on real edits
+  each time, never exceeding 2, `sameFailure` staying 0 throughout (nothing
+  to fingerprint -- no repeated failure occurred). Reviewer flagged three
+  times along the way but the final diff passed the hidden test regardless.
+- **Second rerun**: `valid: true, passed: false`, 120.4s, not timed out. The
+  model shipped an incorrect fix but did not loop -- `pi-stall-trace` again
+  shows `sourcelessRounds` capping at 2 per streak, `sameFailure` at 0. It
+  stopped and reported rather than repeatedly re-probing the same failure.
+
+**Neither run reproduced the runaway scratch-file stall this fix targets**,
+so the specific claim "sameFailure now climbs past 0 on a real stall" remains
+unexercised end-to-end, live. This is consistent with the task's known
+stochasticity documented across earlier reruns in this file (roughly half of
+historical pair-7 harness-arm runs stall into a scratch loop, half settle
+directly, correct or not) -- not a sign the fix is broken, just that these
+two attempts drew the non-stalling half of that distribution. A third rerun
+was deliberately not chased: two clean non-reproductions plus a
+deterministic unit test that exercises the exact mechanism
+(`fingerprintDiagnostic` on varying heredoc bodies, same failure category)
+is treated as sufficient evidence for now rather than persisting until a
+stall happens to land, which would just be selecting a lucky run rather than
+adding real confidence.
+
+**Net status**: the fix itself (command-shape + failure-category signature,
+nudge removal) is verified by canonical unit tests and typecheck, and two
+live runs against the real model confirm no regression (both completed
+normally, no extension errors, no false `stalled: true`). The one specific
+thing not yet directly observed live is `sameFailure` climbing past the old
+ceiling *during an actual stall* -- left open, to be picked up by whichever
+future pair-7 rerun happens to reproduce the scratch-loop shape, rather than
+manufactured. Artifacts: `/private/tmp/pi-arm-20260818T201441Z-0l6ufgr8/` and
+`/private/tmp/pi-arm-20260818T203437Z-p4l3521g/` (manifests, summary.json);
+full session logs at `/private/tmp/pi-screen-07-harness-74zhut93/` and
+`/private/tmp/pi-screen-07-harness-0pb6io03/` (all local temp, not
+committed).

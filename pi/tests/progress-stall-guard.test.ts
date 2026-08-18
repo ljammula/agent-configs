@@ -36,7 +36,7 @@ function nonEmptyTurnEnd() {
 	} as any;
 }
 
-test("reproduces the observed stall: same-failure test reruns with no source edit trace as stalled but stay silent by default", async () => {
+test("reproduces the observed stall: same-failure test reruns with no source edit trace as stalled", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -46,18 +46,13 @@ test("reproduces the observed stall: same-failure test reruns with no source edi
 		await harness.emit(nonEmptyTurnEnd());
 	}
 
-	assert.equal(harness.messages.length, 0, "trace-only by default: no nudge without PI_STALL_GUARD_NUDGE=1");
+	assert.equal(harness.messages.length, 0, "the guard is trace-only");
 	const traces = harness.entries.filter((e) => e.type === "pi-stall-trace");
 	assert.equal(traces.length, 3);
-	assert.deepEqual(traces.at(-1)?.data, { sourcelessRounds: 3, sameFailure: 2, stalled: true, nudged: false });
+	assert.deepEqual(traces.at(-1)?.data, { sourcelessRounds: 3, sameFailure: 2, stalled: true });
 });
 
-test("nudges when PI_STALL_GUARD_NUDGE=1 and the stall pattern reproduces", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("does not inject a nudge when the stall pattern reproduces", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -67,16 +62,10 @@ test("nudges when PI_STALL_GUARD_NUDGE=1 and the stall pattern reproduces", asyn
 		await harness.emit(nonEmptyTurnEnd());
 	}
 
-	assert.equal(harness.messages.length, 1);
-	assert.match(String(harness.messages[0].content), /same failure/);
+	assert.equal(harness.messages.length, 0);
 });
 
-test("an edit to a non-test source file resets the stall counters", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("an edit to a non-test source file resets the stall counters", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -101,12 +90,7 @@ test("an edit to a non-test source file resets the stall counters", async (t) =>
 	assert.equal(harness.messages.length, 0, "the counter should have reset on the edit, not reached the threshold yet");
 });
 
-test("an edit to a test file does not reset the stall counters", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("an edit to a test file does not reset the stall counters", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -126,15 +110,10 @@ test("an edit to a test file does not reset the stall counters", async (t) => {
 		await harness.emit(nonEmptyTurnEnd());
 	}
 
-	assert.equal(harness.messages.length, 1);
+	assert.equal(harness.messages.length, 0);
 });
 
-test("a passing test run resets sameFailure even without a source edit", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("a passing test run resets sameFailure even without a source edit", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -164,12 +143,7 @@ test("turns with no tool calls at all are ignored -- continuation-nudge.ts's ter
 	assert.equal(harness.entries.filter((e) => e.type === "pi-stall-trace").length, 0);
 });
 
-test("matches `make verify`/`make test`/`make check`, mirroring BROAD_VERIFICATION_PATTERNS's coverage", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("matches `make verify`/`make test`/`make check`, mirroring BROAD_VERIFICATION_PATTERNS's coverage", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -186,15 +160,10 @@ test("matches `make verify`/`make test`/`make check`, mirroring BROAD_VERIFICATI
 		await harness.emit(nonEmptyTurnEnd());
 	}
 
-	assert.equal(harness.messages.length, 1, "make verify runs should count toward the stall the same as a direct go test call");
+	assert.equal(harness.messages.length, 0, "the guard is trace-only");
 });
 
-test("counts repeated scratch-file runs as diagnostic activity", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("counts repeated scratch-file runs as diagnostic activity", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
@@ -211,8 +180,30 @@ test("counts repeated scratch-file runs as diagnostic activity", async (t) => {
 		await harness.emit(nonEmptyTurnEnd());
 	}
 
-	assert.equal(harness.messages.length, 1, "the scratch-file loop should reach the same stall threshold as a test loop");
-	assert.deepEqual(harness.entries.at(-1)?.data, { sourcelessRounds: 3, sameFailure: 2, stalled: true, nudged: true });
+	assert.equal(harness.messages.length, 0, "the guard is trace-only");
+	assert.deepEqual(harness.entries.at(-1)?.data, { sourcelessRounds: 3, sameFailure: 2, stalled: true });
+});
+
+test("varied scratch heredocs still accumulate sameFailure for the same underlying Go test", async () => {
+	const harness = new ExtensionHarness();
+	progressStallGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+
+	for (const key of ["10", "11", "12"]) {
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: `varying-${key}`,
+			toolName: "bash",
+			input: { command: `cat > /tmp/lru-dbg/main.go <<'EOF'\npackage main\n// probe key ${key}\nfunc main() {}\nEOF\ngo run /tmp/lru-dbg/main.go` },
+			content: [{ type: "text", text: `--- FAIL: TestEvictionWithDistinctKeysAndValues (0.0${key}s)\n    lru_test.go:95: key ${key} should have been evicted\nFAIL` }],
+			isError: true,
+		} as any);
+		await harness.emit(nonEmptyTurnEnd());
+	}
+
+	const trace = harness.entries.at(-1)?.data as any;
+	assert.equal(trace.sameFailure, 2);
+	assert.equal(trace.stalled, true);
 });
 
 // Regression test for the 2026-08-16 live finding: agent_start fires on every
@@ -221,12 +212,7 @@ test("counts repeated scratch-file runs as diagnostic activity", async (t) => {
 // evidence of repeated inaction every time a retry happens, so a run that
 // hits frequent retries (as one did, under real ai-stack proxy contention)
 // never accumulates enough rounds to fire. See file header.
-test("a later agent_start (simulating an auto-retry restart) does not wipe accumulated stall evidence", async (t) => {
-	process.env.PI_STALL_GUARD_NUDGE = "1";
-	t.after(() => {
-		delete process.env.PI_STALL_GUARD_NUDGE;
-	});
-
+test("a later agent_start (simulating an auto-retry restart) does not wipe accumulated stall evidence", async () => {
 	const harness = new ExtensionHarness();
 	progressStallGuard(harness.api);
 	await harness.emit({ type: "agent_start" } as any); // true start
@@ -244,7 +230,7 @@ test("a later agent_start (simulating an auto-retry restart) does not wipe accum
 	// Naive reset-on-every-agent_start would have wiped round 1's evidence at
 	// the retry restart, leaving only 2 rounds accumulated -- one short of
 	// STALL_ROUNDS_THRESHOLD (3) -- and never nudge.
-	assert.equal(harness.messages.length, 1);
+	assert.equal(harness.messages.length, 0);
 });
 
 test("fingerprintFailure normalizes timings, line numbers, addresses, and temp paths", () => {

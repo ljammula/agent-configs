@@ -25,9 +25,11 @@
  *
  * Heuristic is a conjunction, not any single signal:
  *   (a) no edit/write tool call touching a non-test source file across
- *       STALL_ROUNDS_THRESHOLD consecutive turns that ran a test command, AND
- *   (b) the test command's failure output fingerprint hasn't changed across
- *       SAME_FAILURE_THRESHOLD consecutive failing runs.
+ *       STALL_ROUNDS_THRESHOLD consecutive turns that ran a diagnostic command, AND
+ *   (b) the diagnostic signature (command shape plus failure category) hasn't
+ *       changed across SAME_FAILURE_THRESHOLD consecutive failing runs. The
+ *       command shape ignores scratch heredoc contents, because a probe can
+ *       vary while still reproving the same source bug.
  * Neither alone is safe: (a) alone flags legitimate read-only exploration;
  * (b) alone flags a flaky test genuinely being re-run to check reproducibility.
  * Together they describe "diagnosed and reproduced, but never acted on."
@@ -37,14 +39,14 @@
  * touching source until it has localized the fault, produces a
  * tool-call trace this heuristic cannot distinguish from the stall above --
  * that distinction lives in the model's reasoning, not the tool stream. The
- * cost asymmetry justifies firing anyway: a false positive costs one
- * ignorable nudge; a false negative costs a killed multi-minute run, as it
+ * cost asymmetry justifies recording anyway: a false positive costs one
+ * trace event; a false negative costs a killed multi-minute run, as it
  * did here.
  *
- * Ships in TRACE-ONLY mode: every fire is recorded via `appendEntry`
- * regardless of `PI_STALL_GUARD_NUDGE`, so the false-positive rate can be
- * measured against real sessions before the nudge itself is trusted to run
- * live. Set `PI_STALL_GUARD_NUDGE=1` to actually send the nudge message.
+ * Ships in TRACE-ONLY mode: every fire is recorded via `appendEntry`. In-band
+ * nudging was removed because `deliverAs: "followUp"` cannot interrupt a
+ * model that keeps calling tools; this follows the established
+ * cross-model-review.ts and quality-gate.ts precedent.
  *
  * Two bugs found live 2026-08-16 re-running this exact scenario (see
  * pi-harness-validation-status.md):
@@ -106,7 +108,6 @@ const TEST_FILE_PATTERNS = [
 
 const STALL_ROUNDS_THRESHOLD = 3;
 const SAME_FAILURE_THRESHOLD = 2;
-const MAX_NUDGES_PER_RUN = 2;
 
 function isTestFile(path: string): boolean {
 	return TEST_FILE_PATTERNS.some((re) => re.test(path));
@@ -146,16 +147,35 @@ export function fingerprintFailure(text: string): string {
 	return `${tail.length}:${hash}`;
 }
 
+function diagnosticCommandShape(command: string): string {
+	// Keep the redirection target and command after it, but discard the
+	// deliberately variable scratch probe body.
+	return command
+		.replace(/<<-?\s*(['"]?)([A-Za-z_][\w-]*)\1[\s\S]*?\n\2/g, "<<HEREDOC")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function failureCategory(text: string): string {
+	const normalized = text.replace(/\r/g, "");
+	const goTest = normalized.match(/--- FAIL:\s*([^\s(]+)/);
+	if (goTest) return `go-test:${goTest[1]}`;
+	const panic = normalized.match(/\bpanic:\s*([^\s:]+)/i);
+	if (panic) return `panic:${panic[1].toLowerCase()}`;
+	const error = normalized.match(/\b(error|fatal error|exception)\s*:?\s*([^\s:]+)/i);
+	if (error) return `${error[1].trim().toLowerCase()}:${error[2].toLowerCase()}`;
+	return `output:${fingerprintFailure(text)}`;
+}
+
+function fingerprintDiagnostic(command: string, text: string): string {
+	return `${diagnosticCommandShape(command)}|${failureCategory(text)}`;
+}
+
 export default function (pi: ExtensionAPI) {
-	// Read per-registration, not at module load, so a caller (or a test) that
-	// sets this env var right before starting a session is honored -- same
-	// reasoning as wall-clock-budget-nudge.ts.
-	const nudgeEnabled = process.env.PI_STALL_GUARD_NUDGE === "1";
 	let sourcelessRounds = 0;
 	let sameFailure = 0;
-	let lastFingerprint: string | undefined;
+	let lastDiagnosticFingerprint: string | undefined;
 	let sawTestThisTurn = false;
-	let nudges = 0;
 
 	let seenFirstAgentStart = false;
 	pi.on("agent_start", () => {
@@ -166,17 +186,17 @@ export default function (pi: ExtensionAPI) {
 		seenFirstAgentStart = true;
 		sourcelessRounds = 0;
 		sameFailure = 0;
-		lastFingerprint = undefined;
+		lastDiagnosticFingerprint = undefined;
 		sawTestThisTurn = false;
-		nudges = 0;
 	});
 
-	// A new ask (steering message, injected follow-up) resets the failure
+	// A new ask (steering message, injected message from another extension)
+	// resets the failure
 	// scope, mirroring continuation-nudge.ts -- a stale fingerprint from a
 	// prior ask must not count toward this one.
 	pi.on("input", () => {
 		sameFailure = 0;
-		lastFingerprint = undefined;
+		lastDiagnosticFingerprint = undefined;
 	});
 
 	pi.on("tool_result", (event) => {
@@ -185,7 +205,7 @@ export default function (pi: ExtensionAPI) {
 			if (path && !event.isError && !isTestFile(path)) {
 				sourcelessRounds = 0;
 				sameFailure = 0;
-				lastFingerprint = undefined;
+				lastDiagnosticFingerprint = undefined;
 			}
 			return undefined;
 		}
@@ -196,16 +216,16 @@ export default function (pi: ExtensionAPI) {
 		sawTestThisTurn = true;
 		if (!event.isError) {
 			sameFailure = 0;
-			lastFingerprint = undefined;
+			lastDiagnosticFingerprint = undefined;
 			return undefined;
 		}
 		const text = event.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
 			.map((c) => c.text)
 			.join("\n");
-		const fp = fingerprintFailure(text);
-		sameFailure = fp === lastFingerprint ? sameFailure + 1 : 0;
-		lastFingerprint = fp;
+		const fp = fingerprintDiagnostic(command, text);
+		sameFailure = fp === lastDiagnosticFingerprint ? sameFailure + 1 : 0;
+		lastDiagnosticFingerprint = fp;
 		return undefined;
 	});
 
@@ -216,14 +236,6 @@ export default function (pi: ExtensionAPI) {
 		sourcelessRounds += 1;
 
 		const stalled = sourcelessRounds >= STALL_ROUNDS_THRESHOLD && sameFailure >= SAME_FAILURE_THRESHOLD;
-		const willNudge = stalled && nudgeEnabled && nudges < MAX_NUDGES_PER_RUN;
-		pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled, nudged: willNudge });
-		if (!willNudge) return;
-
-		nudges += 1;
-		pi.sendUserMessage(
-			`You have run this test ${sameFailure + 1} times in a row with the same failure and have not edited any non-test source file in that span. The bug is in the implementation, not the test. Edit the source file the test is about, or state explicitly why the test itself is wrong.`,
-			{ deliverAs: "followUp" },
-		);
+		pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled });
 	});
 }
