@@ -250,7 +250,7 @@
 
   <div class="stats">
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, pre-hardening paired battery</div></div>
-    <div class="stat"><div class="num">4/4</div><div class="label">Hardened-config rerun: every valid harness run passed (3/7 timed out)</div></div>
+    <div class="stat"><div class="num">4/4</div><div class="label">Hardened-config rerun: every valid harness run passed (3/7 timed out, partly under resource contention)</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix: Qwen3.8 thinking + temperature tuning</div></div>
   </div>
@@ -322,10 +322,10 @@
   <section>
     <h2>Open items</h2>
     <div class="steps">
-      <div class="step"><div class="dot"></div><p>Per-task timeout budgets (30/45 min) predate thinking being enabled and haven't been revisited — the 8/17 hardened-config rerun found 3/7 harness arms (43%) failing to complete inside them, one a pure settlement-speed problem (diff already passed hidden tests), the other a genuine unresolved stall.</p></div>
+      <div class="step"><div class="dot"></div><p>Per-task timeout budgets (30/45 min) predate thinking being enabled and haven't been revisited — the 8/17 hardened-config rerun found 3/7 harness arms (43%) failing to complete inside them, one a pure settlement-speed problem (diff already passed hidden tests), the other a genuine unresolved stall. Caveat: the 2:15-4:46 PM run window overlapped with other local inference contesting the same host's resources, so some of this may be contention noise rather than purely thinking-enabled cost — not yet separated by a clean rerun.</p></div>
       <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — mechanism class identified, exact enforcing code not yet traced; a 2/2 correlation with aggressive compaction settings is a new, unconfirmed lead.</p></div>
       <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> corrective follow-up under <code>pi -p</code> confirmed to silently not fire in some real sessions (n=2) — a real fix is needed, not just more observation.</p></div>
-      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> runtime overhead was median 100.3% pre-hardening, still above the plan's 20% screening threshold — now ~312% on thinking-enabled turns, sharpening the same open question.</p></div>
+      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> runtime overhead was median 100.3% pre-hardening, still above the plan's 20% screening threshold — now ~312% on thinking-enabled turns (same contention caveat above applies), sharpening the same open question.</p></div>
       <div class="step"><div class="dot"></div><p>TypeScript/JS task fixtures still need battery coverage — routed and unit-tested only so far.</p></div>
     </div>
   </section>

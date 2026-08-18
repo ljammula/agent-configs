@@ -144,6 +144,13 @@ Full record: `pi/evals/hardened-screening-2026-08-17.json`; narrative:
 Detail, including the pair-4 concurrency-bug deep-dive, in
 `pi-harness-history.md`.
 
+**Caveat, not yet isolated:** the 2:15-4:46 PM window of this run overlapped
+with other local inference contesting the same host's GPU/route resources.
+The ~312% median overhead figure and/or the 3/7 timeout failures inside that
+window may be partly measurement noise from that contention rather than
+purely the cost of thinking-enabled turns — not yet separated from a clean
+rerun.
+
 ## Extension-by-extension current status
 
 | Extension | Status | Evidence |
