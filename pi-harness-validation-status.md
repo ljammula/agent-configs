@@ -107,7 +107,11 @@ absence, network denial, `/tmp` noexec, capabilities, no-new-privileges).
 ## Current battery result
 
 A completed nine-pair randomized screen (seed `20260802`, stock Pi vs. the
-installed harness) is the pre-hardening operational-hardening evidence:
+installed harness) is the pre-hardening operational-hardening evidence. The
+9 scheduled pairs cover only **7 unique tasks** — `go/lru-cache` and
+`go/notes-api` are each deliberately scheduled twice (repeats are
+intentional: a single result on a stochastic agent is anecdotal), so "9"
+is pair count, not distinct-task count.
 hidden-test success baseline 7/9, harness 8/9 (its one loss was a shared
 baseline failure, not a harness defect); zero extension errors across all
 eighteen runs; median paired runtime overhead 100.3%, above the plan's 20%
@@ -144,12 +148,26 @@ Full record: `pi/evals/hardened-screening-2026-08-17.json`; narrative:
 Detail, including the pair-4 concurrency-bug deep-dive, in
 `pi-harness-history.md`.
 
-**Caveat, not yet isolated:** the 2:15-4:46 PM window of this run overlapped
-with other local inference contesting the same host's GPU/route resources.
-The ~312% median overhead figure and/or the 3/7 timeout failures inside that
-window may be partly measurement noise from that contention rather than
-purely the cost of thinking-enabled turns — not yet separated from a clean
-rerun.
+**Caveat, now partly resolved (2026-08-17, evening).** The 2:15-4:46 PM
+window of the hardened rerun overlapped with other local inference
+contesting the same host's GPU/route resources. Pair 4
+(`go-flutter/bookmarks-app`, the zero-diff/zero-turn 45-min timeout) was
+rerun clean: the host's proxy and Qwen3.8 launchd jobs were fully restarted
+(`launchctl kickstart -k`), reachability and idle-connection state verified,
+then only the harness arm rerun (baseline reused as-is, since it already
+passed 7/7 valid in the original battery and pair 4's baseline specifically
+was not in question). Result: **`valid: true`, `passed: true`, `timed_out:
+false`**, 1073s (~18 min, well inside the 45-min budget), a real 328-line
+diff across 3 files, 46 assistant messages, 60 tool calls, hidden tests
+passing, with a genuine corrective loop (reviewer flagged once, quality-gate
+failed 3 times before settling) — a stark contrast to the original run's
+zero turns in the full 45 minutes. **Conclusion: pair 4's original stall was
+contention-caused, not a genuine hang or thinking-mode defect.** Pair 5
+(`dart/sequential-runner`, the settlement-speed timeout) has not yet been
+re-isolated the same way; the ~312% median overhead figure also remains
+unseparated from contention — both still open. Full trail:
+`pi-harness-history.md`'s 2026-08-17 evening "pair 4 clean-contention rerun"
+entry.
 
 ## Extension-by-extension current status
 
@@ -190,14 +208,18 @@ evidence-cited version of each):
   2026-08-17 hardened-config battery rerun found 3/7 harness arms (43%)
   failing to complete inside their existing `harness_timeout_minutes`
   budgets (30/45 min), which predate thinking being enabled and haven't been
-  revisited. One (`dart/sequential-runner`) had already produced a
+  revisited. `dart/sequential-runner` had already produced a
   hidden-test-passing diff before running out of time — a pure
   budget/settlement-speed problem, not a correctness one, and the second
-  live occurrence of the exact failure shape from `pair4-rerun-2026-08-13`.
-  The other (`go-flutter/bookmarks-app`) produced zero diff and zero turns
-  in the full 45 minutes — a genuine stall, not yet root-caused. Needs
-  either raised budgets or a quality-gate settlement-speed fix before this
-  can be called resolved; see `pi/evals/hardened-screening-2026-08-17.json`.
+  live occurrence of the exact failure shape from `pair4-rerun-2026-08-13`;
+  **not yet re-isolated under a clean, uncontended stack.**
+  `go-flutter/bookmarks-app` produced zero diff and zero turns in the full
+  45 minutes originally, but a same-day clean rerun (contention cleared, host
+  restarted) passed with a real 328-line diff, 46 messages, 60 tool calls,
+  1073s total — **resolved as contention-caused, not a genuine stall**; see
+  `pi-harness-history.md`'s evening "pair 4 clean-contention rerun" entry.
+  Timeout-budget-vs-turn-cost question and `dart/sequential-runner` remain
+  open; see `pi/evals/hardened-screening-2026-08-17.json`.
 - **Background-process kills** (now four unattended `/goal` runs killed
   mid-round, the latest two on 2026-08-12): root-caused as far as the
   mechanism class — a client-side network-idle timeout on the primary

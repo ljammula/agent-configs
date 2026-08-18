@@ -3387,3 +3387,54 @@ actionable finding is reliability: 43% of harness arms didn't finish
 inside timeout budgets that were sized for the pre-thinking harness and
 haven't been revisited since thinking was turned on. Full record:
 `pi/evals/hardened-screening-2026-08-17.json`.
+
+Note on the "9-pair" framing: the seeded schedule covers only **7 unique
+tasks**, not 9 — `go/lru-cache` and `go/notes-api` are each scheduled
+twice on purpose (a single result on a stochastic agent is anecdotal). "9"
+has always meant pair count, not distinct-task count; this rerun happened
+to skip both `go/lru-cache` repeats (separate 4/4 evidence already existed
+for it) while keeping both `go/notes-api` repeats, landing on 7 pairs / 7
+unique tasks by coincidence, not by design.
+
+## 2026-08-17 (evening) — pair 4 clean-contention rerun
+
+Following the hardened-config battery rerun above, its runtime overlapped
+(2:15-4:46 PM) with other local inference contesting the same host's
+GPU/route resources, discovered after the fact. To separate contention
+noise from genuine harness defects, pair 4 (`go-flutter/bookmarks-app`,
+harness arm) was rerun in isolation once the LAN was confirmed clear:
+
+1. Killed the in-flight rerun process cleanly.
+2. Fully restarted the two relevant launchd jobs — `com.aistack.qwen38`
+   and `com.aistack.kvproxy` — via `launchctl kickstart -k` (new PIDs
+   confirmed: 34038, 34045). The underlying `mlx_vlm.server` processes
+   for other routes were untouched; this targeted only the Qwen3.8
+   primary route and its proxy.
+3. Verified clean state before relaunch: `/v1/models` responding fresh
+   on `:8080` and `:8081`, `lsof` showing no lingering client
+   connections from the prior run.
+4. Reran **harness arm only** — pair 4's baseline was not re-run, since
+   it already passed 7/7 valid in the original battery and was never in
+   question; reusing it avoided ~15-20 minutes of redundant baseline
+   time. (`run_single_pair.py` has no baseline-skip flag, so this reused
+   its `execute_arm()` directly via a small wrapper script instead.)
+
+**Result: `valid: true`, `passed: true`, `timed_out: false`.** 1073s
+(~18 min, well inside the 45-min budget), a real 328-line diff across 3
+files (`client/lib/bookmarks_client.dart`,
+`client/lib/bookmarks_view_model.dart`, `server/bookmarksapi.go`), 46
+assistant messages, 60 tool calls, `hidden_test_exit=0`. Trace shows a
+genuine corrective loop, not a rubber-stamp pass: `cross-model-review.ts`
+flagged once, `quality-gate.ts` failed verification 3 times before
+settling. This is a stark contrast to the original run's zero diff and
+zero turns across the full 45 minutes.
+
+**Conclusion: pair 4's original stall was contention-caused, not a
+genuine hang or a defect in the hardened (thinking-enabled) config.**
+This closes the "genuine stall, not yet root-caused" open item for pair 4
+specifically. `dart/sequential-runner` (pair 5, the settlement-speed
+timeout) has not yet been re-isolated the same way and remains open, as
+does the ~312% median overhead figure, since neither has had its own
+clean-contention rerun. Artifact: `record.json` under
+`/tmp/pi-pair4-harness-only-clean-20260817T232159/` (not committed, local
+temp path).
