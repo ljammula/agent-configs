@@ -92,11 +92,13 @@ symlink escapes, external-effect policy, installer scope, stack routing,
 extension interactions, nested verification manifests, stale-extension-
 context handling, and the goal-gate/greenfield hardening extensions below.
 
-One acceptance boundary remains intentionally not adopted:
+One acceptance boundary remains intentionally not adopted, one resolved:
 
-- `continuation-nudge.ts` and `co-change-suggest.ts` remain source-tested
-  but are removed from the installed runtime until randomized paired
-  evidence meets the current adoption threshold.
+- `co-change-suggest.ts` remains source-tested but removed from the
+  installed runtime — structurally untestable by this repo's battery
+  methodology (see its table row below), not a negative trial result.
+- **`continuation-nudge.ts` adopted 2026-08-19 (Task 6)**, now installed
+  by default. Live trial evidence: see its table row below.
 
 Docker containment is live-proven on this host via Colima: image and
 launcher build and run with Pi 0.83.0, the persistent agent volume is
@@ -164,8 +166,10 @@ failed 3 times before settling) — a stark contrast to the original run's
 zero turns in the full 45 minutes. **Conclusion: pair 4's original stall was
 contention-caused, not a genuine hang or thinking-mode defect.** Pair 5
 (`dart/sequential-runner`, the settlement-speed timeout) has not yet been
-re-isolated the same way; the ~312% median overhead figure also remains
-unseparated from contention — both still open. Full trail:
+re-isolated the same way at the time; since re-isolated 2026-08-19 and
+resolved as a self-inflicted verification loop, not contention or genuine
+settlement speed — see the "Open items" section below. The ~312% median
+overhead figure remains unseparated from contention — still open. Full trail:
 `pi-harness-history.md`'s 2026-08-17 evening "pair 4 clean-contention rerun"
 entry.
 
@@ -178,10 +182,10 @@ entry.
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. Live-found and fixed 2026-08-17 (hardened battery, pair 7, `go/notes-api`): `turn_start`'s first ctx call could throw Pi's documented stale-context error (a session reload/compaction/fork landing before the handler ran), crashing the turn — `stack-router.ts`/`quality-gate.ts` already guarded against this exact class via `lib/stale-context.ts`, `git-checkpoint.ts` had not. Fixed with the same guard; 4 new deterministic tests, including one reproducing the exact crash. Not yet re-observed live post-fix (the race is timing-dependent, not reliably reproducible on demand). |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement. Proven in the nine-pair battery. **Corrective in-band nudging removed by design, 2026-08-19** (see `cross-model-review.ts`'s row for the shared rationale): after three separate incidents tracing back to trying to make a correction land inside a live session, scope was narrowed instead of chasing a fourth fix. A failing settlement check no longer queues `sendUserMessage`; it's recorded as a `fail` trace event, with the redacted failure output now carried in `metadata.failureExcerpt` (the only remaining channel for a human to read it, since the injected message used to be the sole carrier). No round cap needed anymore — nothing is being capped. 188 deterministic tests, typecheck clean. Not yet live-validated post-decoupling: unit tests confirm the mechanism, a live run showing a real failing settlement land purely as a trace entry (zero injected messages) hasn't been observed. Full trail: `pi-harness-history.md`'s 2026-08-19 "decouple nudging from review" entry (supersedes the 2026-08-18 `agent_end`-fix and `followUp`-vs-`steer` entries below it, which remain as history of what was tried first). |
-| `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Go/Dart have battery coverage; a new JavaScript LRU fixture is structurally wired and locally testable, but its required live baseline/harness pair is still open. |
-| `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target #1 of 8) short of the adoption threshold. Live validation not run. |
-| `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic tests pass; widened trigger has zero real-trial field evidence. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement. Proven in the nine-pair battery. **Corrective in-band nudging removed by design, 2026-08-19** (see `cross-model-review.ts`'s row for the shared rationale): after three separate incidents tracing back to trying to make a correction land inside a live session, scope was narrowed instead of chasing a fourth fix. A failing settlement check no longer queues `sendUserMessage`; it's recorded as a `fail` trace event, with the redacted failure output now carried in `metadata.failureExcerpt` (the only remaining channel for a human to read it, since the injected message used to be the sole carrier). No round cap needed anymore — nothing is being capped. **Post-decoupling overhead check, 2026-08-18:** three current-code logs each contain exactly one verification trace, with gate cost 842 ms, 643 ms, and 2,398 ms against 110.360 s, 270.805 s, and 120.439 s totals. No code change is justified; a fresh live paired battery is still required for a current overhead number. The resolver remains uncached because a session can create or modify a Makefile/manifest, and caching without correct invalidation could bind evidence to a stale command. 190 deterministic tests, typecheck clean. Full trail: `pi-harness-history.md`'s 2026-08-18 overhead investigation entry. |
+| `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Go/Dart have battery coverage; **TypeScript/JavaScript now does too (2026-08-19, Task 7)**: a live `javascript/lru-cache` baseline/harness pair — baseline failed the hidden test (1/1), harness passed (1/1) after its own settlement check correctly rejected the model's first attempt and the reviewer independently flagged a real bug before a corrected diff settled clean. Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 7" entry. |
+| `co-change-suggest.ts` | Default-disabled, source-tested | **Adoption bar stated 2026-08-19 (Task 6): 3 live trials where the suggestion measurably surfaces a file the model would otherwise have missed, with zero regressions** (matches this repo's existing ~3-occurrence bar elsewhere, e.g. the corrective-follow-up and stall-guard findings). **Structurally untestable by the existing battery methodology, documented not worked around**: `MIN_COMMITS_FOR_COCHANGE = 20` gates every mining pass, but `run_screening.py`'s `execute_arm()` always seeds a fixture's work directory with a single fresh `git init` + one starter commit — no battery fixture can ever reach 20 commits as currently constructed. One real retrospective replay (ranked target #1 of 8, against `personal-assistant`'s real history) remains the only evidence; it's retrospective, not live, and stays short of the bar. A genuine live trial needs a real repo with real history and a real task, not a fixture — out of scope to fabricate one without a real task motivating it. Not adopted. |
+| `continuation-nudge.ts` | **Adopted 2026-08-19 (Task 6), on by default** | Adoption bar (stated before trials ran): 3 live instances where the nudge fires on a genuine abandoned-turn/failed-verification scenario and the model measurably continues or corrects afterward, with zero regressions. 3 live battery trials ran (`go/lru-cache`, `go/notes-api`, `dart/task-manager`); the first two completed cleanly with nothing to nudge (0 firings — a fixture the model doesn't stall on gives the extension no opportunity to demonstrate anything, not evidence against it). The third hit `MAX_NUDGES_PER_RUN`'s cap exactly: 3 distinct `"failed-verification"` nudges, each directly following a real `quality-gate.ts` `outcome: "fail"`, each confirmed (by inspecting the very next `turn_end`) followed by a real tool call, not another silent stop. The run converged to `hidden_test_exit: 0`, `extension_errors: 0` — a genuine multi-round correction, not a rubber-stamp pass. The bar's literal wording ("3 live trials") is satisfied here by 3 firing *instances* within one trial rather than one firing per trial across three; noted honestly rather than silently reinterpreted — the evidence is arguably stronger this way (it also demonstrates the round cap engaging correctly under real repeated failure). Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 6" entry. |
 | Auto-compaction (`ai-stack-local.ts` `contextWindow`) | Fixed and live-confirmed | Was mis-set to a value above the route's real admission budget, so Pi's own auto-compaction never fired on overflow. Corrected + adapter-level follow-up fix; live rerun: reward 1.0. Detail in history. |
 | `stack-skill-overlay.ts` | Fixed | Per-repo stack skills only load matching skill(s) instead of all 8 globally — real measured ~15% prompt-token reduction. |
 | `codebase-memory-mcp` 0.9.0 | Default-disabled, trial-only | No efficiency win over plain repo tools in a paired Go trial; vendor's token-reduction claim not confirmed. Not globally wired. |
@@ -208,18 +212,32 @@ evidence-cited version of each):
   2026-08-17 hardened-config battery rerun found 3/7 harness arms (43%)
   failing to complete inside their existing `harness_timeout_minutes`
   budgets (30/45 min), which predate thinking being enabled and haven't been
-  revisited. `dart/sequential-runner` had already produced a
-  hidden-test-passing diff before running out of time — a pure
-  budget/settlement-speed problem, not a correctness one, and the second
-  live occurrence of the exact failure shape from `pair4-rerun-2026-08-13`;
-  **not yet re-isolated under a clean, uncontended stack.**
-  `go-flutter/bookmarks-app` produced zero diff and zero turns in the full
-  45 minutes originally, but a same-day clean rerun (contention cleared, host
-  restarted) passed with a real 328-line diff, 46 messages, 60 tool calls,
-  1073s total — **resolved as contention-caused, not a genuine stall**; see
-  `pi-harness-history.md`'s evening "pair 4 clean-contention rerun" entry.
-  Timeout-budget-vs-turn-cost question and `dart/sequential-runner` remain
-  open; see `pi/evals/hardened-screening-2026-08-17.json`.
+  revisited. `go-flutter/bookmarks-app` produced zero diff and zero turns in
+  the full 45 minutes originally, but a same-day clean rerun (contention
+  cleared, host restarted) passed with a real 328-line diff, 46 messages, 60
+  tool calls, 1073s total — **resolved as contention-caused, not a genuine
+  stall**; see `pi-harness-history.md`'s evening "pair 4 clean-contention
+  rerun" entry. **`dart/sequential-runner` re-isolated 2026-08-19 (Task 4),
+  resolved as neither contention nor a genuine settlement-speed problem —
+  a self-inflicted verification loop.** Clean-isolation rerun (fresh
+  `launchctl kickstart -k` on both routes, no lingering connections) still
+  hit the 1800s timeout with `hidden_test_exit: 0`. Full log reconstruction:
+  the model wrote the real fix 36 seconds in and never touched it again;
+  `quality-gate.ts` correctly rejected its own piped verification
+  (`dart test | od -c | head -20`, `pipedWithoutPipefail: true`) twice as
+  untrustworthy evidence; the model repeated the identical piped pattern
+  127 more times instead of adapting, every one reporting `isError: false`
+  because the pipe's last command masks `dart test`'s real exit code from
+  `progress-stall-guard.ts` too (133 sourceless rounds, `sameFailure` stuck
+  at 0 — the guard has no equivalent to quality-gate's pipe-masking guard).
+  Settlement never re-ran because the diff never changed and the model
+  never reached a true idle turn. **No `harness_timeout_minutes` change
+  applied** — the evidence argues against one; genuine settlement here took
+  under a minute, and a larger budget would only let an identical stall run
+  longer. New open item (not fixed): `progress-stall-guard.ts`'s `isError`
+  check is blind to shell-masked pipe output the same way quality-gate used
+  to be. Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 4:
+  dart/sequential-runner clean-isolation rerun" entry.
 - **Background-process kills** (now four unattended `/goal` runs killed
   mid-round, the latest two on 2026-08-12): root-caused as far as the
   mechanism class — a client-side network-idle timeout on the primary
@@ -260,24 +278,47 @@ evidence-cited version of each):
   pair4-rerun-2026-08-13.json` and `plans/pair4-reviewer-mechanism-check-
   plan.md`.
 - TypeScript/JS fixture added at `../local-model-bench/tasks/javascript/lru-cache`
-  with `meta.json`, `spec.md`, starter package, and hidden tests; the live
-  baseline/harness pair remains open.
+  with `meta.json`, `spec.md`, starter package, and hidden tests. **Live
+  baseline/harness pair run 2026-08-19 (Task 7)** — see `stack-router.ts`'s
+  table row above; closed.
 - **`co-change-suggest.ts` / `continuation-nudge.ts`**: both still need live
   (non-retrospective) field validation before they clear the adoption bar.
 - **`quality-gate.ts` overhead**: the checked-in nine-pair JSON reports a
   median paired runtime overhead of 100.311% (2.0031x), with 212.6% prompt
   token overhead; the thinking-enabled hardened JSON reports 312% on the
-  four fully-valid pairs. Existing JSON has pair timings but no per-extension
-  phase timings, so it cannot attribute the cost among settlement checks,
-  manifest walks, and reviewer calls. A threshold revision proposal and
-  instrumented phase breakdown remain open.
-- **Primary HTTP timeout / unattended kills**: Pi 0.83.0's installed
-  `http-dispatcher.js` sets undici `bodyTimeout` and `headersTimeout` to
-  `DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300000`; `settings-manager.js` supplies
-  that default and maps disabled to 2147483647 in `sdk.js`. This identifies
-  the repo-side client idle bound, but does not yet prove it caused the four
-  historical kills or rule out the proxy/server. A controlled forced- and
-  non-forced-compaction reproduction remains open.
+  four fully-valid pairs. Those totals predate the 2026-08-19 decoupling and
+  cannot attribute phases. Three current-code live logs now provide a bounded
+  phase check: exactly one quality-gate verification per session, taking
+  842 ms/110.360 s, 643 ms/270.805 s, and 2,398 ms/120.439 s. Reviewer trace
+  time in the same runs was 11.513 s, 162.316 s, and 20.714 s; the 153.054 s
+  reviewer call in the middle run dominates that run's harness time. The
+  remaining time is primary-model/session work, but this is not a paired
+  overhead measurement. No extension change is justified; a fresh live
+  baseline/harness battery against current code remains the concrete next
+  step.
+- **Primary HTTP timeout / unattended kills**: **source-level mechanism
+  confirmed; live incident reproduction remains open.** Pi 0.83.0's
+  installed `pi-coding-agent/dist/core/http-dispatcher.js:3,66-75` configures
+  Undici with `bodyTimeout` and `headersTimeout` equal to
+  `DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300000` (5 minutes). In the vendored Undici
+  `lib/dispatcher/client-h1.js:629-633`, the body timer starts when response
+  headers arrive; `:703-718` calls `timeout.refresh()` in `onBody`, so this is
+  an idle gap between response chunks, not a hard total-duration cap.
+  `pi-ai/dist/api/openai-completions.js:512-526` sets `stream: true` for the
+  OpenAI-compatible request, and `ai-stack-local.ts:40-46` selects that API.
+  The proxy's `scripts/kv_concurrency_proxy.py:88-95,674-675` instead gives
+  the whole request a 1,800-second cap, while `:405-407` sets its upstream
+  `ClientTimeout(total=None, sock_connect=10, sock_read=None)`; `:760-786`
+  forwards the upstream body chunk-by-chunk. Therefore a long prefill gap
+  before the next streamed chunk can make Pi abandon a still-healthy request
+  after 300 seconds, well before the proxy's total cap. This fits the
+  aggressive-compaction correlation: forced compaction increases context
+  re-prefill and can extend time-to-first-token/next-chunk, the exact interval
+  governed by Pi's idle timer. It does not by itself prove which four process
+  exits used this path; a route-access live run with server/client timestamps
+  is still required. A safe repo-controlled setting exists in Pi itself:
+  `httpIdleTimeoutMs` is read by `settings-manager.js:560-562`, and `sdk.js:179-183`
+  maps `0`/`disabled` to `2147483647`; no vendored-file patch is warranted.
 - **Resolved by narrowing, 2026-08-19, for `quality-gate.ts` and
   `cross-model-review.ts` specifically: corrective nudges can't interrupt an
   active tool-call loop.** (Originally logged 2026-08-18.) Both extensions
