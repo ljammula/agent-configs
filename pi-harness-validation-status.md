@@ -460,6 +460,18 @@ evidence-cited version of each):
   (`sawTestThisTurn` never re-arming on non-test scratch commands) remains
   open and unrelated to this resolution — its trace-only telemetry stays
   useful as post-hoc reporting even with no nudge attached.
+  **Live confirmation completed, 2026-08-19** (fourth go/lru-cache rerun,
+  harness arm only): reran pair 7 post-decoupling. Result: `valid: true,
+  passed: false, timed_out: false`, 110.4s — no timeout, no runaway loop
+  (10 assistant messages / 12 tool calls, vs. 130+ in the third rerun).
+  `grep -c "deliverAs"` on the full session log returned 0 — zero in-band
+  messages injected. The reviewer flagged the same key/value-confusion
+  eviction bug twice, with the finding text landing in trace
+  `metadata.findings`; the model never saw it and settled honestly with
+  the bug still present, which the hidden test then caught
+  (`TestEvictsByKeyNotValue`). This closes the "not yet done" live-run gap
+  the narrowing entry left open. Full trail: `pi-harness-history.md`'s
+  2026-08-19 "fourth go/lru-cache rerun" entry.
 - Misc smaller items (DayTrix skill placement, `findings[]` severity-aware
   retry prioritization, OS/container boundary for unattended runs): see
   history for detail.
