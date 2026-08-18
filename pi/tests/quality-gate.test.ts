@@ -38,7 +38,7 @@ test("green check followed by an edit is stale and reruns the canonical check", 
 	await harness.emit({ type: "tool_call", toolCallId: "v1", toolName: "bash", input: { command: "make verify" } } as any);
 	await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any);
 	diff = "second";
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 1);
 	assert.equal(harness.messages.length, 0);
 });
@@ -58,7 +58,7 @@ test("green check with no later edit avoids a redundant rerun", async () => {
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
 	await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any);
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 0);
 });
 
@@ -81,10 +81,46 @@ test("canonical check that changes the diff is inconclusive", async () => {
 	});
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.messages.length, 1);
 	assert.match(String(harness.messages[0]?.content), /changed the material diff/);
 });
+
+// agent_end fires on internal retry/abort cycles too, not only on a genuine
+// "the model is done" stop (see extensions/lib/agent-end-guard.ts). Without
+// this guard: (a) an aborted run gets a fabricated "verification failed"
+// corrective nudge that resurrects a run the user just killed, and (b) each
+// retryable transport error re-runs the full canonical check against an
+// *unchanged* failing diff, burning the small shared corrective-round
+// budget on flakiness instead of a real failure -- live-found in the
+// 2026-08-18 Opus review of this fix's first cut. Same test body as
+// "canonical check that changes the diff is inconclusive" above (would
+// otherwise queue a corrective follow-up), except the run's last message
+// is an error/aborted assistant turn.
+for (const stopReason of ["error", "aborted"] as const) {
+	test(`agent_end does not run verification or nudge when the run ended in ${stopReason}`, async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
+		await writeFile(join(cwd, "Makefile"), "verify:\n\t@true\n");
+		const harness = new ExtensionHarness({
+			cwd,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
+				if (command === "git" && args[0] === "diff") return result(0, "diff");
+				if (command === "git" && args[0] === "status") return result(0, " M app.ts\n");
+				if (command === "bash") return result(0);
+				return result(1);
+			},
+		});
+		qualityGate(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({
+			type: "agent_end",
+			messages: [{ role: "assistant", stopReason, content: [], api: "chat", provider: "test", model: "test", usage: {} }],
+		} as any);
+		assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 0, "no verification command ran");
+		assert.equal(harness.messages.length, 0, "no corrective follow-up was queued");
+	});
+}
 
 test("green-looking masked evidence reruns the canonical check", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
@@ -102,7 +138,7 @@ test("green-looking masked evidence reruns the canonical check", async () => {
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
 	await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "npm test; echo EXIT=$?" }, content: [], details: {}, isError: false } as any);
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 1);
 });
 
@@ -121,7 +157,7 @@ test("failed canonical checks nudge at most three times and record cap hit", asy
 	});
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
-	for (let i = 0; i < 5; i += 1) await harness.emit({ type: "agent_settled" } as any);
+	for (let i = 0; i < 5; i += 1) await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.messages.length, 3);
 	assert.equal(harness.entries.some((entry) => (entry.data as any)?.outcome === "cap-hit"), true);
 });
@@ -143,7 +179,7 @@ test("a stale extension context during tool_result does not crash the turn", asy
 	);
 });
 
-test("a stale extension context during agent_settled does not crash the turn", async () => {
+test("a stale extension context during agent_end does not crash the turn", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-stale-settle-"));
 	await writeFile(join(cwd, "Makefile"), "verify:\n\t@true\n");
 	const harness = new ExtensionHarness({
@@ -157,7 +193,7 @@ test("a stale extension context during agent_settled does not crash the turn", a
 	});
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
-	await assert.doesNotReject(harness.emit({ type: "agent_settled" } as any));
+	await assert.doesNotReject(harness.emit({ type: "agent_end", messages: [] } as any));
 });
 
 test("a bare go test cannot satisfy a canonical command that also requires go vet", async () => {
@@ -183,7 +219,7 @@ test("a bare go test cannot satisfy a canonical command that also requires go ve
 	// command for a bare go.mod project is `go vet ./... && go test ./...`,
 	// so this must not be accepted as passing evidence on its own.
 	await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "go test ./..." }, content: [], details: {}, isError: false } as any);
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	// Evidence from the partial command was rejected, so settle had to run
 	// the full canonical command itself.
 	assert.equal(bashCalls, 1);
@@ -202,6 +238,6 @@ test("an unconfigured repository records evidence instead of guessing success", 
 	});
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
-	await harness.emit({ type: "agent_settled" } as any);
+	await harness.emit({ type: "agent_end", messages: [] } as any);
 	assert.equal(harness.entries.some((entry) => (entry.data as any)?.outcome === "unconfigured"), true);
 });

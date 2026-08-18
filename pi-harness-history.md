@@ -3618,3 +3618,147 @@ Status: the corrective-follow-up gap itself remains **open**, now with a
 corrected understanding of the mechanism rather than a shipped-but-wrong
 fix. See `pi-harness-validation-status.md`'s updated
 `quality-gate.ts` / `cross-model-review.ts` corrective follow-up entry.
+
+## 2026-08-18 — quality-gate follow-up fix, take two: agent_end injection, second Opus review, landed
+
+Second attempt, directly following the first review's recommendation: move
+the corrective/review follow-up injection from `agent_settled` to
+`agent_end`.
+
+**Implementation.** `quality-gate.ts`'s and `cross-model-review.ts`'s
+follow-up-sending handlers moved from `pi.on("agent_settled", ...)` to
+`pi.on("agent_end", ...)`. No wait/poll logic was needed this time — the
+premise (confirmed below) is that a message queued from `agent_end`, while
+the session is genuinely still streaming, gets picked up automatically by
+`pi-coding-agent`'s existing `_handlePostAgentRun` → `agent.continue()`
+loop. `cross-model-review.ts` additionally needed a real fix, not just a
+trigger change: its `agent_start` handler unconditionally reset
+`reviewCount`/`lastReviewedDiff`/`settled`, which was harmless before (the
+follow-up never actually landed, so the reset never mattered) but would
+become a real unbounded-recursion risk once follow-ups started working —
+flagged explicitly as a blocker in the first review. First cut: a hand-rolled
+`awaitingOwnContinuation` boolean, set right before `sendUserMessage` and
+consumed by the very next `agent_start`, skipping the reset only when that
+`agent_start` was this extension's own continuation. Also fixed in the same
+pass: the settlement backstop's old `lastReviewedDiff !== undefined` guard
+(a one-shot "has any review ever run this session" check) would have
+silently blocked rounds 2 and 3 now that `lastReviewedDiff` persists across
+own-continuations — removed, relying on `startReviewRound`'s own precise
+`diff === lastReviewedDiff` comparison instead. 180 tests passing at this
+point, including a new "settlement review rounds are capped across the
+extension's own corrective continuations" test that passed on the first
+real run.
+
+**Second independent Opus review, before committing anything.** Given the
+first review caught a wrong diagnosis, a second review was requested for
+this implementation specifically — instructed to re-derive everything from
+`pi-coding-agent`/`pi-agent-core` source itself, not trust either session's
+code comments.
+
+Confirmed correct, from source: at the moment `agent_end` extension
+listeners run, `_isAgentRunActive`/`isStreaming` is genuinely still `true`
+(`_emitAgentSettled` is what flips it false, reached only after
+`_handlePostAgentRun`'s while-loop exits — strictly after `agent_end`'s
+listeners have already run). `sendUserMessage`'s `deliverAs:"followUp"`
+path takes the queuing branch (`agent.followUp()` → `followUpQueue`) while
+streaming, not the nested-run branch. `runLoop` polls queued follow-ups
+*before* emitting `agent_end`, so a message queued *during* `agent_end` is
+missed by that poll and survives to `_handlePostAgentRun` →
+`agent.hasQueuedMessages()` → `agent.continue()` — exactly the mechanism
+the first review's recommendation described, and no extra code was needed
+to make it work. Also confirmed: `agent_start` genuinely refires on every
+`agent.continue()` cycle (`runAgentLoopContinue` emits its own
+`agent_start`, not just `runAgentLoop`), so the premise behind needing some
+kind of continuation-aware reset was real, not imagined.
+
+But it found four real defects in the state layered on top of that correct
+core, two of them severe enough to block:
+
+1. **(HIGH, regression)** An aborted run (user Ctrl-C, or a `-p` timeout)
+   still reaches `agent_end` while `isStreaming` is true. Neither
+   extension's `agent_end` handler filtered on this, so quality-gate would
+   run verification against an already-aborted `ctx.signal`, get a failure,
+   and queue a corrective follow-up that **resurrects a run the user just
+   killed**. Impossible under the old `agent_settled` trigger; a direct
+   side effect of moving to `agent_end`.
+2. **(MEDIUM, factually wrong code comment)** The comment claiming "the
+   unchanged-diff early-return makes an extra `agent_end` firing on retry
+   cycles a no-op" is only true when the *previous* run passed.
+   `evidencePassesCurrentDiff` requires `exitCode === 0`; on the failure
+   path (the only path that produces a continuation at all) an `agent_end`
+   on an *identical* failing diff re-runs the full canonical check and
+   burns one of only three corrective rounds. With this repo's own
+   `retry.maxRetries: 3` settings, three transient API errors against the
+   local endpoint would exhaust the entire corrective budget on transport
+   flakiness before a single real failure gets addressed.
+3. **(MEDIUM)** `awaitingOwnContinuation` could leak `true`: the
+   `tool_result`-triggered review path (fire-and-forget mid-run) also sets
+   it, but if that round resolves while the model is still working, the
+   resulting follow-up is drained by `runLoop`'s own inner poll (no
+   `agent_start` fires for that path) — so the flag never gets consumed,
+   and the *next genuinely new* `agent_start` incorrectly skips the reset,
+   letting a stale `settled`/`reviewCount` leak into an unrelated later
+   task.
+4. **(MEDIUM)** Cross-extension mis-attribution: `followUpMode` defaults to
+   `"one-at-a-time"`, so when both extensions queue a follow-up off the
+   *same* `agent_end`, one `agent.continue()` drains only one message,
+   producing **two separate `agent_start` events**, not one. Extension load
+   order (`fs.readdirSync`, unsorted) decides which fires first, so
+   whichever `agent_start` isn't cross-model-review's own gets misread as
+   "not my continuation" and wipes its round state anyway — bounded by
+   quality-gate's own 3-nudge cap (worst case ~12 review calls, not
+   infinite) but the cap is not actually honored, which is exactly what the
+   new capping test claims to protect and doesn't.
+
+Root cause of (3) and (4): trying to reconstruct "is this agent_start a
+genuinely new task" from `agent_start` itself, which fundamentally cannot
+distinguish that from a continuation. The review's fix, adopted as-is: use
+`before_agent_start` instead. Its single call site
+(`agent-session.js`'s `emitBeforeAgentStart`, inside `prompt()`'s
+non-streaming path) fires exactly once per genuine top-level user prompt —
+never on a continuation, retry, or compaction — so the reset can move
+there and the flag can be deleted outright rather than patched.
+
+Two lower-severity items accepted rather than fixed: removing the
+`lastReviewedDiff !== undefined` guard is sound (the comparison it's
+replaced by is deterministic) but can now waste one real review call on
+build-tool-generated tracked-file churn (lockfiles, generated code) landing
+in the diff on a continuation, since quality-gate's verification command
+now runs on every one, not just once per settle — a cost, not a
+correctness bug, left as a documented note rather than fixed. Live
+end-to-end validation (a real follow-up producing a real second turn with
+non-zero tokens) was flagged as still needed — unit tests against the mock
+`ExtensionHarness` can't close that gap; recommended as the next step, not
+done in this session.
+
+**Fixes applied, in the same session:**
+- New `extensions/lib/agent-end-guard.ts`: `lastAssistantMessageFailed(messages)`,
+  scanning `AgentEndEvent.messages` from the end for the last assistant
+  message and checking `stopReason === "error" || "aborted"`, mirroring
+  the scan `_willRetryAfterAgentEnd` does internally. Applied as an
+  early-return at the top of both extensions' `agent_end` handlers (after
+  awaiting any in-flight `tool_result`-triggered review in
+  `cross-model-review.ts` — letting an already-running round finish and log
+  is harmless; what must not happen is *starting* a new one).
+- `cross-model-review.ts`: deleted `awaitingOwnContinuation` entirely;
+  `reviewCount`/`lastReviewedDiff`/`settled` now reset on a new
+  `pi.on("before_agent_start", ...)` handler instead of `agent_start`.
+- 6 new tests: abort/error-guard tests for both extensions (2 each, one
+  per `stopReason`), and a two-extension-interleaving test that mounts both
+  `qualityGate` and `reviewer` on one harness, drives 6 rounds of
+  `agent_end`/`agent_start` (deliberately more than either extension's own
+  cap) without ever re-emitting `before_agent_start`, and confirms neither
+  extension's round cap gets corrupted by the other's activity — passed on
+  the first real run. Total: 185 tests, up from 179 before this fix (179
+  itself already reflected the earlier `agent_settled`→`agent_end` test
+  migration from the reverted first attempt's cleanup).
+
+`npm run typecheck` clean; `npm test`: 185/185 passing.
+
+**Status: fix landed, believed correct by two independent source-level
+reviews, not yet live-validated.** The next step is a real `-p` run (ideally
+reproducing the original `go/lru-cache` battery-script scenario) confirming
+a corrective/review follow-up actually produces a second model turn with
+non-zero tokens — the exact signal that was missing when this investigation
+started. See `pi-harness-validation-status.md`'s updated corrective
+follow-up entry for the condensed version.

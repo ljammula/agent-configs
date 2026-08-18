@@ -7,6 +7,7 @@
  * default and labeled blind-self-review when explicitly allowed.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { lastAssistantMessageFailed } from "./lib/agent-end-guard.ts";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
 import {
@@ -215,13 +216,30 @@ export default function reviewer(pi: ExtensionAPI): void {
 		});
 	});
 
-	pi.on("agent_start", async (_event, ctx) => {
-		runId += 1;
+	// `agent_start` fires again on every internal continuation, not only on
+	// a genuinely new top-level prompt (confirmed in pi-agent-core's
+	// runAgentLoopContinue) -- resetting reviewCount/lastReviewedDiff/
+	// settled here would wipe them on every one of this extension's own
+	// corrective rounds, making MAX_REVIEW_ROUNDS an ineffective cap once
+	// those rounds actually land (see the agent_end trigger below). Reset
+	// those three on `before_agent_start` instead: it fires exactly once
+	// per genuine top-level user prompt (agent-session.js's single
+	// `emitBeforeAgentStart` call site is inside `prompt()`'s non-streaming
+	// path), never on a continuation, retry, or compaction -- no flag or
+	// state tracking needed to tell those apart, unlike an earlier version
+	// of this fix that tried to do so with a fragile `awaitingOwnContinuation`
+	// boolean (see pi-harness-history.md's 2026-08-18 entry for why that
+	// leaked stale and mis-attributed across extensions).
+	pi.on("before_agent_start", () => {
 		reviewCount = 0;
 		lastReviewedDiff = undefined;
+		settled = false;
+	});
+
+	pi.on("agent_start", async (_event, ctx) => {
+		runId += 1;
 		reviewInFlight = false;
 		inFlightReview = undefined;
-		settled = false;
 		if (baseSha) return;
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
 		if (result?.code === 0) baseSha = result.stdout.trim();
@@ -291,12 +309,13 @@ export default function reviewer(pi: ExtensionAPI): void {
 				}
 				reviewCount += 1;
 				settled = reviewCount >= MAX_REVIEW_ROUNDS;
-				// A settlement-triggered follow-up fires after pi has already
-				// decided the turn is done; whether `-p` mode resumes on it is the
-				// same open question tracked for quality-gate's corrective
-				// follow-up (see pi-harness-validation-status.md). Send it anyway
-				// -- it's a strict improvement over never reviewing at all -- but
-				// don't claim it reliably produces a second turn.
+				// Both triggers now run from agent_end (see below), while the
+				// session is still mid-run -- deliverAs:"followUp" genuinely
+				// queues here and the existing continuation loop picks it up, no
+				// separate nested run and no race. See
+				// pi-harness-history.md's 2026-08-17/18 "quality-gate follow-up
+				// fix" entries for why agent_settled (the previous trigger point)
+				// doesn't work for this.
 				pi.sendUserMessage(
 					`A ${config.kind} flagged a possible issue (round ${reviewCount}/${MAX_REVIEW_ROUNDS}):\n\n${result.text}\n\nInvestigate it against the code and spec; fix it if real, otherwise explain why it is false.`,
 					{ deliverAs: "followUp" },
@@ -326,25 +345,59 @@ export default function reviewer(pi: ExtensionAPI): void {
 		startReviewRound(ctx, "tool_result");
 	});
 
-	// Give a pending review round time to finish before pi decides the run
-	// is done; requestReview's own timeout bounds the wait. The chain above
-	// only re-throws a non-stale error out of its own trace-logging fallback
-	// (a genuine bug, not staleness), so mirror the same stale-context guard
-	// used everywhere else in the harness rather than swallow it here too.
+	// Deliberately hooked on `agent_end`, not `agent_settled` -- the latter
+	// is documented to fire only once no queued continuation will run, so a
+	// follow-up sent from there doesn't queue, it starts a separate nested
+	// run (see quality-gate.ts's matching comment and
+	// pi-harness-history.md's 2026-08-17/18 entries for the full incident).
 	//
-	// Settlement backstop: if no review round ever ran this session (the
-	// tool_result trigger requires the model itself to run a broad
-	// verification command, which task suites like local-model-bench never
-	// give it the chance to do), fire one directly here, gated on a
-	// materially non-empty diff so an empty/no-op turn doesn't spend a
-	// review round on nothing.
-	pi.on("agent_settled", async (_event, ctx) => {
+	// Give a pending tool_result-triggered review round time to finish
+	// before pi decides this run-cycle is done; requestReview's own timeout
+	// bounds the wait. Awaiting it here (rather than at the old
+	// agent_settled point) also matters for correctness, not just
+	// telemetry: if that round comes back flagged, its own follow-up must
+	// be queued while the session is still mid-run too, or it hits the same
+	// dead-follow-up bug this fix addresses. The chain above only re-throws
+	// a non-stale error out of its own trace-logging fallback (a genuine
+	// bug, not staleness), so mirror the same stale-context guard used
+	// everywhere else in the harness rather than swallow it here too.
+	//
+	// Settlement backstop: if the model's own corrective continuation never
+	// runs a broad verification command itself (the tool_result trigger
+	// requires that; task suites like local-model-bench never give it the
+	// chance to), fire a review directly here on every agent_end, gated on
+	// a materially non-empty diff so an empty/no-op turn doesn't spend a
+	// round on nothing. Deliberately does NOT also gate on
+	// `lastReviewedDiff !== undefined` ("has any review ever run this
+	// session") -- that was fine when this only needed to fire once per
+	// top-level settle, but reviewCount/lastReviewedDiff now persist across
+	// this extension's own corrective continuations (see
+	// `awaitingOwnContinuation` above), so a plain "already reviewed once,
+	// ever" gate would silently skip round 2+ of the backstop path even
+	// though the diff has materially changed since. `startReviewRound`
+	// already does the precise, cheap version of this check itself
+	// (`diff === lastReviewedDiff`, logged as a "blocked"/
+	// "unchanged-since-last-review" trace entry, not a wasted network
+	// call), so this outer guard only needs `settled`/`reviewInFlight`.
+	// `trigger: "settlement"` is kept as the telemetry label for continuity
+	// with existing evidence records even though the firing point moved
+	// from agent_settled to agent_end -- it still means the same thing: a
+	// backstop review with no model-run verification command to react to.
+	//
+	// A pending tool_result-triggered round is still awaited even on an
+	// aborted/errored agent_end -- letting an already-running review finish
+	// and log is harmless. What must NOT happen on an aborted/errored
+	// agent_end is *starting a new* round or queuing a fresh corrective
+	// follow-up (see lastAssistantMessageFailed's doc comment), so that
+	// guard sits after the await but before the backstop itself.
+	pi.on("agent_end", async (event, ctx) => {
 		try {
 			if (inFlightReview) await inFlightReview;
 		} catch (error) {
 			if (!isStaleContextError(error)) throw error;
 		}
-		if (!config.enabled || settled || reviewInFlight || lastReviewedDiff !== undefined) return;
+		if (lastAssistantMessageFailed(event.messages)) return;
+		if (!config.enabled || settled || reviewInFlight) return;
 		try {
 			const snapshot = await snapshotDiff(pi, ctx.cwd, baseSha);
 			if (!snapshot.material) return;

@@ -178,7 +178,7 @@ entry.
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. Live-found and fixed 2026-08-17 (hardened battery, pair 7, `go/notes-api`): `turn_start`'s first ctx call could throw Pi's documented stale-context error (a session reload/compaction/fork landing before the handler ran), crashing the turn — `stack-router.ts`/`quality-gate.ts` already guarded against this exact class via `lib/stale-context.ts`, `git-checkpoint.ts` had not. Fixed with the same guard; 4 new deterministic tests, including one reproducing the exact crash. Not yet re-observed live post-fix (the race is timing-dependent, not reliably reproducible on demand). |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. Corrective follow-up is a **confirmed real gap, not just a suspicion**: fires in a small isolated repro (n=1) but silently doesn't in three independent occurrences now — two deep `pi -p` sessions (9 turns real, 30 turns deliberate repro) plus a clean battery-script catch (2026-08-17 evening, `go/lru-cache` pair, cleanest trace yet: reviewer correctly flagged the model's key/value eviction bug post-settlement, a corrective round was queued, but the very next `quality-gate` entry shows `diffChanged: false` and an immediate re-settle 213ms later — no second model turn ever ran). Queues the follow-up correctly every time; the process just exits without giving the model a real second turn. Mechanism not yet isolated; see history. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. **Corrective-follow-up mechanism fixed 2026-08-18** (root-caused, fixed, and independently re-derived from `pi-coding-agent`/`pi-agent-core` source across two Opus review passes — not just observation): the trigger was `agent_settled`, which the runtime documents as firing only once no queued continuation will run, so `sendUserMessage(...,{deliverAs:"followUp"})` from there started a separate nested run instead of queuing, matching the exact "queued correctly, zero-token immediate re-settle" symptom this file's history recorded three times. Moved to `agent_end` (fires while still mid-run; the existing `agent.continue()` loop drains a message queued from there with no extra code needed) in both `quality-gate.ts` and `cross-model-review.ts`, plus a shared `lib/agent-end-guard.ts` skip when the run ended in `error`/`aborted` (the first review pass's own recommended fix introduced two regressions the second pass caught: a killed run resurrected by a fabricated nudge, and the whole corrective budget burned on transport retries against an unchanged diff — both closed by the guard). `cross-model-review.ts`'s per-run review-round reset also moved from `agent_start` (refires on every continuation, would have made its 3-round cap meaningless once follow-ups actually land) to `before_agent_start` (fires exactly once per genuine top-level prompt). 185 deterministic tests, including a dedicated two-extension-interleaving test and abort/error-guard tests for both extensions. **Not yet live-validated**: unit tests confirm the mechanism by source trace, but a follow-up genuinely producing a second model turn with real tokens hasn't been observed live post-fix — recommended next step, not yet done. See history for the full two-pass review account, including the first, reverted attempt's wrong diagnosis. |
 | `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Only Go/Dart routes have battery coverage; rest are unit-tested only. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target #1 of 8) short of the adoption threshold. Live validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic tests pass; widened trigger has zero real-trial field evidence. |
@@ -266,46 +266,57 @@ evidence-cited version of each):
 - **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
   the plan's 20% screening threshold — needs either a reduction or an
   evidenced revision to the threshold itself.
-- **`quality-gate.ts` / `cross-model-review.ts` corrective follow-up**:
-  confirmed (n=3 now — two `pi -p` sessions at 9 and 30 turns, plus a
-  2026-08-17-evening battery-script catch on `go/lru-cache`) that a
-  settlement-triggered `sendUserMessage(..., {deliverAs:"followUp"})`
-  doesn't reliably produce a second turn — a real fix is needed, not just
-  more observation. The `go/lru-cache` occurrence is the cleanest trace yet
-  (`diffChanged: false`, immediate re-settle 213ms after the corrective
-  message was injected) and prompted a same-day fix attempt.
+- **`quality-gate.ts` / `cross-model-review.ts` corrective follow-up — fixed
+  2026-08-18, not yet live-validated**: three confirmed occurrences (two
+  `pi -p` sessions at 9 and 30 turns, plus a 2026-08-17-evening
+  battery-script catch on `go/lru-cache`, the cleanest trace: reviewer
+  correctly flagged a bug, a corrective round was queued, but the very next
+  `quality-gate` entry showed `diffChanged: false` and an immediate
+  re-settle 213ms later) established that a settlement-triggered
+  `sendUserMessage(..., {deliverAs:"followUp"})` didn't reliably produce a
+  second turn. A same-day fix attempt was **reverted** after an Opus
+  second-opinion review found the diagnosis itself wrong: by the time
+  `agent_settled` fires, `pi-coding-agent`'s session is already
+  non-streaming, so `deliverAs:"followUp"` doesn't queue anything from
+  there, it starts a full nested re-entrant run — the documented,
+  race-free seam is `agent_end` instead (fires mid-run; the existing
+  `agent.continue()` continuation loop drains a message queued from there
+  automatically).
 
-  **That attempt was reverted after an Opus second-opinion review found the
-  underlying mechanism diagnosis was wrong**, not just the implementation.
-  The originally-stated framing above — "the follow-up gets queued
-  correctly but the process exits before a second turn runs it" — is
-  itself inaccurate and superseded by this entry. Tracing the actual
-  `pi-coding-agent` runtime source: by the time `agent_settled` fires, the
-  session's `isStreaming` flag is already false, and
-  `deliverAs:"followUp"` only queues *while streaming*. From
-  `agent_settled` it does nothing of the kind — `sendUserMessage` instead
-  immediately starts a full **nested, re-entrant agent run**. The
-  documented, race-free injection seam for a settlement-time follow-up is
-  `agent_end` (whose queued messages the existing post-run drain loop
-  services automatically), not `agent_settled`. The observed 213ms
-  zero-token re-settle is consistent with `handleRunFailure` — the nested
-  run hitting an immediate provider/preflight error and synthesizing an
-  empty assistant turn — which no amount of "wait for the turn to start"
-  logic addresses, since neither extension awaits or catches the
-  `sendUserMessage` call's own promise. **Status: still open, and the
-  fix now needs to start from `agent_end` injection and capture the
-  nested run's actual `stopReason`/error before the next attempt** — not
-  from re-deriving a wait-for-`agent_start` guard, which was tried,
-  reviewed, and found to (a) not address the actual failure mode, (b) cap
-  a genuine corrective turn at a shared 10s deadline regardless of how
-  long it actually needs, (c) mask quality-gate's own diagnostic
-  re-verification by resetting its `settling` flag after the wait instead
-  of before, and (d) risk unbounded recursive review rounds in
-  `cross-model-review.ts` once its `agent_start` handler's full state
-  reset becomes reachable from a nested run that previously never landed.
-  Full trail, including the complete review verdict: `pi-harness-history.md`'s
-  2026-08-17/18 "quality-gate follow-up fix: diagnosis, attempt, and revert"
-  entry.
+  **A second attempt, following that recommendation, was independently
+  re-verified by a second Opus pass and landed.** The core `agent_end`
+  mechanism was confirmed correct by re-deriving it from
+  `pi-coding-agent`/`pi-agent-core` source (not trusting either session's
+  own code comments) — but the second pass also caught two real
+  regressions the fix itself introduced: an aborted run (Ctrl-C, `-p`
+  timeout) still reaches `agent_end` mid-abort, so an unguarded handler
+  would run verification against an already-aborted signal and fabricate a
+  corrective nudge that resurrects a run the user just killed; and a
+  retryable transport error re-fires `agent_end` on an *unchanged* failing
+  diff, so an unguarded handler would burn the whole 3-round corrective
+  budget on flakiness before ever addressing a real failure. Both closed
+  with a shared `extensions/lib/agent-end-guard.ts` skip keyed on the last
+  assistant message's `stopReason`. The review also caught that
+  `cross-model-review.ts`'s first-pass fix (a hand-rolled
+  `awaitingOwnContinuation` flag tracking "was this `agent_start` my own
+  continuation") could leak stale and get mis-attributed when both
+  extensions queue in the same `agent_end` (the real runtime drains queued
+  follow-ups one at a time, so two extensions queuing in one `agent_end`
+  produces two separate `agent_start` events, not one) — replaced with
+  resetting review state on `before_agent_start` instead, which fires
+  exactly once per genuine top-level prompt and never on a continuation,
+  removing the need for any flag at all.
+
+  185 deterministic tests now cover this, including a dedicated
+  two-extension-interleaving test and abort/error-guard tests for both
+  extensions — up from 179 before this fix. **What's not yet done: a live
+  `-p` run showing a corrective round actually producing a second model
+  turn with non-zero tokens.** The mechanism is confirmed by source trace
+  across two independent review passes, not by observation — and a
+  zero-token corrective round is exactly the symptom that exposed the
+  first, wrong attempt, so this shouldn't be called fully validated until
+  that's seen live. Full trail, both review passes in full, in
+  `pi-harness-history.md`'s 2026-08-17/18 entries.
 - **`go/lru-cache` via the battery script vs. the earlier direct-scratch-task
   evidence**: 2026-08-17 evening, run through `run_single_pair.py` for the
   first time (previous 4/4 evidence used a different, direct scratch-task

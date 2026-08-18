@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { lastAssistantMessageFailed } from "./lib/agent-end-guard.ts";
 import { appendHarnessTrace } from "./lib/harness-telemetry.ts";
 import { isStaleContextError } from "./lib/stale-context.ts";
 import {
@@ -95,7 +96,27 @@ export default function qualityGate(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("agent_settled", async (_event, ctx) => {
+	// Deliberately hooked on `agent_end`, not `agent_settled`. By the time
+	// `agent_settled` fires the session is documented to no longer accept a
+	// queued continuation ("no automatic retry, compaction, or queued
+	// continuation will run" -- AgentSettledEvent's own doc comment); a
+	// `sendUserMessage(..., {deliverAs:"followUp"})` call from there doesn't
+	// queue anything, it starts a whole separate nested agent run, which is
+	// how a corrective round could go on to silently fail with zero tokens
+	// (see pi-harness-history.md's 2026-08-17/18 "quality-gate follow-up
+	// fix" entries for the live incident and the reverted first attempt).
+	// `agent_end` fires while the session is still mid-run -- the documented
+	// upstream comment on `_handlePostAgentRun` is explicit that messages
+	// queued from here get picked up by the existing continuation loop
+	// (`agent.continue()`) with no extra waiting required. `agent_end` also
+	// fires on internal retry/abort/compaction cycles, not only on a
+	// genuine "the model is done" stop -- see lastAssistantMessageFailed's
+	// own doc comment for the two live-confirmed failure modes an
+	// unfiltered handler here produces (a killed run resurrected by a
+	// fabricated corrective nudge; the whole corrective budget burned on
+	// transport retries against an unchanged diff, not a real failure).
+	pi.on("agent_end", async (event, ctx) => {
+		if (lastAssistantMessageFailed(event.messages)) return;
 		if (settling) return;
 		if (correctiveFollowUps >= MAX_CORRECTIVE_FOLLOW_UPS) return;
 		settling = true;
