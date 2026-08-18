@@ -333,13 +333,13 @@
     the project actually got here.
   </p>
   <div class="meta-row">
-    <span><b>Span</b> 2026-08-02 → 2026-08-17</span>
-    <span><b>Commits</b> 90+ across <code class="mono">pi/</code> and root docs</span>
+    <span><b>Span</b> 2026-08-02 → 2026-08-19</span>
+    <span><b>Commits</b> 100+ across <code class="mono">pi/</code> and root docs</span>
     <span><b>Host</b> kannasmacstudio.lan · mlx-vlm</span>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="num">9</div><div class="label">Dated milestones below, spanning 16 days</div></div>
+    <div class="stat"><div class="num">12</div><div class="label">Dated milestones below, spanning 18 days</div></div>
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, paired battery</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">0→4/4</div><div class="label">Qwen3.8 replicated failure flipped to a replicated pass</div></div>
@@ -351,11 +351,11 @@
   </div>
 
   <div class="filters" role="group" aria-label="Filter by result">
-    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">9</span></button>
+    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">12</span></button>
     <button class="filter-chip" type="button" data-filter="pass" aria-pressed="false">Passed <span class="n">4</span></button>
-    <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">3</span></button>
+    <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">5</span></button>
     <button class="filter-chip" type="button" data-filter="fail" aria-pressed="false">Failure <span class="n">1</span></button>
-    <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">1</span></button>
+    <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">2</span></button>
   </div>
 
   <!-- Act I -->
@@ -681,6 +681,110 @@
           <div class="links">
             <a href="reports/qwen38-pi-harness-report.html">Full report</a>
             <a href="qwen38-agentic-coding-tuning-research.md">Research trail</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Act VI — the hardening backlog -->
+  <section class="chapter">
+    <div class="chapter-head">
+      <div class="act">Act VI · Aug 17–19</div>
+      <h2>Closing the reliability gap the thinking-mode fix opened</h2>
+      <p>Turning thinking on made turns ~3x more expensive, and a broader battery rerun surfaced two flagged timeouts, a reviewer parse failure, and a corrective-nudge delivery gap. An eight-task backlog chased each down.</p>
+    </div>
+
+    <div class="timeline">
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 17–18</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-17 → 2026-08-18</div>
+          <div class="badges"><span class="badge fixed">2 flagged timeouts re-isolated</span><span class="badge fixed">1 real bug found</span></div>
+          <h3>Both hardened-config timeouts re-isolated: one is contention, one is a real stall-guard gap</h3>
+          <p>
+            The broader battery's 43%-timeout finding split cleanly once
+            re-isolated one pair at a time on a freshly restarted route.
+            <code>go-flutter/bookmarks-app</code> (pair 4) passed cleanly in
+            18 minutes with a real 328-line diff once contention was ruled
+            out — <b>contention-caused, not a stall</b>.
+            <code>dart/sequential-runner</code> (pair 5) did <b>not</b>
+            resolve the same way: a clean-isolation rerun still hit the
+            30-minute budget, and reading the raw session log end to end
+            found 133 sourceless diagnostic rounds — a genuine,
+            self-inflicted verification loop, now root-caused to a real
+            <code>progress-stall-guard.ts</code> detection gap rather than a
+            budget-sizing problem.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Pair-4 and Task-4 entries</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 18</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-18</div>
+          <div class="badges"><span class="badge fixed">Reviewer truncation fixed</span><span class="badge fixed">Corrective nudging decoupled</span></div>
+          <h3>Reviewer truncation root-caused and fixed; in-band corrective nudging removed by design</h3>
+          <p>
+            A live <code>malformed-verdict</code> reviewer failure turned out
+            to be token-cap truncation (<code>finish_reason: "length"</code>)
+            on a long self-correcting field, not a parsing regression — fixed
+            with an explicit <code>max_tokens</code>, a brevity-bounded
+            prompt, and a one-shot stricter retry; the planted-bug battery
+            held at 15/15 afterward. That investigation also found
+            <code>followUp</code>-delivered corrections structurally can't
+            interrupt an active tool-calling loop: a correct, queued
+            correction can sit undelivered for an entire run. Rather than
+            switch delivery mode, in-band corrective nudging was removed
+            entirely from <code>quality-gate.ts</code> and
+            <code>cross-model-review.ts</code> — both now do pure trace
+            reporting. A same-day <code>go/lru-cache</code> rerun confirmed
+            it live: zero injected messages, the reviewer's finding
+            preserved purely in trace metadata, the session settling
+            honestly as a real, cleanly-reported failure.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Truncation, token-budget, and decoupling entries</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-open" data-result="open">
+        <div class="date">Aug 19</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-19</div>
+          <div class="badges"><span class="badge fixed">continuation-nudge.ts adopted</span><span class="badge fixed">TS/JS battery coverage</span><span class="badge open">session_compact still unconfirmed</span></div>
+          <h3>Backlog closes: two more extensions adopted, TypeScript/JS covered, compaction gap precisely characterized</h3>
+          <p>
+            <code>continuation-nudge.ts</code> was adopted after 3 live
+            firings on a genuine multi-round correction, each confirmed
+            followed by a real tool call rather than another silent stop.
+            <code>stack-router.ts</code>'s TypeScript/JavaScript path got its
+            first live battery coverage: a <code>javascript/lru-cache</code>
+            pair where the harness's own settlement check rejected a bad
+            first attempt and the reviewer independently flagged the bug
+            before a corrected diff settled clean. Background-process kills
+            on long <code>/goal</code> runs were root-caused to Pi's
+            client-side 5-minute idle HTTP timeout, and disabling it let two
+            forced-compaction runs survive a reproduction that had killed two
+            prior attempts outright. The raw <code>session_compact</code>
+            event still never fires (5-for-5 to date) — now understood to be
+            gated on internals torn down by the time trailing
+            post-<code>agent_end</code> compaction runs in <code>pi -p</code>
+            mode, but not yet confirmed with a task forcing enough corrective
+            rounds to test that directly.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Task 5, 6, 7, 8 entries</a>
+            <a href="pi-harness-validation-status.md">Current status</a>
           </div>
         </div>
       </div>

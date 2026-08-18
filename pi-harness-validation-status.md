@@ -1,6 +1,6 @@
 # pi harness — consolidated validation status
 
-**Current as of 2026-08-16.** This file states only what's true right now,
+**Current as of 2026-08-19.** This file states only what's true right now,
 extension by extension, kept deliberately short and high-level. The full
 dated investigation — what was tried, what broke, what got fixed, live-run
 counts, superseded results — lives in `pi-harness-history.md`; nothing here

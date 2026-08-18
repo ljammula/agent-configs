@@ -244,13 +244,13 @@
   <div class="meta-row">
     <span><b>Host</b> kannasmacstudio.lan · mlx-vlm</span>
     <span><b>Harness</b> pi 0.83.0</span>
-    <span><b>Last updated</b> 2026-08-17</span>
+    <span><b>Last updated</b> 2026-08-19</span>
     <span><a href="timeline.html">Full timeline →</a></span>
   </div>
 
   <div class="stats">
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, pre-hardening paired battery</div></div>
-    <div class="stat"><div class="num">5/6</div><div class="label">Hardened-config rerun: completed harness runs passing (pair 4's timeout resolved as contention-caused; go/lru-cache's new failure traces to a harness gap, not the fix)</div></div>
+    <div class="stat"><div class="num">5/6</div><div class="label">Hardened-config rerun, both flagged timeouts now re-isolated: pair 4 resolved as contention-caused (now passes clean); pair 5 root-caused to a real stall-guard gap, still open</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix, direct scratch-task trials: Qwen3.8 thinking + temperature tuning</div></div>
   </div>
@@ -279,11 +279,12 @@
     <h2>Extension status</h2>
     <div class="status-groups">
       <div class="status-group on">
-        <div class="count">~14</div>
+        <div class="count">~15</div>
         <div class="glabel">Adopted, on by default</div>
         <ul>
-          <li><code>quality-gate.ts</code> — corrective-follow-up fix landed 8/18</li>
-          <li><code>cross-model-review.ts</code> — same fix, plus a round-cap bug</li>
+          <li><code>quality-gate.ts</code> — in-band corrective nudging removed by design 8/19; pure reporting now</li>
+          <li><code>cross-model-review.ts</code> — same decoupling, plus a truncation/token-budget fix</li>
+          <li><code>continuation-nudge.ts</code> — adopted 8/19 (Task 6), 3 live-confirmed firings</li>
           <li><code>goal-gate.ts</code> (<code>/goal</code>)</li>
           <li><code>protected-paths.ts</code></li>
           <li><code>artifact-guard.ts</code>, <code>error-leak-guard.ts</code></li>
@@ -296,15 +297,14 @@
         <div class="count">1</div>
         <div class="glabel">Trace-only, pending a fix</div>
         <ul>
-          <li><code>progress-stall-guard.ts</code> — real bugs found &amp; fixed; one detection gap still open (varied scratch-test evasion)</li>
+          <li><code>progress-stall-guard.ts</code> — fingerprint fixed 8/18 (stable scratch-loop signature, in-band nudge removed); live reproduction against a real stall still unexercised</li>
         </ul>
       </div>
       <div class="status-group off">
-        <div class="count">3</div>
+        <div class="count">2</div>
         <div class="glabel">Default-disabled, source-tested only</div>
         <ul>
-          <li><code>co-change-suggest.ts</code></li>
-          <li><code>continuation-nudge.ts</code></li>
+          <li><code>co-change-suggest.ts</code> — structurally untestable by the current battery methodology</li>
           <li><code>codebase-memory-mcp</code></li>
         </ul>
       </div>
@@ -322,12 +322,13 @@
   <section>
     <h2>Open items</h2>
     <div class="steps">
-      <div class="step"><div class="dot"></div><p>Per-task timeout budgets (30/45 min) predate thinking being enabled and haven't been revisited — the 8/17 hardened-config rerun found 3/7 harness arms (43%) failing to complete inside them. That run's 2:15-4:46 PM window overlapped with other local inference contesting the same host's resources; a clean-restart rerun of the worst case (<code>go-flutter/bookmarks-app</code>, zero diff/zero turns originally) passed cleanly in 18 min with a real 328-line diff — <b>resolved as contention-caused</b>, not a genuine stall. <code>dart/sequential-runner</code>'s settlement-speed timeout and the ~312% overhead figure are not yet re-isolated the same way.</p></div>
-      <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — mechanism class identified, exact enforcing code not yet traced; a 2/2 correlation with aggressive compaction settings is a new, unconfirmed lead.</p></div>
-      <div class="step"><div class="dot"></div><p>Corrective-follow-up mechanism (<code>quality-gate.ts</code>, <code>cross-model-review.ts</code>) fixed 8/18, after a first attempt was reverted for a wrong diagnosis and a second, independently re-verified attempt caught and closed two real regressions (a killed run resurrected by a fabricated nudge; the corrective budget burned on transport retries) before landing. 185 tests confirm the mechanism by source trace across two Opus review passes — <b>not yet confirmed live</b>: a same-day <code>go/lru-cache</code> battery-script rerun (2026-08-18) passed cleanly on the harness's first attempt with no bug to correct, so the mechanism still hasn't been exercised against a real corrective round.</p></div>
-      <div class="step"><div class="dot"></div><p>New from that same rerun: the reviewer returned <code>outcome: "transient", reason: "malformed-verdict"</code> on both its in-band and settlement-triggered calls — a parse failure not previously seen in <code>cross-model-review.ts</code>'s history. No behavioral consequence this time (the diff was correct), but root cause (Gemma response shape vs. a parsing regression) isn't yet investigated.</p></div>
-      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> runtime overhead was median 100.3% pre-hardening, still above the plan's 20% screening threshold — now ~312% on thinking-enabled turns (not yet re-isolated from the contention window above), sharpening the same open question.</p></div>
-      <div class="step"><div class="dot"></div><p>TypeScript/JS task fixtures still need battery coverage — routed and unit-tested only so far.</p></div>
+      <div class="step"><div class="dot"></div><p>Both hardened-config timeout flags from 8/17 are now re-isolated. <code>go-flutter/bookmarks-app</code> (pair 4) was contention — a clean-restart rerun passed in 18 min with a real 328-line diff. <code>dart/sequential-runner</code> (pair 5) is <b>not</b> contention or a genuine settlement-speed problem: a clean-isolation rerun (Task 4) still hit the 30-min budget, and reading the raw session log found 133 sourceless diagnostic rounds — a real, still-open <code>progress-stall-guard.ts</code> gap, now root-caused rather than just flagged.</p></div>
+      <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — <b>root-caused (Task 5)</b> to Pi's client-side 5-minute idle HTTP timeout, not the proxy's 30-minute total cap. Disabling it (<code>httpIdleTimeoutMs: 0</code>) was tested against the exact reproduction that killed two prior forced-compaction runs (Task 8): both survived. Not a fully controlled A/B (the precise trigger — a gap over 5 minutes — wasn't reproduced independently of compaction), but the first time this recipe hasn't killed the process, matching the root-cause prediction.</p></div>
+      <div class="step"><div class="dot"></div><p><b>Corrective-follow-up mechanism resolved by narrowing, not by fixing delivery mode (8/19).</b> The reviewer-truncation investigation found <code>followUp</code> messages structurally can't interrupt an active tool-calling loop — a queued correction can sit undelivered forever. Rather than switch to <code>deliverAs: "steer"</code> (untested, its own validation question), in-band corrective nudging was removed entirely from <code>quality-gate.ts</code> and <code>cross-model-review.ts</code>; both now do pure reporting via trace metadata. <b>Live-confirmed end to end</b>: a 4th <code>go/lru-cache</code> rerun post-decoupling shows zero injected <code>followUp</code> messages, the reviewer's finding landing purely in trace metadata, and the session settling honestly as a real, cleanly-reported failure. <code>goal-gate.ts</code>'s <code>followUp</code> calls were deliberately left alone — unattended builds have no human to hand a trace to mid-run.</p></div>
+      <div class="step"><div class="dot"></div><p>The <code>malformed-verdict</code> reviewer failure flagged 8/18 is <b>root-caused and fixed</b>: token-cap truncation (<code>finish_reason: "length"</code>) on a long self-correcting <code>analysis</code> field, not a parsing regression. Fix: explicit <code>max_tokens: 8192</code>, a brevity-bounded prompt, and a one-shot stricter retry on truncation — verified via the planted-bug battery (still 15/15 catches, 0/9 false positives) and a direct replay of the original truncating diff (now clean in 5.8s, was 202.9s/178.8s failing).</p></div>
+      <div class="step"><div class="dot"></div><p><code>quality-gate.ts</code> overhead (Task 3): no current-code fix justified. Post-decoupling, three live logs each show exactly one verification trace costing 842ms/643ms/2,398ms against 110s/271s/120s total run time — small relative to total, though a fresh live paired battery is still needed for a real overhead number untangled from the 8/17 contention window.</p></div>
+      <div class="step"><div class="dot"></div><p><b>TypeScript/JS battery coverage landed (Task 7):</b> a live <code>javascript/lru-cache</code> baseline/harness pair — baseline failed the hidden test, harness passed after its own settlement check rejected a first bad attempt and the reviewer independently flagged the same bug before a corrected diff settled clean.</p></div>
+      <div class="step"><div class="dot"></div><p><b>New from Task 8:</b> the raw <code>session_compact</code> extension event still never fires (5-for-5 across all attempts to date), now precisely characterized: it's gated on the extension runner being alive, which appears to be torn down by the time trailing post-<code>agent_end</code> compaction runs in <code>pi -p</code> mode. Landing compaction genuinely inside the active loop — not just chronologically mid-goal — looks structurally required to ever observe it fire; not yet confirmed with a task engineered to force enough corrective rounds to test that directly.</p></div>
     </div>
   </section>
 
