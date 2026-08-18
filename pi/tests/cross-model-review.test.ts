@@ -41,7 +41,7 @@ test("a verdict is accepted only as a well-formed schema response", () => {
 	assert.equal(parseVerdict('{"verdict":"clean"}'), undefined);
 });
 
-test("findings render into the follow-up message the agent receives", () => {
+test("findings render into the trace's flagged-verdict text", () => {
 	assert.equal(
 		renderFindings([{ file: "a.ts", severity: "bug", issue: "missing upper clamp" }]),
 		"- [bug] a.ts: missing upper clamp",
@@ -50,7 +50,8 @@ test("findings render into the follow-up message the agent receives", () => {
 
 test("review request classifies clean, flagged, malformed, and unreachable responses", async () => {
 	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
-	const response = (content?: string, ok = true) => async () => ({ ok, json: async () => ({ choices: content === undefined ? [] : [{ message: { content } }] }) }) as Response;
+	const response = (content?: string, ok = true, finishReason = "stop") => async () =>
+		({ ok, json: async () => ({ choices: content === undefined ? [] : [{ message: { content }, finish_reason: finishReason }] }) }) as Response;
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response('{"verdict":"clean","findings":[]}'))).outcome, "clean");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response('{"verdict":"flagged","findings":[{"file":"app.ts","severity":"bug","issue":"off by one"}]}'))).outcome, "flagged");
 	// Prose where a schema response is required means the route is misconfigured,
@@ -58,6 +59,79 @@ test("review request classifies clean, flagged, malformed, and unreachable respo
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response("NO_ISSUES_FOUND"))).reason, "malformed-verdict");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, response(undefined))).outcome, "transient");
 	assert.equal((await requestReview(config, "spec", "diff", undefined, async () => { throw new Error("down"); })).outcome, "transient");
+
+	// Live-found 2026-08-18 on a real go/lru-cache run: a long, self-looping
+	// `analysis` field can exhaust the completion's token cap before the JSON
+	// ever closes. finish_reason: "length" distinguishes this from a genuinely
+	// malformed response instead of collapsing both into the same reason.
+	// This fetchImpl always truncates, so the request should retry once (with
+	// a stricter brevity prompt) and still report the same terminal outcome
+	// rather than looping.
+	const alwaysTruncates = response('{"analysis": "still reasoning, never', true, "length");
+	const truncated = await requestReview(config, "spec", "diff", undefined, alwaysTruncates);
+	assert.equal(truncated.reason, "truncated-response");
+	assert.equal(truncated.finishReason, "length");
+});
+
+test("a truncated first attempt retries once with a stricter brevity prompt and can recover", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	let callCount = 0;
+	const seenPrompts: string[] = [];
+	const fetchImpl = (async (_url: string, init: RequestInit) => {
+		callCount += 1;
+		const body = JSON.parse(init.body as string);
+		const prompt = body.messages[0].content as string;
+		seenPrompts.push(prompt);
+		// First call always truncates; only a prompt carrying the stricter
+		// "at most 3 sentences" instruction gets a real verdict back --
+		// this is the behavior a retry-with-the-same-prompt could never
+		// produce at temperature 0.
+		const truncating = !prompt.includes("at most 3 sentences");
+		return {
+			ok: true,
+			json: async () => ({
+				choices: [
+					truncating
+						? { message: { content: '{"analysis": "still going' }, finish_reason: "length" }
+						: { message: { content: '{"analysis":"ok","verdict":"clean","findings":[]}' }, finish_reason: "stop" },
+				],
+			}),
+		} as Response;
+	}) as typeof fetch;
+
+	const result = await requestReview(config, "spec", "diff", undefined, fetchImpl);
+	assert.equal(callCount, 2);
+	assert.equal(result.outcome, "clean");
+	assert.ok(!seenPrompts[0].includes("at most 3 sentences"));
+	assert.ok(seenPrompts[1].includes("at most 3 sentences"));
+});
+
+test("a truncated retry attempt is not retried a second time", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	let callCount = 0;
+	const fetchImpl = (async () => {
+		callCount += 1;
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content: '{"analysis": "still going' }, finish_reason: "length" }] }),
+		} as Response;
+	}) as typeof fetch;
+
+	const result = await requestReview(config, "spec", "diff", undefined, fetchImpl);
+	assert.equal(callCount, 2);
+	assert.equal(result.reason, "truncated-response");
+});
+
+test("the review request reserves headroom with an explicit max_tokens", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	let sentMaxTokens: number | undefined;
+	const fetchImpl = (async (_url: string, init: RequestInit) => {
+		sentMaxTokens = JSON.parse(init.body as string).max_tokens;
+		return { ok: true, json: async () => ({ choices: [{ message: { content: '{"analysis":"ok","verdict":"clean","findings":[]}' }, finish_reason: "stop" }] }) } as Response;
+	}) as typeof fetch;
+	await requestReview(config, "spec", "diff", undefined, fetchImpl);
+	assert.equal(typeof sentMaxTokens, "number");
+	assert.ok(sentMaxTokens! > 0);
 });
 
 test("every unavailable reviewer carries a distinguishable reason", async () => {
@@ -285,7 +359,7 @@ test("agent_end does not spend a backstop review round on an empty diff", async 
 	}
 });
 
-test("a new top-level prompt (before_agent_start) resets a settled reviewer", async () => {
+test("a new top-level prompt (before_agent_start) resets lastReviewedDiff, so a repeated diff gets reviewed again", async () => {
 	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
 	const previousModel = process.env.AI_REVIEW_MODEL;
 	const previousFetch = globalThis.fetch;
@@ -323,21 +397,13 @@ test("a new top-level prompt (before_agent_start) resets a settled reviewer", as
 	}
 });
 
-// agent_start fires again on every internal continuation this extension's
-// own follow-up causes, not only on a genuinely new task (confirmed against
-// pi-agent-core's runAgentLoopContinue). A plain "reset review state on
-// every agent_start" would make MAX_REVIEW_ROUNDS (3) an ineffective cap:
-// each round's own continuation would look indistinguishable from a fresh
-// task and wipe reviewCount back to 0 -- reviewCount/lastReviewedDiff/
-// settled are reset on `before_agent_start` instead (fires once per
-// genuine top-level prompt, never on a continuation) specifically so
-// `agent_start` alone doesn't need to make that distinction. This exercises
-// the fix end to end: three flagged rounds against a changing diff, none
-// preceded by `before_agent_start` (matching a real continuation), must
-// still cap at 3 requests/3 follow-up messages and settle -- and a
-// subsequent prompt that *is* preceded by `before_agent_start` must still
-// reset it for a genuinely new task.
-test("settlement review rounds are capped across the extension's own corrective continuations", async () => {
+// Decoupled 2026-08-19: a flagged verdict is pure telemetry now, never a
+// queued follow-up (see the file-top comment on cross-model-review.ts for
+// why). This replaces the old round-cap test -- there is no cap to test
+// anymore, since nothing is being capped; what matters instead is that
+// review keeps firing independently for every materially distinct diff
+// across repeated agent_end cycles, and that no message is ever queued.
+test("a flagged verdict never queues a follow-up, and review has no round cap", async () => {
 	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
 	const previousModel = process.env.AI_REVIEW_MODEL;
 	const previousFetch = globalThis.fetch;
@@ -372,33 +438,13 @@ test("settlement review rounds are capped across the extension's own corrective 
 
 		await harness.emit({ type: "before_agent_start", prompt: "fix it", systemPrompt: "", systemPromptOptions: {} } as any);
 		await harness.emit({ type: "agent_start" } as any);
-		for (let round = 1; round <= 3; round += 1) {
+		for (let round = 1; round <= 5; round += 1) {
 			diffRound = round;
-			// Each of these agent_start calls simulates the continuation this
-			// extension's own prior-round follow-up caused, not a fresh task --
-			// exactly the case that must NOT reset reviewCount/settled.
-			if (round > 1) await harness.emit({ type: "agent_start" } as any);
 			await harness.emit({ type: "agent_end", messages: [] } as any);
+			await harness.emit({ type: "agent_start" } as any);
 		}
-		assert.equal(reviewRequests, 3, "capped at MAX_REVIEW_ROUNDS despite three separate agent_start events");
-		assert.equal(harness.messages.length, 3, "a follow-up was queued for every round up to the cap");
-
-		// A fourth continuation (still this extension's own, from round 3's
-		// follow-up) must not spend a fourth round -- settled should already
-		// block it.
-		await harness.emit({ type: "agent_start" } as any);
-		diffRound = 4;
-		await harness.emit({ type: "agent_end", messages: [] } as any);
-		assert.equal(reviewRequests, 3, "settled after the cap -- no fourth round even though the diff changed again");
-		assert.equal(harness.messages.length, 3);
-
-		// A genuinely new task -- before_agent_start fires this time, unlike
-		// every continuation above -- must still reset and review again.
-		await harness.emit({ type: "before_agent_start", prompt: "fix it again", systemPrompt: "", systemPromptOptions: {} } as any);
-		await harness.emit({ type: "agent_start" } as any);
-		diffRound = 5;
-		await harness.emit({ type: "agent_end", messages: [] } as any);
-		assert.equal(reviewRequests, 4, "a genuine before_agent_start resets the cap");
+		assert.equal(reviewRequests, 5, "every materially distinct diff gets reviewed, no cap");
+		assert.equal(harness.messages.length, 0, "a flagged verdict never queues a follow-up message");
 	} finally {
 		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
 		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
@@ -408,23 +454,13 @@ test("settlement review rounds are capped across the extension's own corrective 
 	}
 });
 
-// Both quality-gate.ts and cross-model-review.ts listen to agent_end and can
-// each queue their own corrective follow-up in the same firing. The real
-// runtime drains queued followUp messages one at a time (pi-agent-core's
-// default followUpMode), so two extensions queuing in the same agent_end
-// produces two separate continuation cycles (two agent_start events), not
-// one -- confirmed in the 2026-08-18 Opus review. Neither extension's own
-// continuation is ever preceded by before_agent_start (only a genuine
-// top-level prompt fires that), so this is exactly why the reset moved
-// there instead of staying on agent_start: it doesn't matter which
-// extension's queued message caused a given agent_start, or how many fire
-// between rounds -- only before_agent_start can reset either extension's
-// state. This mounts both extensions on one harness and drives repeated
-// agent_start/agent_end cycles (deliberately more than either extension's
-// own round count, simulating the two-continuations-per-round shape)
-// without ever re-emitting before_agent_start, and checks neither
-// extension's cap gets corrupted by the other's activity.
-test("two extensions queuing follow-ups off the same agent_end don't corrupt each other's round cap", async () => {
+// Decoupled 2026-08-19: quality-gate's corrective follow-up is gone too
+// (see quality-gate.ts's file-top comment). This replaces the old
+// two-extension-interleaving round-cap test -- with neither extension
+// queuing anything, there's nothing left to interleave or corrupt; what
+// matters is that both extensions can react to the same repeated agent_end
+// firings, independently, without ever sending a message.
+test("quality-gate and the reviewer both react to repeated agent_end firings without queuing any message", async () => {
 	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
 	const previousModel = process.env.AI_REVIEW_MODEL;
 	const previousFetch = globalThis.fetch;
@@ -442,8 +478,8 @@ test("two extensions queuing follow-ups off the same agent_end don't corrupt eac
 	};
 	try {
 		const cwd = await mkdtemp(join(tmpdir(), "pi-gate-review-"));
-		// Always fails, so quality-gate's own agent_end handler also queues a
-		// corrective follow-up every round, alongside the reviewer's.
+		// Always fails, so quality-gate's own agent_end handler also records a
+		// failing verification every round, alongside the reviewer's flag.
 		await writeFile(join(cwd, "Makefile"), "verify:\n\t@false\n");
 		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
 		let diffRound = 0;
@@ -463,22 +499,14 @@ test("two extensions queuing follow-ups off the same agent_end don't corrupt eac
 
 		await harness.emit({ type: "before_agent_start", prompt: "fix it", systemPrompt: "", systemPromptOptions: {} } as any);
 		await harness.emit({ type: "agent_start" } as any);
-		// Six rounds: more than either extension's own cap (3), and each
-		// round fires agent_end once (both extensions react to the same
-		// firing) followed by an uncorrelated agent_start standing in for
-		// whichever extension's queued message the real runtime happened to
-		// continue on first -- never before_agent_start.
 		for (let round = 1; round <= 6; round += 1) {
 			diffRound = round;
 			await harness.emit({ type: "agent_end", messages: [] } as any);
 			await harness.emit({ type: "agent_start" } as any);
 		}
 
-		assert.equal(reviewRequests, 3, "reviewer still caps at its own MAX_REVIEW_ROUNDS despite quality-gate's parallel activity");
-		const reviewerMessages = harness.messages.filter((m) => /flagged a possible issue/.test(String(m.content)));
-		const qualityGateMessages = harness.messages.filter((m) => /quality gate ran/.test(String(m.content)));
-		assert.equal(reviewerMessages.length, 3);
-		assert.equal(qualityGateMessages.length, 3, "quality-gate still caps at its own MAX_CORRECTIVE_FOLLOW_UPS");
+		assert.equal(reviewRequests, 6, "reviewer keeps firing for every materially distinct diff, no cap");
+		assert.equal(harness.messages.length, 0, "neither extension ever queues a message");
 	} finally {
 		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
 		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;

@@ -3820,3 +3820,298 @@ Artifacts: `/tmp/pi-pair7-lru-cache-rerun-20260818T012503Z/` (manifest,
 summary.json — not committed, local temp path); full session trace at
 `/private/tmp/pi-screen-07-harness-9nt6gh4d/session/*.jsonl` (also local
 temp, not committed).
+
+## 2026-08-18 — malformed-verdict root cause found: token-cap truncation, not a parsing regression
+
+Direct follow-up to the "recommended next steps" above. Both surviving
+artifacts from the prior rerun (`.../work/` working tree with the exact
+uncommitted diff, and the session trace with the exact task-spec text) were
+still on disk, so the two malformed-verdict reviewer calls were reproduced
+live rather than guessed at: reconstructed the identical prompt
+`requestReview` would have sent (same spec, same `buildReviewDiff` output —
+tracked `git diff --binary HEAD` plus synthesized untracked-file blocks for
+`Makefile`/`README.md`/`lru_test.go`) and POSTed it directly to the `:8081`
+Gemma route with the same schema/temperature.
+
+**Result: `finish_reason: "length"`, `completion_tokens: 16384`.** The
+response is genuinely truncated mid-JSON, not a parse regression in
+`cross-model-review.ts` and not a Gemma response-shape change. The model's
+`analysis` field (put first in the schema on purpose, see the schema's own
+doc comment, to force reasoning before verdict commitment) spirals into a
+long, self-correcting chain-of-thought on this diff — "**Wait, I found the
+bug.**" appears twice, each time re-deriving the same worked example — and
+never converges to closing the JSON string before the 16384-token
+completion cap cuts it off. `requestReview` never sent an explicit
+`max_tokens`, so the server's own default applied with no reserved headroom
+for the `verdict`/`findings` fields once `analysis` ran long. Confirmed via
+direct JSON.parse on the captured content: `Unterminated string starting
+at: line 1 column 14`.
+
+This is very likely deterministic on this exact diff at `temperature: 0`,
+consistent with the original run's 2/2 malformed-verdict outcomes (in-band
+and settlement triggers, 202.9s and 178.8s — comparable to this repro's
+233.5s).
+
+**Fix landed (telemetry only, per explicit scope decision — not the
+token-budget/prompt-length fix):** `requestReview` now reads
+`choices[0].finish_reason` from the response and, when a verdict fails to
+parse, reports it as a new `truncated-response` reason distinct from
+`malformed-verdict` whenever `finish_reason === "length"`, carrying the raw
+`finishReason` through to the trace's `metadata`. This makes a future
+occurrence of this exact failure mode distinguishable from a genuine parse
+bug in telemetry alone, without needing another live repro to tell them
+apart. Deliberately did not also add an explicit `max_tokens` cap or shorten
+the analysis-field pressure — that's a behavior change to the reviewer's
+prompt/budget, held out of scope for this pass pending a decision on
+tradeoffs (e.g. capping `analysis` risks cutting off the reasoning that
+raised the schema's catch rate in the first place).
+
+185 deterministic tests (unchanged count — extended the existing
+`requestReview` classification test rather than adding a new one), typecheck
+clean.
+
+**Open**: the underlying token-budget exhaustion itself is unfixed — a
+`malformed-verdict`/`truncated-response` outcome on an actually-buggy diff
+still means the reviewer silently fails to flag it, now just distinguishably
+logged rather than silently conflated. The corrective-follow-up mechanism's
+first live confirmation (a queued round producing a real second model turn)
+is also still open, per the prior entry.
+
+## 2026-08-18 — token-budget exhaustion fixed (same day, follow-up)
+
+User explicitly asked for the underlying truncation itself to be fixed, not
+just distinguishably logged. Two changes landed in `requestReview`:
+
+1. **Explicit `max_tokens: 8192`** on every reviewer request (previously
+   unset, so the server's own default of 16384 applied with no reserved
+   headroom for `verdict`/`findings`).
+2. **A brevity instruction in the prompt**, added without touching the
+   `analysis`-before-`verdict` field ordering (that ordering is load-bearing
+   -- the schema's own doc comment records a verdict-first regression that
+   cost catch rate 5/5 -> 0/5 on a planted bug). The base prompt now reads
+   "Keep your analysis concise ... commit to a verdict once you've reached
+   one."
+3. **A one-shot retry on `truncated-response`** with an even stricter
+   prompt ("at most 3 sentences"). A retry of the *identical* prompt at
+   `temperature: 0` would just reproduce the same truncation deterministically
+   -- the retry only has a chance because the prompt itself changes. Capped
+   at one retry, not a loop, to avoid spending a second full
+   `REVIEW_TIMEOUT_MS` (240s) window chasing a diff this model can't
+   summarize briefly.
+
+`requestReview`'s internals were refactored into a `callReviewer` helper
+(single HTTP call + parse) and `buildReviewPrompt(spec, diff, concise)`, with
+`requestReview` itself now just: call once, retry once with the stricter
+prompt only if the first attempt was `truncated-response`, return whichever
+result is final.
+
+**Verified safe, not just "typechecks":** re-ran the checked-in planted-bug
+battery (`pi/evals/reviewer-battery.ts`) live against the real `:8081`
+Gemma route after the prompt change -- **15/15 catches, 0/9 false
+positives**, identical to the pre-fix baseline. The brevity instruction did
+not cost catch rate.
+
+3 new deterministic tests (188 total, up from 185): a recovering retry
+(first call truncates, second call's prompt is verified to carry the
+stricter instruction and returns a real verdict), a retry that also
+truncates and is not retried again, and an explicit `max_tokens` assertion
+on the outgoing request body. Typecheck clean.
+
+**Also directly confirmed**: replayed the exact original truncating
+spec/diff (same reconstructed artifacts used to find this bug) through the
+fixed `requestReview`. Result: `outcome: "clean"`, no truncation, no retry
+needed, in **5.8s** -- versus the original 202.9s/178.8s truncation
+failures on the identical input. ("clean" is the correct verdict here too:
+the diff itself was already a correct fix; the point is the model no
+longer spirals in `analysis` before saying so.) Between this direct repro
+and the 15/15-catches/0/9-false-positives battery result above, the fix is
+confirmed both not to regress catch rate and to actually resolve the
+specific failure it was built from.
+
+## 2026-08-18 — third go/lru-cache rerun (harness arm only): corrective follow-up queues correctly but never drains, root-caused to a `followUp`-vs-`steer` delivery-mode gap
+
+Per the "next step" above: reran pair 7 (`go/lru-cache`) to get the
+`agent_end` fix's first live exercise. Baseline for this exact pair was
+already solid (48.1s and 42.6s, clean, twice) so only the harness arm was
+rerun -- a new `run_single_arm.py` script (added alongside this entry,
+mirroring the pair-4 clean-contention rerun's precedent of reusing an
+already-established arm) runs one `execute_arm()` call instead of a full
+pair. Preflight matched prior runs: Pi 0.83.0, both routes reachable and
+model-id matched, installed `cross-model-review.ts`/`quality-gate.ts`
+symlinked straight to the working tree (today's truncation fix included).
+
+**Result: `valid: false`, `passed: false`, `timed_out: true`, 1800.0s (hit
+the task's 30-minute default budget).** Hidden tests: 3 passed, 1 failed
+(`TestGetMarksRecentlyUsed`). The reviewer fired once (`tool_result`
+trigger, round 1, 6.8s -- no truncation this time) and correctly flagged a
+real bug: `lru.go`'s `Put` stores only the value in the list element, so
+eviction deletes by value instead of by key -- the exact key/value-
+confusion bug class this investigation's original 0/4 finding was about,
+reintroduced a third time. Final `lru.go` on disk still has the bug
+verbatim (`delete(c.data, oldest.Value.(int))`), confirming the model never
+returned to fix it.
+
+**The corrective follow-up: queued correctly, never delivered -- a new,
+more specific root cause than "unconfirmed."** `pi-output.jsonl` shows
+exactly one `queue_update` event, with the reviewer's real finding text
+sitting in `followUp`, and no second `queue_update` ever shows that array
+empty; no `agent_end` event appears anywhere in the log. So this is not a
+repeat of the old "queued but immediately zero-token re-settled" bug the
+`agent_end` fix targeted -- the message genuinely sat queued the entire
+run. Root-caused by reading `pi-agent-core`'s `agent-loop.js` and `agent.js`
+directly (not inferring from either session's own commentary):
+
+- `getFollowUpMessages()` is called **only** at the point the inner tool
+  loop is about to exit -- i.e., only after a turn produces zero tool
+  calls and no steering messages are pending ("Agent would stop here").
+  `getSteeringMessages()`, by contrast, is called and drained at the *end
+  of every single turn*, tool calls or not.
+- `pi.sendUserMessage(..., { deliverAs: "followUp" })` -- the delivery mode
+  both `cross-model-review.ts`'s and `quality-gate.ts`'s corrective nudges
+  use -- therefore cannot interrupt an agent that keeps calling tools every
+  turn. It can only land once the model would otherwise have stopped on
+  its own.
+- This run's model never stopped calling tools: after the flagged review
+  (turn ~11) it drifted into a 130+-tool-call debugging loop writing and
+  re-running a throwaway scratch file (`cd /tmp/lru-dbg && cat > main.go
+  <<'EOF' ...`, near-identical content repeated dozens of times) instead of
+  editing `lru.go` itself, and was still doing so when the 30-minute
+  external timeout killed the process. The queued correction was correct
+  and ready; the loop simply never reached the idle point that drains it.
+
+**This also re-confirms, live, a third time, the already-documented
+`progress-stall-guard.ts` fingerprint gap** (see its table row): its
+`turn_end` handler only appends a trace / considers nudging when
+`sawTestThisTurn` is true, which is only set by a `bash` tool call matching
+`matchesTestExecution()`. The scratch-file loop's commands (`cat > main.go
+<<EOF`, occasional ad hoc `go run`) never matched that pattern, so
+`pi-stall-trace` entries stopped appearing entirely after turn ~13 (4
+trace entries total, then silence for the remaining ~120 turns) --
+identical shape to the 2026-08-16 finding. **New implication uncovered
+here**: even if that fingerprint gap were fixed and the guard's own nudge
+enabled, the nudge also fires via `deliverAs: "followUp"` (same code
+path, same call), so it would have the identical delivery problem --
+fixing the fingerprint alone would not be sufficient to actually interrupt
+a loop like this one.
+
+**Net for the open item this rerun targeted**: the `agent_end` mechanism
+itself (queueing at the right point, not starting a nested run) is now
+confirmed correct by direct evidence, not just source trace -- the queue
+state is real and correctly populated. What's newly discovered is a
+*different*, previously-unarticulated gap one layer up: `followUp` delivery
+is structurally incapable of interrupting a model that's stuck calling
+tools, which is exactly the situation where a correction is most needed.
+Not yet done: whether switching the corrective nudge (in both
+`cross-model-review.ts` and `quality-gate.ts`) to `deliverAs: "steer"`
+would fix this without other side effects (e.g. injecting a message mid a
+tool-call batch) is untested -- a real design/validation question, not a
+one-line swap to make without checking.
+
+Artifacts: `/private/tmp/pi-arm-20260818T164256Z-d0qkklvx/` (manifest,
+summary.json); full run artifacts at
+`/private/tmp/pi-screen-07-harness-zt5u960i/` (work/, session/,
+pi-output.jsonl -- all local temp, not committed). New runner script:
+`pi/evals/run_single_arm.py`.
+
+## 2026-08-18 — hardening backlog Tasks 2–8 progress
+
+Task 2: widened `progress-stall-guard.ts` to classify the observed scratch
+execution shapes (`cat`/`tee` into `/tmp` and `go`/`node`/`python`/`dart run`
+of scratch paths), while retaining the unchanged-failure and no-source-edit
+conjunction. Added a three-round heredoc reproduction. Evidence: `npm run
+typecheck` exited 0; `npm test` exited 0 with **189/189 passing**, including
+the new test whose final trace is `{sourcelessRounds:3,sameFailure:2,
+stalled:true,nudged:true}` with the opt-in flag. The live pair-7 harness arm
+was launched after both model routes passed `/v1/models` preflight and ended
+with `valid:false`, `passed:false`, `timed_out:true`, `harness_seconds:
+1800.036`. Its parsed `trace_events` contained only one `stack-router`
+`routing/pass` entry and no `pi-stall-trace` entries, so the runner did not
+provide the required live confirmation that traces continued through the
+scratch loop. The nudge remains default-disabled and uses `followUp`, so
+delivery is still open.
+
+**Correction (same day, post-review): "zero `pi-stall-trace` entries" was
+reading the wrong artifact, not the true result.** `run_screening.py` line
+149 filters trace extraction on `customType === "pi-harness-trace"` only --
+`progress-stall-guard.ts` appends its own trace under a different
+`customType`, `"pi-stall-trace"` (confirmed by reading both files directly),
+so `summary.json`'s `trace_events` list structurally can never contain
+stall-guard evidence, regardless of whether the guard fired. This is a
+pre-existing runner gap, not something this change introduced or broke.
+
+Reading the raw session log directly
+(`/private/tmp/pi-screen-07-harness-4goj0n14/session/*.jsonl`, still on disk)
+tells the real story: **74 `pi-stall-trace` entries fired across the run**,
+`sourcelessRounds` climbing steadily to 72 -- the widened
+`matchesDiagnosticExecution` classifier worked exactly as designed, correctly
+recognizing the scratch-file loop as diagnostic activity the entire time.
+But `stalled` was `false` on all 74 entries, because `sameFailure` never
+exceeded 0 (`SAME_FAILURE_THRESHOLD` is 2) -- `sourcelessRounds` alone easily
+cleared `STALL_ROUNDS_THRESHOLD` (3), but the *other* half of the `stalled`
+condition never engaged. `fingerprintFailure` hashes the last ~20
+output lines with only timing/line-number/address/temp-path normalization;
+a model varying its actual scratch debugging approach round to round (not
+just noise in those normalized fields) produces a genuinely different
+fingerprint most rounds, so `sameFailure` keeps resetting to 0 instead of
+accumulating. This is precisely the original 2026-08-16 finding restated
+with clearer, quantified live evidence (72 rounds, `sameFailure` never once
+exceeding 0) -- not a new bug, and not resolved by Task 2's fix, which
+targeted a genuinely different half of the mechanism (command recognition,
+not failure-similarity matching) and did its job correctly. **Net: Task 2's
+literal fix (widen `matchesDiagnosticExecution`) is confirmed working live.
+The nudge still cannot fire on this failure class, but because of the
+pre-existing fingerprint-strictness gap, not because the new classifier
+failed.** `run_screening.py`'s trace-extraction gap (silently dropping
+`pi-stall-trace` events) is a separate, real, still-open bug in the runner
+itself worth its own fix -- anyone reading `summary.json`/`results.jsonl`
+alone for stall-guard evidence will reach the same wrong "it didn't fire"
+conclusion this entry originally did.
+
+Task 3: the checked-in JSON gives totals but no phase attribution.
+`full-screening-2026-08-03.json` reports ratio `2.0031102096010818`,
+`100.31102096010818%` overhead, and `212.6%` prompt-token delta;
+`hardened-screening-2026-08-17.json` reports ratio `4.12`, `312%` overhead
+on four fully-valid thinking-enabled pairs, and zero connection errors. No
+reduction or threshold revision is honestly supported until instrumentation
+separates settlement checks, manifest walks, and reviewer calls.
+
+Task 4: pair 5 is `dart/sequential-runner`; its missing timeout metadata means
+the runner uses 30 minutes. Hardened evidence records `timeout (1800s, diff
+present, hidden tests would have passed)` while the older full screen records
+143.934s for that harness arm. No clean isolated rerun or timeout change yet.
+
+Task 5: Pi 0.83.0 source tracing identifies `DEFAULT_HTTP_IDLE_TIMEOUT_MS =
+300_000` in `dist/core/http-dispatcher.js`, passed to undici `bodyTimeout` and
+`headersTimeout`; settings supplies that default and SDK maps disabled to
+`2147483647`. This is a specific repo-side candidate, not causal proof for
+the four kills. No fix; server-side and forced-vs-normal compaction checks
+remain open.
+
+Task 6: adoption bar set before trials — three live trials per extension,
+trace-observed message, measurable beneficial behavior, zero regressions and
+transport/runtime errors. No qualifying live trials completed; both remain
+disabled.
+
+Task 7: added `../local-model-bench/tasks/javascript/lru-cache` with
+`meta.json`, `spec.md`, starter `package.json`/`cache.js`, and hidden tests.
+The starter has the plantable `get`-does-not-reorder LRU bug and its package
+manifest exercises JS stack routing. Live pair and JSON result remain open.
+
+Task 8: still blocked on Task 5's missing causal fix/mitigation; its unit test
+is not counted as live acceptance evidence.
+
+## 2026-08-19 — decouple nudging from review: scope narrowed instead of fixing delivery mode
+
+Direct follow-up to the "New root cause" finding above. A `plans/pi-harness-hardening-backlog-2026-08-18.md` handoff plan had been drafted (intended for a Codex session) proposing to fix the `followUp`-vs-`steer` gap by switching the corrective nudge's delivery mode. Before handing that off, discussion reframed the actual question: is the harness's job to self-correct inside a live session at all, or to write code and report an honest result, with correction left to a human (or a separate pass) afterward? Given three separate incidents now trace back to trying to make a correction land *inside* a live session (the `agent_settled`-vs-`agent_end` nested-run bug, the malformed-verdict truncation investigation, and the `followUp`-can't-interrupt-a-loop finding), the decision was to narrow scope rather than add a fourth fix: remove in-band corrective injection entirely from `cross-model-review.ts` and `quality-gate.ts`, keep both extensions' verification/review work exactly as-is, and make their output pure reporting.
+
+**What changed, both extensions:**
+
+- `cross-model-review.ts`: the `pi.sendUserMessage(..., {deliverAs:"followUp"})` call after a flagged verdict is gone. `reviewCount`, `MAX_REVIEW_ROUNDS` (3), and the `settled` flag are all removed -- there is no longer a corrective loop to cap, so nothing needs capping. Every materially distinct diff (`diff !== lastReviewedDiff`) still gets reviewed, on both the `tool_result` and `agent_end`-settlement triggers, exactly as before; the verdict is recorded in the `pi-harness-trace` event same as always, now additionally carrying the flagged finding's text itself (`metadata.findings`) since the injected message used to be the only place that text traveled -- without adding it to the trace, a flagged finding would have become genuinely invisible, not just non-corrective.
+- `quality-gate.ts`: the `pi.sendUserMessage(...)` corrective nudge on a failing settlement check is gone. `correctiveFollowUps`, `MAX_CORRECTIVE_FOLLOW_UPS` (3), and the `"nudge"`/`"cap-hit"` trace event are all removed. The settlement verification itself -- diff-hash-bound evidence, rejecting truncated/shell-masked results, running the repo's canonical check -- is completely unchanged; only the "what happens on failure" step changed, from "auto-inject a corrective message" to "record a `fail` outcome." The redacted failure output (`redactFailureOutput`, still 3000-char capped) now travels in the trace's `metadata.failureExcerpt` for the same reason -- it used to only exist in the injected message text.
+- `goal-gate.ts` was deliberately left untouched. Its three `deliverAs: "followUp"` call sites (kickoff, stall-escalation nudge, `session_compact` reminder) have the identical structural exposure to the same delivery-mode gap, but `goal-gate.ts` exists specifically for unattended `/goal`-driven builds where there is no human to engage until the run is fully done -- decoupling it the same way would mean an unattended build just stops at the first stall instead of self-correcting, a real behavior change for that workflow, not a strict simplification. Left as an open question for whoever next touches `goal-gate.ts`, not assumed.
+
+**Why this is a narrowing, not a fix.** The `followUp`-vs-`steer` finding is not resolved -- it's now moot for these two extensions specifically, because they no longer try to inject anything at all. `progress-stall-guard.ts`'s fingerprint gap (its own nudge, still default-disabled, uses the same `deliverAs: "followUp"` call) is untouched and still open; its trace-only telemetry remains valuable as exactly this kind of post-hoc reporting signal even with no nudge attached.
+
+**Verification:** `npm run typecheck` clean; `npm test`: 188/188 passing. Two tests in `cross-model-review.test.ts` and one in `quality-gate.test.ts` that exercised the now-removed round-cap/interleaving behavior were rewritten (not just patched) to assert the new decoupled behavior instead -- no follow-up ever queued, every materially distinct diff still reviewed/verified independently with no cap, and the finding/failure text still reaches the trace. `pi/evals/reviewer-battery.ts` was not rerun: it calls `requestReview`/`resolveReviewerConfig` directly, neither of which this change touched (only the `reviewer()` extension wrapper's state machine changed), so its 15/15/0/9 result from the same-day truncation fix still stands unaffected.
+
+**Not done, deliberately out of scope for this pass**: no live end-to-end run yet confirming the new decoupled behavior against a real flagged/failing session (e.g. a `go/lru-cache` rerun where the model reintroduces the known bug again, checking that the reviewer's flag and quality-gate's failure both land purely in the trace with zero injected messages and the session settles honestly as failed). Unit-test coverage confirms the mechanism; a live run confirming it end-to-end has not been done. The draft `plans/pi-harness-hardening-backlog-2026-08-18.md` Codex handoff (Tasks 1 and 2, the `followUp`-vs-`steer` fix and the coupled stall-guard fingerprint gap) is superseded by this entry for `cross-model-review.ts`/`quality-gate.ts` specifically; the plan file should be updated to reflect that rather than handed off as originally drafted.

@@ -80,6 +80,16 @@ const TEST_EXECUTION_PATTERNS = [
 	/\bcargo test\b/i,
 ];
 
+// Scratch-file loops are still diagnostic execution even when the command
+// never invokes a test runner. Keep this deliberately narrow: the guard
+// should not treat arbitrary shell failures as evidence of repeated work on
+// the same bug. The observed live shape was a heredoc into /tmp followed by
+// repeated `go run` calls against that scratch file.
+const SCRATCH_EXECUTION_PATTERNS = [
+	/\b(?:cat|tee)\s+>\s*\/?(?:tmp|var\/tmp)\//i,
+	/\b(?:go|node|python(?:3)?|dart)\s+run\s+\/?(?:tmp|var\/tmp)\//i,
+];
+
 // Conservative on purpose: matching "contains test" as a substring
 // misclassifies real production files (testutil/helpers.go,
 // internal/testing/harness.go, contest.go) as test files, which would make
@@ -104,6 +114,10 @@ function isTestFile(path: string): boolean {
 
 function matchesTestExecution(command: string): boolean {
 	return TEST_EXECUTION_PATTERNS.some((re) => re.test(command));
+}
+
+function matchesDiagnosticExecution(command: string): boolean {
+	return matchesTestExecution(command) || SCRATCH_EXECUTION_PATTERNS.some((re) => re.test(command));
 }
 
 /**
@@ -177,7 +191,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (event.toolName !== "bash") return undefined;
 		const command = event.input?.command;
-		if (typeof command !== "string" || !matchesTestExecution(command)) return undefined;
+		if (typeof command !== "string" || !matchesDiagnosticExecution(command)) return undefined;
 
 		sawTestThisTurn = true;
 		if (!event.isError) {

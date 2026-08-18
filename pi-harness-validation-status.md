@@ -178,21 +178,21 @@ entry.
 | `rtk-rewrite.ts` | Adopted, on by default | Deterministic bash-output filter. |
 | `git-checkpoint.ts` | Adopted, on by default | Deterministic per-turn snapshotting. Live-found and fixed 2026-08-17 (hardened battery, pair 7, `go/notes-api`): `turn_start`'s first ctx call could throw Pi's documented stale-context error (a session reload/compaction/fork landing before the handler ran), crashing the turn — `stack-router.ts`/`quality-gate.ts` already guarded against this exact class via `lib/stale-context.ts`, `git-checkpoint.ts` had not. Fixed with the same guard; 4 new deterministic tests, including one reproducing the exact crash. Not yet re-observed live post-fix (the race is timing-dependent, not reliably reproducible on demand). |
 | `git-safety.ts` | Adopted | Blocks destructive git commands. 1 scratch-repo reproduction plus deterministic tests. |
-| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement, caps corrective follow-ups at three. Proven in the nine-pair battery. **Corrective-follow-up mechanism fixed 2026-08-18** (root-caused, fixed, and independently re-derived from `pi-coding-agent`/`pi-agent-core` source across two Opus review passes — not just observation): the trigger was `agent_settled`, which the runtime documents as firing only once no queued continuation will run, so `sendUserMessage(...,{deliverAs:"followUp"})` from there started a separate nested run instead of queuing, matching the exact "queued correctly, zero-token immediate re-settle" symptom this file's history recorded three times. Moved to `agent_end` (fires while still mid-run; the existing `agent.continue()` loop drains a message queued from there with no extra code needed) in both `quality-gate.ts` and `cross-model-review.ts`, plus a shared `lib/agent-end-guard.ts` skip when the run ended in `error`/`aborted` (the first review pass's own recommended fix introduced two regressions the second pass caught: a killed run resurrected by a fabricated nudge, and the whole corrective budget burned on transport retries against an unchanged diff — both closed by the guard). `cross-model-review.ts`'s per-run review-round reset also moved from `agent_start` (refires on every continuation, would have made its 3-round cap meaningless once follow-ups actually land) to `before_agent_start` (fires exactly once per genuine top-level prompt). 185 deterministic tests, including a dedicated two-extension-interleaving test and abort/error-guard tests for both extensions. **Not yet live-validated**: unit tests confirm the mechanism by source trace, but a follow-up genuinely producing a second model turn with real tokens hasn't been observed live post-fix — recommended next step, not yet done. See history for the full two-pass review account, including the first, reverted attempt's wrong diagnosis. |
-| `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Only Go/Dart routes have battery coverage; rest are unit-tested only. |
+| `quality-gate.ts` | Adopted, on by default | Binds passing evidence to the current diff hash, rejects truncated/shell-masked results, runs the repo's canonical check at settlement. Proven in the nine-pair battery. **Corrective in-band nudging removed by design, 2026-08-19** (see `cross-model-review.ts`'s row for the shared rationale): after three separate incidents tracing back to trying to make a correction land inside a live session, scope was narrowed instead of chasing a fourth fix. A failing settlement check no longer queues `sendUserMessage`; it's recorded as a `fail` trace event, with the redacted failure output now carried in `metadata.failureExcerpt` (the only remaining channel for a human to read it, since the injected message used to be the sole carrier). No round cap needed anymore — nothing is being capped. 188 deterministic tests, typecheck clean. Not yet live-validated post-decoupling: unit tests confirm the mechanism, a live run showing a real failing settlement land purely as a trace entry (zero injected messages) hasn't been observed. Full trail: `pi-harness-history.md`'s 2026-08-19 "decouple nudging from review" entry (supersedes the 2026-08-18 `agent_end`-fix and `followUp`-vs-`steer` entries below it, which remain as history of what was tried first). |
+| `stack-router.ts` | Adopted, on by default | Routes Go, Python, Flutter, TypeScript/JavaScript, PostgreSQL, Kafka, Temporal, GCP guidance from repo evidence. Go/Dart have battery coverage; a new JavaScript LRU fixture is structurally wired and locally testable, but its required live baseline/harness pair is still open. |
 | `co-change-suggest.ts` | Default-disabled, source-tested | One real retrospective replay (ranked target #1 of 8) short of the adoption threshold. Live validation not run. |
 | `continuation-nudge.ts` | Default-disabled, source-tested | Deterministic tests pass; widened trigger has zero real-trial field evidence. |
 | Auto-compaction (`ai-stack-local.ts` `contextWindow`) | Fixed and live-confirmed | Was mis-set to a value above the route's real admission budget, so Pi's own auto-compaction never fired on overflow. Corrected + adapter-level follow-up fix; live rerun: reward 1.0. Detail in history. |
 | `stack-skill-overlay.ts` | Fixed | Per-repo stack skills only load matching skill(s) instead of all 8 globally — real measured ~15% prompt-token reduction. |
 | `codebase-memory-mcp` 0.9.0 | Default-disabled, trial-only | No efficiency win over plain repo tools in a paired Go trial; vendor's token-reduction claim not confirmed. Not globally wired. |
-| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | 15/15 planted-bug catch rate, 0/9 false positives on a checked-in battery (`pi/evals/reviewer-battery.ts`). Was structurally blind on all-untracked repos (fixed) and on suites whose verification command never runs inside the model's own session (mitigated via a settlement-time trigger). That trigger is now live-confirmed with a clean round: a task that only ran `go build`/`go vet` (no `go test`, no Makefile) still got a real settlement-triggered review with a genuine `outcome:"flagged"` finding, not the earlier `model-rejected` transport failure. Full saga (stale-model-id incident, schema-ordering regression, timeout raise) in history. |
+| `cross-model-review.ts` | Adopted, resolves to genuine `independent-review` | 15/15 planted-bug catch rate, 0/9 false positives on a checked-in battery (`pi/evals/reviewer-battery.ts`). Was structurally blind on all-untracked repos (fixed) and on suites whose verification command never runs inside the model's own session (mitigated via a settlement-time trigger). That trigger is now live-confirmed with a clean round: a task that only ran `go build`/`go vet` (no `go test`, no Makefile) still got a real settlement-triggered review with a genuine `outcome:"flagged"` finding, not the earlier `model-rejected` transport failure. Full saga (stale-model-id incident, schema-ordering regression, timeout raise) in history. A live-found `malformed-verdict` failure (2026-08-18) turned out to be `finish_reason: "length"` token-cap truncation on a long self-correcting `analysis` field, not a parsing regression. Fixed same day: explicit `max_tokens`, a brevity-bounded prompt, and a one-shot retry with a stricter prompt on truncation — verified live via the planted-bug battery (15/15 catches, 0/9 false positives, unchanged) and a direct replay of the original truncating diff (now clean in 5.8s, no truncation). A third `go/lru-cache` rerun (2026-08-18) confirmed the reviewer itself fires correctly (in-band, 6.8s, correctly flagged a real bug), but its corrective follow-up — sent via `deliverAs: "followUp"` — sat queued and undelivered for the entire run because the model never stopped calling tools. **Corrective in-band nudging removed by design, 2026-08-19**: rather than switch to `deliverAs: "steer"` (an untested, real design/validation question of its own), scope was narrowed instead — the reviewer still runs on every materially distinct diff, on both triggers, exactly as before, but a flagged verdict is now pure reporting: no `sendUserMessage`, no round cap (`MAX_REVIEW_ROUNDS`/`reviewCount`/`settled` all removed, since there's no corrective loop left to cap), and the finding text now travels in the trace's `metadata.findings` (previously it only existed in the injected message). This is a narrowing, not a fix — `progress-stall-guard.ts`'s own nudge has the identical `followUp` exposure and remains untouched, still default-disabled. `goal-gate.ts`'s three `followUp` call sites were deliberately left alone too: it exists for unattended builds with no human to engage mid-run, where decoupling would remove its only self-correction path rather than simplify it. 188 tests, typecheck clean; `reviewer-battery.ts` unaffected (calls `requestReview` directly, untouched by this change). Not yet live-validated post-decoupling. Full trail: `pi-harness-history.md`'s 2026-08-19 "decouple nudging from review" entry. |
 | `new-project-scaffold.ts` | Adopted, on by default | Git-init + layered-architecture nudge for greenfield repos. Live-tested. |
 | `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical Makefile target. Redesigned `tool_result`/`turn_end` backstop live-confirmed: armed by a `go mod init` bash call, nudged at the next turn boundary, model acted on it. |
 | `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Both paths live-confirmed: `agent_settled` backstop (caught real stray binaries) and primary `tool_result` path (fired in-band on a `go build -o` command before any commit could hide the artifact). |
 | `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks. Redesigned `tool_result` write-scan live-confirmed (fired instantly on a planted `http.Error(w, err.Error(), ...)` leak); `agent_settled` backstop also confirmed in the same run. |
 | `goal-gate.ts` (`/goal` command) | Adopted, on by default | Session-scoped `/goal <condition>` with a literal `GOAL COMPLETE: <evidence>` marker gated on the most recent broad verification passing against the *current* diff hash (diff-hash-bound, not self-report). Live-confirmed: kickoff race fixed, false-rejection-after-nudge fixed, stall-escalation fixed and live-confirmed (real stall → escalated nudge → recovery), `session_compact` mid-goal reminder shipped but not yet live-exercised. n=7 organic single-process runs, all converged at `rounds: 0` or `1` — "many nudge rounds" behavior not yet seen from this model, treated as a real (if provisional) negative finding, not a gap. Full account, including two real production runs against `personal-budget-simplifier`, in history. |
 | `build_app.py` (zero-human build orchestrator) | Live-tested | Drives bounded `pi -p` corrective rounds outside chat, always writes `BUILD_REPORT.md`. `--containment` confirmed refusing exactly as documented (exit 1, no report, no round attempted). Multi-round corrective recovery: 5/5 single-round successes across every attempt so far, including three deliberate traps (a hidden runtime-only behavioral contract, a concurrency-bug class this model class sometimes misses unaided) — same shape as `goal-gate.ts`'s n=7 negative finding, not a testing gap; the `--continue` loop itself is unit-tested but still never exercised against a real failure. Non-Go stacks unexercised. |
-| `progress-stall-guard.ts` | Trace-only, two live-found bugs fixed, one live-found gap open | Detects repeated tool calls (re-running a self-written test) with no source edit and an unchanged failure fingerprint. Two real bugs found and fixed across trials 3-4 (2026-08-16): missing `make (?:verify\|test\|check)` pattern, and `agent_start` resetting state on every internal auto-retry instead of only the true first start. Both confirmed fixed live in trial 4 (single `agent_start`, correct trace behavior throughout a real 30-minute run). Open gap, found live, not yet fixed: the repeated-failure fingerprint is too strict against varied scratch-test content written outside the `write`/`edit` tool path (e.g. `bash cat > /tmp/x_test.go <<EOF`) — trial 4 reached 61 stall rounds (~26 min, zero source edits) without ever firing. 9 deterministic tests. Nudge (`PI_STALL_GUARD_NUDGE=1`) still not enabled by default, pending resolution of the fingerprint gap. Full account: `pi-harness-history.md`'s 2026-08-16 entry. |
+| `progress-stall-guard.ts` | Trace-only. Command-recognition gap fixed and live-confirmed; failure-fingerprint gap still open | The `tool_result` activity gate now recognizes scratch-file execution shapes (`cat`/`tee` into `/tmp`, `go`/`node`/`python`/`dart run` of `/tmp` paths), not just literal test commands. 189/189 tests passing. **Live-confirmed 2026-08-18/19** on a real `go/lru-cache` scratch-file-loop rerun: reading the raw session log directly (the runner's `summary.json` extraction silently drops `pi-stall-trace` events — a separate, real runner bug, see history) shows 74 stall-trace entries fired, `sourcelessRounds` correctly climbing to 72 — the widened classifier works. But `stalled` never went `true`: `sameFailure` stayed at 0 the entire run, because `fingerprintFailure`'s output-hash changes whenever the model's actual scratch content varies round to round, not just noise. This is the original 2026-08-16 fingerprint-strictness finding, now quantified precisely (72 rounds, zero `sameFailure` accumulation) rather than resolved — Task 2's fix targeted command recognition specifically and did that correctly; the fingerprint-matching half is a distinct, still-open gap. Nudge (`PI_STALL_GUARD_NUDGE=1`) remains default-disabled — even if enabled, it couldn't have fired in this run regardless of delivery mode, since `stalled` never went true. Full trail: `pi-harness-history.md`'s 2026-08-18/19 entries. |
 | `wall-clock-budget-nudge.ts` | Adopted, on by default, live-confirmed | Warns once near 75% of an externally-supplied `PI_HARNESS_TIMEOUT_MINUTES` deadline ("land your diagnosed fix now"). Inert unless that env var is set; `local-model-bench`'s runner sets it from each task's `harness_timeout_minutes`. One bug found and fixed live (2026-08-16): `agent_start` resetting `startedAt` on every internal auto-retry, so a retried run's deadline never accumulated real elapsed time; fixed to anchor on only the true first `agent_start`. Confirmed live in trial 4: fired exactly once, at the correct point (23 of 30 minutes), zero false resets across a real run. 5 deterministic tests. |
 | `todo.ts` (built-in TUI tool) | Fixed | A malformed model tool-call (validator-rejected `todo` args) hit a missing `default:` case in `renderResult`, returning `undefined` into the TUI's render tree and crashing the interactive session. Root-caused from the actual crashed session log, deterministically reproduced standalone, fixed with an explicit default case. Universal bug class (any model that trips arg validation on `todo`), not local-model-specific. |
 | Phase 4 (Aider-based failing-test retry) | Deliberately not built | Aider dispatch is out of scope (benchmarked and removed, see `~/.claude/CLAUDE.md`). |
@@ -259,13 +259,44 @@ evidence-cited version of each):
   counted. Mechanism question still open. See `pi/evals/
   pair4-rerun-2026-08-13.json` and `plans/pair4-reviewer-mechanism-check-
   plan.md`.
-- TypeScript/JS task fixtures still need battery coverage (currently
-  routed + unit-tested only).
+- TypeScript/JS fixture added at `../local-model-bench/tasks/javascript/lru-cache`
+  with `meta.json`, `spec.md`, starter package, and hidden tests; the live
+  baseline/harness pair remains open.
 - **`co-change-suggest.ts` / `continuation-nudge.ts`**: both still need live
   (non-retrospective) field validation before they clear the adoption bar.
-- **`quality-gate.ts` overhead**: median 100.3% runtime cost is still above
-  the plan's 20% screening threshold — needs either a reduction or an
-  evidenced revision to the threshold itself.
+- **`quality-gate.ts` overhead**: the checked-in nine-pair JSON reports a
+  median paired runtime overhead of 100.311% (2.0031x), with 212.6% prompt
+  token overhead; the thinking-enabled hardened JSON reports 312% on the
+  four fully-valid pairs. Existing JSON has pair timings but no per-extension
+  phase timings, so it cannot attribute the cost among settlement checks,
+  manifest walks, and reviewer calls. A threshold revision proposal and
+  instrumented phase breakdown remain open.
+- **Primary HTTP timeout / unattended kills**: Pi 0.83.0's installed
+  `http-dispatcher.js` sets undici `bodyTimeout` and `headersTimeout` to
+  `DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300000`; `settings-manager.js` supplies
+  that default and maps disabled to 2147483647 in `sdk.js`. This identifies
+  the repo-side client idle bound, but does not yet prove it caused the four
+  historical kills or rule out the proxy/server. A controlled forced- and
+  non-forced-compaction reproduction remains open.
+- **Resolved by narrowing, 2026-08-19, for `quality-gate.ts` and
+  `cross-model-review.ts` specifically: corrective nudges can't interrupt an
+  active tool-call loop.** (Originally logged 2026-08-18.) Both extensions
+  used to send a corrective nudge via `deliverAs: "followUp"`, which
+  (confirmed from `pi-agent-core` source) only drains once a turn produces
+  zero tool calls — `deliverAs: "steer"` drains after every turn instead. A
+  model stuck calling tools every turn (as the third `go/lru-cache` rerun's
+  model did, for 130+ turns) held any queued `followUp` correction forever,
+  exactly when a correction was needed most. Rather than switch to
+  `"steer"` (a real design/validation question of its own — checking for
+  side effects like injecting mid a tool-call batch), both extensions had
+  their in-band correction removed entirely: they still verify/review every
+  materially distinct diff, but a flagged/failing result is now pure
+  reporting in the trace, not an injected message. `progress-stall-guard.ts`'s
+  own nudge (still default-disabled) and `goal-gate.ts`'s three `followUp`
+  sites (deliberately untouched — it exists for unattended builds with no
+  human to engage mid-run) still have the identical exposure and remain
+  open. See `pi-harness-history.md`'s 2026-08-19 "decouple nudging from
+  review" entry.
 - **`quality-gate.ts` / `cross-model-review.ts` corrective follow-up — fixed
   2026-08-18, not yet live-validated**: three confirmed occurrences (two
   `pi -p` sessions at 9 and 30 turns, plus a 2026-08-17-evening
@@ -317,6 +348,14 @@ evidence-cited version of each):
   first, wrong attempt, so this shouldn't be called fully validated until
   that's seen live. Full trail, both review passes in full, in
   `pi-harness-history.md`'s 2026-08-17/18 entries.
+
+  **Superseded 2026-08-19**: this entire mechanism (`sendUserMessage`-based
+  corrective follow-up, round caps, the live-validation question above) was
+  removed from both extensions the same week it was finally confirmed
+  correct — see the "Resolved by narrowing" open item above and
+  `pi-harness-history.md`'s 2026-08-19 "decouple nudging from review"
+  entry. Kept here as the full record of what was tried and why it was hard,
+  not as a still-open question.
 - **`go/lru-cache` via the battery script vs. the earlier direct-scratch-task
   evidence**: 2026-08-17 evening, run through `run_single_pair.py` for the
   first time (previous 4/4 evidence used a different, direct scratch-task
@@ -349,11 +388,78 @@ evidence-cited version of each):
   `cross-model-review.ts`'s history, with no behavioral consequence here
   only because the diff happened to be correct. Full trace:
   `pi-harness-history.md`'s 2026-08-18 "second go/lru-cache battery-script
-  rerun" entry. **Next steps, in order:** investigate the malformed-verdict
-  root cause (Gemma response shape vs. a `cross-model-review.ts` parsing
-  regression); then a third rerun, or a task more reliable at first-attempt
-  bug triggering, to get the corrective-follow-up mechanism's first genuine
-  live confirmation.
+  rerun" entry.
+
+  **Root cause found (2026-08-18), same day.** Reproduced live: replayed
+  the exact spec/diff `requestReview` sent (surviving working-tree and
+  session-trace artifacts from the run above made this possible) directly
+  against the `:8081` Gemma route. Result: `finish_reason: "length"`,
+  `completion_tokens: 16384` — the response is genuinely truncated
+  mid-JSON, not a parsing regression or a Gemma response-shape change. The
+  schema-first `analysis` field spiraled into a long, self-correcting
+  chain-of-thought on this diff ("**Wait, I found the bug.**" recurring
+  twice) and never closed the JSON before hitting the completion's token
+  cap; `requestReview` never set an explicit `max_tokens`, leaving no
+  reserved headroom for `verdict`/`findings` once `analysis` ran long.
+  Very likely deterministic on this diff at `temperature: 0`, consistent
+  with the original 2/2. **Fix landed, telemetry-scope only** (explicit
+  user decision, not the token-budget/prompt fix): `requestReview` now
+  reads `finish_reason` and reports a new `truncated-response` reason,
+  distinct from `malformed-verdict`, whenever the parse failure coincides
+  with `finish_reason === "length"`, with the raw value carried into the
+  trace. 185 tests (extended existing coverage), typecheck clean. The
+  underlying token-budget exhaustion itself remains unfixed — a
+  `malformed-verdict`/`truncated-response` outcome on an actually-buggy
+  diff still silently fails to flag it, now just distinguishably logged.
+  Full trail: `pi-harness-history.md`'s 2026-08-18 "malformed-verdict root
+  cause found" entry.
+
+  **Token-budget exhaustion itself fixed, same day.** `requestReview` now
+  sets an explicit `max_tokens: 8192`, adds a brevity instruction to the
+  prompt (without touching the load-bearing `analysis`-before-`verdict`
+  field ordering), and retries once with an even stricter prompt if the
+  first attempt truncates. Verified two ways: the planted-bug battery
+  (`pi/evals/reviewer-battery.ts`) re-run live post-fix — **15/15
+  catches, 0/9 false positives**, unchanged from baseline — and a direct
+  replay of the exact original truncating spec/diff, which now returns
+  `outcome: "clean"` in 5.8s with no truncation or retry, versus the
+  original 202.9s/178.8s failures. 188 tests (up from 185), typecheck
+  clean. Full trail: `pi-harness-history.md`'s 2026-08-18 "token-budget
+  exhaustion fixed" entry.
+
+  **Third rerun (2026-08-18), harness arm only** (baseline for this pair
+  already solid at 48.1s/42.6s clean, so not rerun — new
+  `pi/evals/run_single_arm.py` runs one arm instead of a full pair):
+  `valid: false, passed: false, timed_out: true`, 1800s (hit the 30-min
+  default budget). The model reintroduced the exact key/value-confusion
+  eviction bug a third time; the reviewer correctly flagged it in-band
+  (6.8s, no truncation, confirming today's earlier fix holds); the model
+  then drifted into a 130+-tool-call loop rewriting a throwaway scratch
+  file (`/tmp/lru-dbg/main.go`) instead of fixing `lru.go`, still doing so
+  when the timeout killed it. **New root cause, evidenced directly from
+  `pi-output.jsonl`** (not inferred): the reviewer's correction *did* queue
+  correctly — a `queue_update` event shows it sitting in `followUp`, never
+  drained, no `agent_end` ever fired — so the `agent_end` mechanism itself
+  is now confirmed correct by direct evidence, closing that specific
+  validation gap. What's newly found is one layer up, read from
+  `pi-agent-core` source: `deliverAs: "followUp"` only drains once the
+  model's own turn produces zero tool calls — it structurally cannot
+  interrupt an active tool-calling loop, unlike `deliverAs: "steer"`, which
+  drains after every turn regardless. A model stuck in a loop (this run
+  hit the already-documented `progress-stall-guard.ts` fingerprint gap a
+  third time, live — its `sawTestThisTurn` gate never re-armed once the
+  model moved to non-test scratch commands) can hold a correct, queued
+  correction forever. Full trail: `pi-harness-history.md`'s 2026-08-18 "third
+  go/lru-cache rerun" entry.
+
+  **Resolved by narrowing, 2026-08-19, not by switching delivery mode**: the
+  originally-proposed next step (`"steer"`-based delivery) was reconsidered
+  and rejected in favor of removing in-band correction from both extensions
+  entirely — see `pi-harness-history.md`'s 2026-08-19 "decouple nudging
+  from review" entry. `progress-stall-guard.ts`'s fingerprint gap
+  (`sawTestThisTurn` never re-arming on non-test scratch commands) remains
+  open and unrelated to this resolution — its trace-only telemetry stays
+  useful as post-hoc reporting even with no nudge attached.
 - Misc smaller items (DayTrix skill placement, `findings[]` severity-aware
   retry prioritization, OS/container boundary for unattended runs): see
   history for detail.

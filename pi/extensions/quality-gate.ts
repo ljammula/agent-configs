@@ -1,3 +1,21 @@
+/**
+ * Settlement quality gate: binds passing evidence to the current diff hash
+ * and rejects truncated/shell-masked results.
+ *
+ * Deliberately does not queue a corrective follow-up on a failing check
+ * inside the live session. An earlier version did, via
+ * `sendUserMessage(..., {deliverAs:"followUp"})`; live-found 2026-08-18 (on
+ * `cross-model-review.ts`, which had the identical mechanism) that a
+ * `followUp` message is only drained once a model's turn produces zero tool
+ * calls -- it cannot interrupt a model that keeps calling tools, which is
+ * exactly when a correction is needed most. Rather than chase a
+ * loop-interrupting delivery mode, this extension's scope was narrowed
+ * instead: it verifies and reports truthfully, the harness's job is writing
+ * code and reporting an honest result, and any correction is a decision a
+ * human (or a separate pass, e.g. `/code-review`) makes after the session
+ * ends. See pi-harness-history.md's 2026-08-19 "decouple nudging from
+ * review" entry.
+ */
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lastAssistantMessageFailed } from "./lib/agent-end-guard.ts";
@@ -12,8 +30,6 @@ import {
 	verificationPipelineCanMaskFailure,
 	type VerificationEvidence,
 } from "./lib/verification.ts";
-
-const MAX_CORRECTIVE_FOLLOW_UPS = 3;
 
 function truncated(details: unknown): boolean {
 	return Boolean((details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated);
@@ -35,7 +51,6 @@ export function redactFailureOutput(output: string): string {
 export default function qualityGate(pi: ExtensionAPI): void {
 	let baseSha: string | undefined;
 	let evidence: VerificationEvidence | undefined;
-	let correctiveFollowUps = 0;
 	let settling = false;
 	const starts = new Map<string, number>();
 
@@ -96,29 +111,19 @@ export default function qualityGate(pi: ExtensionAPI): void {
 		}
 	});
 
-	// Deliberately hooked on `agent_end`, not `agent_settled`. By the time
-	// `agent_settled` fires the session is documented to no longer accept a
-	// queued continuation ("no automatic retry, compaction, or queued
-	// continuation will run" -- AgentSettledEvent's own doc comment); a
-	// `sendUserMessage(..., {deliverAs:"followUp"})` call from there doesn't
-	// queue anything, it starts a whole separate nested agent run, which is
-	// how a corrective round could go on to silently fail with zero tokens
-	// (see pi-harness-history.md's 2026-08-17/18 "quality-gate follow-up
-	// fix" entries for the live incident and the reverted first attempt).
-	// `agent_end` fires while the session is still mid-run -- the documented
-	// upstream comment on `_handlePostAgentRun` is explicit that messages
-	// queued from here get picked up by the existing continuation loop
-	// (`agent.continue()`) with no extra waiting required. `agent_end` also
-	// fires on internal retry/abort/compaction cycles, not only on a
-	// genuine "the model is done" stop -- see lastAssistantMessageFailed's
-	// own doc comment for the two live-confirmed failure modes an
-	// unfiltered handler here produces (a killed run resurrected by a
-	// fabricated corrective nudge; the whole corrective budget burned on
-	// transport retries against an unchanged diff, not a real failure).
+	// Hooked on `agent_end`, which fires while the session is still mid-run
+	// (unlike `agent_settled`, documented to fire only once no queued
+	// continuation will run) -- kept from when this handler used to queue a
+	// corrective follow-up from here, since `agent_end` also fires on
+	// internal retry/abort/compaction cycles and `lastAssistantMessageFailed`
+	// still needs to skip those (an unfiltered handler previously produced a
+	// killed run resurrected by a fabricated nudge; see that helper's own
+	// doc comment). No longer queues anything itself -- see the file-top
+	// comment for why -- this just runs the settlement check once and
+	// records the result.
 	pi.on("agent_end", async (event, ctx) => {
 		if (lastAssistantMessageFailed(event.messages)) return;
 		if (settling) return;
-		if (correctiveFollowUps >= MAX_CORRECTIVE_FOLLOW_UPS) return;
 		settling = true;
 		try {
 			const before = await snapshotDiff(pi, ctx.cwd, baseSha);
@@ -155,6 +160,11 @@ export default function qualityGate(pi: ExtensionAPI): void {
 			};
 			const passed = evidencePassesCurrentDiff(evidence, after);
 			const failureOutput = redactFailureOutput(`${result?.stdout ?? ""}\n${result?.stderr ?? ""}`);
+			// No corrective follow-up is queued on failure -- decoupled by
+			// design (see file-top comment). `failureExcerpt` is included here
+			// specifically because there is no other channel left for a human
+			// to see it after the session ends; it used to travel only in the
+			// injected message text.
 			appendHarnessTrace(pi, {
 				extension: "quality-gate",
 				diffHash: after.hash,
@@ -166,35 +176,9 @@ export default function qualityGate(pi: ExtensionAPI): void {
 					exitCode: evidence.exitCode,
 					diffChanged,
 					hadOutput: failureOutput.length > 0,
+					...(failureOutput ? { failureExcerpt: failureOutput } : {}),
 				},
 			});
-			if (passed) return;
-
-			correctiveFollowUps += 1;
-			const capHit = correctiveFollowUps >= MAX_CORRECTIVE_FOLLOW_UPS;
-			if (capHit) {
-				appendHarnessTrace(pi, {
-					extension: "quality-gate",
-					diffHash: after.hash,
-					event: "nudge",
-					outcome: "cap-hit",
-					durationMs: 0,
-					metadata: {
-						attempts: correctiveFollowUps,
-						commandHash: commandHash(command),
-						exitCode: evidence.exitCode,
-					},
-				});
-			}
-			pi.sendUserMessage(
-				`The current-diff quality gate ran \`${command}\` but did not establish passing evidence for the latest material diff ` +
-					`(attempt ${correctiveFollowUps}/${MAX_CORRECTIVE_FOLLOW_UPS}).` +
-					(diffChanged ? " The check changed the material diff, so the resulting content must be verified again." : "") +
-					(failureOutput ? `\n\nRedacted failure excerpt:\n\n${failureOutput}` : "") +
-					"\n\nInspect the failure, make the smallest fix, and rerun it." +
-					(capHit ? " The correction cap is now reached; report the remaining failure truthfully if it cannot be fixed." : ""),
-				{ deliverAs: "followUp" },
-			);
 		} catch (error) {
 			if (!isStaleContextError(error)) throw error;
 		} finally {

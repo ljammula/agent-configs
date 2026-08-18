@@ -189,6 +189,32 @@ test("matches `make verify`/`make test`/`make check`, mirroring BROAD_VERIFICATI
 	assert.equal(harness.messages.length, 1, "make verify runs should count toward the stall the same as a direct go test call");
 });
 
+test("counts repeated scratch-file runs as diagnostic activity", async (t) => {
+	process.env.PI_STALL_GUARD_NUDGE = "1";
+	t.after(() => {
+		delete process.env.PI_STALL_GUARD_NUDGE;
+	});
+
+	const harness = new ExtensionHarness();
+	progressStallGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+
+	for (let i = 0; i < 3; i += 1) {
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: `scratch-${i}`,
+			toolName: "bash",
+			input: { command: "cat > /tmp/lru-dbg/main.go <<'EOF'\npackage main\nfunc main() {}\nEOF\ngo run /tmp/lru-dbg/main.go" },
+			content: [{ type: "text", text: FAILURE_TEXT }],
+			isError: true,
+		} as any);
+		await harness.emit(nonEmptyTurnEnd());
+	}
+
+	assert.equal(harness.messages.length, 1, "the scratch-file loop should reach the same stall threshold as a test loop");
+	assert.deepEqual(harness.entries.at(-1)?.data, { sourcelessRounds: 3, sameFailure: 2, stalled: true, nudged: true });
+});
+
 // Regression test for the 2026-08-16 live finding: agent_start fires on every
 // internal auto-retry after a transient provider error, not once per
 // invocation. A naive reset-on-every-agent_start implementation wipes real

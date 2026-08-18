@@ -82,8 +82,14 @@ test("canonical check that changes the diff is inconclusive", async () => {
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
 	await harness.emit({ type: "agent_end", messages: [] } as any);
-	assert.equal(harness.messages.length, 1);
-	assert.match(String(harness.messages[0]?.content), /changed the material diff/);
+	// Decoupled 2026-08-19: a check that changes the diff it's verifying is
+	// reported as a failing trace entry, not a queued corrective follow-up
+	// (see quality-gate.ts's file-top comment). `diffChanged: true` and
+	// outcome "fail" are what a human reading the trace afterward sees.
+	assert.equal(harness.messages.length, 0);
+	const trace = harness.entries.find((entry) => (entry.data as any)?.event === "verification");
+	assert.equal((trace?.data as any)?.outcome, "fail");
+	assert.equal((trace?.data as any)?.metadata?.diffChanged, true);
 });
 
 // agent_end fires on internal retry/abort cycles too, not only on a genuine
@@ -142,24 +148,43 @@ test("green-looking masked evidence reruns the canonical check", async () => {
 	assert.equal(harness.execCalls.filter((call) => call.command === "bash").length, 1);
 });
 
-test("failed canonical checks nudge at most three times and record cap hit", async () => {
+// Decoupled 2026-08-19: no corrective follow-up is ever queued, so there is
+// no round cap to hit anymore (see quality-gate.ts's file-top comment).
+// Repeated failures against materially distinct diffs are each reported as
+// their own failing trace entry, with the redacted failure text carried in
+// `failureExcerpt` -- the only channel left for a human to see it, now that
+// nothing injects it into the session.
+test("repeated failing canonical checks never queue a message, each recorded with its failure excerpt", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-gate-"));
 	await writeFile(join(cwd, "Makefile"), "verify:\n\t@false\n");
+	let diff = "diff-0";
 	const harness = new ExtensionHarness({
 		cwd,
 		exec: ({ command, args }: ExecCall) => {
 			if (command === "git" && args[0] === "rev-parse") return result(0, "base\n");
-			if (command === "git" && args[0] === "diff") return result(0, "diff");
+			if (command === "git" && args[0] === "diff") return result(0, diff);
 			if (command === "git" && args[0] === "status") return result(0, " M app.ts\n");
-			if (command === "bash") return result(1);
+			if (command === "bash") return result(1, "FAIL: something broke");
 			return result(1);
 		},
 	});
 	qualityGate(harness.api);
 	await harness.emit({ type: "agent_start" } as any);
-	for (let i = 0; i < 5; i += 1) await harness.emit({ type: "agent_end", messages: [] } as any);
-	assert.equal(harness.messages.length, 3);
-	assert.equal(harness.entries.some((entry) => (entry.data as any)?.outcome === "cap-hit"), true);
+	for (let i = 0; i < 5; i += 1) {
+		diff = `diff-${i + 1}`;
+		await harness.emit({ type: "agent_end", messages: [] } as any);
+	}
+	assert.equal(harness.messages.length, 0, "no corrective follow-up is ever queued, no matter how many times it fails");
+	const verificationTraces = harness.entries.filter((entry) => (entry.data as any)?.event === "verification");
+	assert.equal(verificationTraces.length, 5, "every materially distinct failing diff gets its own trace entry");
+	assert.ok(
+		verificationTraces.every((entry) => (entry.data as any)?.outcome === "fail"),
+		"all five are recorded as failing",
+	);
+	assert.ok(
+		verificationTraces.every((entry) => String((entry.data as any)?.metadata?.failureExcerpt ?? "").includes("something broke")),
+		"the failure text is carried in the trace, the only remaining channel a human can read it from",
+	);
 });
 
 test("a stale extension context during tool_result does not crash the turn", async () => {
