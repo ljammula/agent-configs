@@ -39,6 +39,7 @@
 import { mkdir, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isStaleContextError } from "./lib/stale-context.ts";
 
 const MAX_UNTRACKED_FILES = 50; // bound turn_start latency in a messy repo
 const EXEC_TIMEOUT_MS = 5000;
@@ -53,35 +54,45 @@ export default function (pi: ExtensionAPI) {
 	const checkpoints = new Map<string, Checkpoint>();
 
 	pi.on("turn_start", async (_event, ctx) => {
-		const leaf = ctx.sessionManager.getLeafEntry();
-		if (!leaf) return;
+		// This handler's several awaited pi.exec() calls give a session
+		// reload/compaction/fork room to land mid-handler, which invalidates
+		// the captured ctx (see isStaleContextError's doc comment) -- observed
+		// live in the 2026-08-17 hardened-battery run (pair 7, go/notes-api).
+		// Nothing productive is left to do with a stale ctx: a fresh extension
+		// instance is already registered for the replacement session.
+		try {
+			const leaf = ctx.sessionManager.getLeafEntry();
+			if (!leaf) return;
 
-		const headResult = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
-		const baseSha = headResult && headResult.code === 0 ? headResult.stdout.trim() || undefined : undefined;
+			const headResult = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
+			const baseSha = headResult && headResult.code === 0 ? headResult.stdout.trim() || undefined : undefined;
 
-		// Pre-existing dirty tracked-file changes, if any. Non-destructive.
-		const stashResult = await pi.exec("git", ["stash", "create"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
-		const stashRef = stashResult && stashResult.code === 0 ? stashResult.stdout.trim() || undefined : undefined;
+			// Pre-existing dirty tracked-file changes, if any. Non-destructive.
+			const stashResult = await pi.exec("git", ["stash", "create"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
+			const stashRef = stashResult && stashResult.code === 0 ? stashResult.stdout.trim() || undefined : undefined;
 
-		// Untracked files: `stash create` can't see these at all. Snapshot each
-		// as a loose blob instead -- also non-destructive.
-		const untracked: { path: string; blobSha: string }[] = [];
-		const lsResult = await pi
-			.exec("git", ["ls-files", "--others", "--exclude-standard"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
-			.catch(() => undefined);
-		if (lsResult && lsResult.code === 0) {
-			const paths = lsResult.stdout.split("\n").filter(Boolean).slice(0, MAX_UNTRACKED_FILES);
-			for (const path of paths) {
-				const hashResult = await pi
-					.exec("git", ["hash-object", "-w", "--", path], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
-					.catch(() => undefined);
-				const blobSha = hashResult && hashResult.code === 0 ? hashResult.stdout.trim() : undefined;
-				if (blobSha) untracked.push({ path, blobSha });
+			// Untracked files: `stash create` can't see these at all. Snapshot each
+			// as a loose blob instead -- also non-destructive.
+			const untracked: { path: string; blobSha: string }[] = [];
+			const lsResult = await pi
+				.exec("git", ["ls-files", "--others", "--exclude-standard"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
+				.catch(() => undefined);
+			if (lsResult && lsResult.code === 0) {
+				const paths = lsResult.stdout.split("\n").filter(Boolean).slice(0, MAX_UNTRACKED_FILES);
+				for (const path of paths) {
+					const hashResult = await pi
+						.exec("git", ["hash-object", "-w", "--", path], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS })
+						.catch(() => undefined);
+					const blobSha = hashResult && hashResult.code === 0 ? hashResult.stdout.trim() : undefined;
+					if (blobSha) untracked.push({ path, blobSha });
+				}
 			}
-		}
 
-		if (baseSha || stashRef || untracked.length > 0) {
-			checkpoints.set(leaf.id, { baseSha, stashRef, untracked });
+			if (baseSha || stashRef || untracked.length > 0) {
+				checkpoints.set(leaf.id, { baseSha, stashRef, untracked });
+			}
+		} catch (error) {
+			if (!isStaleContextError(error)) throw error;
 		}
 	});
 
