@@ -194,7 +194,7 @@ entry.
 | `makefile-scaffold-nudge.ts` | Adopted, on by default | Nudges toward a canonical Makefile target. Redesigned `tool_result`/`turn_end` backstop live-confirmed: armed by a `go mod init` bash call, nudged at the next turn boundary, model acted on it. |
 | `artifact-guard.ts` | Adopted, on by default | Flags oversized/binary build artifacts. Both paths live-confirmed: `agent_settled` backstop (caught real stray binaries) and primary `tool_result` path (fired in-band on a `go build -o` command before any commit could hide the artifact). |
 | `error-leak-guard.ts` | Adopted, on by default | Flags raw error-string leaks. Redesigned `tool_result` write-scan live-confirmed (fired instantly on a planted `http.Error(w, err.Error(), ...)` leak); `agent_settled` backstop also confirmed in the same run. |
-| `goal-gate.ts` (`/goal` command) | Adopted, on by default | Session-scoped `/goal <condition>` with a literal `GOAL COMPLETE: <evidence>` marker gated on the most recent broad verification passing against the *current* diff hash (diff-hash-bound, not self-report). Live-confirmed: kickoff race fixed, false-rejection-after-nudge fixed, stall-escalation fixed and live-confirmed (real stall → escalated nudge → recovery), `session_compact` mid-goal reminder shipped but not yet live-exercised. n=7 organic single-process runs, all converged at `rounds: 0` or `1` — "many nudge rounds" behavior not yet seen from this model, treated as a real (if provisional) negative finding, not a gap. Full account, including two real production runs against `personal-budget-simplifier`, in history. |
+| `goal-gate.ts` (`/goal` command) | Adopted, on by default | Session-scoped `/goal <condition>` with a literal `GOAL COMPLETE: <evidence>` marker gated on the most recent broad verification passing against the *current* diff hash (diff-hash-bound, not self-report). Live-confirmed: kickoff race fixed, false-rejection-after-nudge fixed, stall-escalation fixed and live-confirmed (real stall → escalated nudge → recovery). n=9 organic single-process runs now (7 prior + 2 from Task 8), all converged at `rounds: 0` or `1` — "many nudge rounds" behavior still not seen from this model, a real (if provisional) negative finding, not a gap. **`session_compact` mid-goal reminder: two live forced-compaction attempts 2026-08-19 (Task 8), still not exercised, now precisely characterized rather than just "not yet tried"** — see the open item below. Full account, including two real production runs against `personal-budget-simplifier`, in history. |
 | `build_app.py` (zero-human build orchestrator) | Live-tested | Drives bounded `pi -p` corrective rounds outside chat, always writes `BUILD_REPORT.md`. `--containment` confirmed refusing exactly as documented (exit 1, no report, no round attempted). Multi-round corrective recovery: 5/5 single-round successes across every attempt so far, including three deliberate traps (a hidden runtime-only behavioral contract, a concurrency-bug class this model class sometimes misses unaided) — same shape as `goal-gate.ts`'s n=7 negative finding, not a testing gap; the `--continue` loop itself is unit-tested but still never exercised against a real failure. Non-Go stacks unexercised. |
 | `progress-stall-guard.ts` | Trace-only. Stable diagnostic signature fixed and unit-confirmed; live scratch-loop stall not yet reproduced | The signature now combines canonical diagnostic command shape (scratch heredoc bodies ignored) with a failure category (Go test name/panic/error class, existing normalized-output fallback), so varying scratch probes for one underlying test failure accumulate `sameFailure` without making all failures equivalent. The nudge path and `PI_STALL_GUARD_NUDGE`/`MAX_NUDGES_PER_RUN`/`nudges` state were removed: `followUp` cannot interrupt a tool-calling loop, matching the `cross-model-review.ts` and `quality-gate.ts` precedent. **190/190 tests pass** canonically (re-verified outside the authoring sandbox, which had hit an unrelated `tsx` IPC `listen EPERM` restriction), including a new deterministic test reproducing the exact varying-heredoc scratch-loop shape and asserting `sameFailure` now reaches 2 and `stalled` goes `true`. `npm run typecheck` clean. Two independent live `go/lru-cache` pair-7 reruns against the real model routes (2026-08-19, post-fix) were attempted to get end-to-end confirmation on an actual stall, not just the unit test: the first passed clean (model got the fix right, no diagnostic loop at all), the second failed the hidden test but the model stopped after 1-2 sourceless rounds each time rather than looping — neither reproduced the runaway scratch-file stall this fix targets, so `sameFailure`'s accumulation past the old ceiling remains unexercised by a real stall, honestly unconfirmed rather than claimed. This mirrors the task's known stochasticity (roughly half of historical pair-7 reruns stall, half don't); further reruns were not chased indefinitely to avoid false-confidence-by-persistence. Tradeoff: different bugs reported under the same Go test name and command shape can now share a signature if their output only differs in assertion details. Full trail: `pi-harness-history.md`'s 2026-08-18/19 entries. |
 | `wall-clock-budget-nudge.ts` | Adopted, on by default, live-confirmed | Warns once near 75% of an externally-supplied `PI_HARNESS_TIMEOUT_MINUTES` deadline ("land your diagnosed fix now"). Inert unless that env var is set; `local-model-bench`'s runner sets it from each task's `harness_timeout_minutes`. One bug found and fixed live (2026-08-16): `agent_start` resetting `startedAt` on every internal auto-retry, so a retried run's deadline never accumulated real elapsed time; fixed to anchor on only the true first `agent_start`. Confirmed live in trial 4: fired exactly once, at the correct point (23 of 30 minutes), zero false resets across a real run. 5 deterministic tests. |
@@ -238,22 +238,44 @@ evidence-cited version of each):
   check is blind to shell-masked pipe output the same way quality-gate used
   to be. Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 4:
   dart/sequential-runner clean-isolation rerun" entry.
-- **Background-process kills** (now four unattended `/goal` runs killed
-  mid-round, the latest two on 2026-08-12): root-caused as far as the
-  mechanism class — a client-side network-idle timeout on the primary
-  model path, same shape as an already-fixed reviewer-timeout bug — but
-  the exact enforcing code isn't traced yet. `nohup ... & disown`
-  fully-detached launch is a tested, working mitigation in the meantime,
-  not a fix for the underlying cause. New unconfirmed lead: the latest two
-  kills both happened under a deliberately aggressive compaction setting
-  (forcing frequent, longer prefills) — 2/2 correlation, not yet a
-  confirmed trigger; see `pi-harness-history.md`'s 2026-08-12 live-testing
-  entry.
+- **Background-process kills** (four unattended `/goal` runs killed
+  mid-round historically, 2026-08-12): **root cause found 2026-08-19
+  (Task 5)** — Pi's client-side HTTP idle timeout (`httpIdleTimeoutMs`,
+  default 5 minutes, resets per streamed chunk) is far tighter than the
+  local proxy's 30-minute total-request cap; a prefill/quiet gap past 5
+  minutes (plausibly worsened by aggressive compaction's longer prefills,
+  matching the earlier 2/2 correlation) can kill the client well before
+  the proxy would. `nohup ... & disown` remains the tested mitigation for
+  unattended launches. **New evidence, same day (Task 8)**: two live
+  forced-aggressive-compaction `/goal` runs with `httpIdleTimeoutMs: 0`
+  both survived cleanly — the exact reproduction recipe that killed both
+  2026-08-12 attempts produced zero kills across two more tries. n=2, not
+  proven, but the first time this recipe hasn't killed the process, and
+  exactly the change Task 5's finding predicted would help. See
+  `pi-harness-history.md`'s 2026-08-19 "Task 5" and "Task 8" entries.
 - **`session_compact` mid-goal reminder**: shipped, unit-tested, still not
-  live-exercised while a goal is active. Two dedicated attempts on
-  2026-08-12 (forcing compaction via an aggressive threshold) both hit the
-  background-kill bug above before producing a result — still open, now
-  with a specific repro lead to chase for the kill bug itself.
+  live-exercised while a goal is active — but now precisely characterized,
+  not just "not yet tried." Two live forced-compaction attempts 2026-08-19
+  (Task 8, following the two 2026-08-12 attempts that died to the
+  background-kill bug above): both survived, both converged in round 0 or
+  1, and both showed the identical shape — compaction fired only *after*
+  `agent_end`, as trailing session-close housekeeping, not inside the
+  active loop. `goal-gate.ts`'s own guard correctly no-op'd in that
+  situation (matches its unit test exactly — not a defect). Separately,
+  and now a 5-for-5 pattern across all attempts to date (3 from
+  2026-08-12, 2 from today): the raw `session_compact` extension event
+  never fires at all, even though the core `compaction_end` lifecycle
+  event does, with a real generated summary. Working hypothesis: Pi's
+  `_extensionRunner` is already torn down for a `pi -p` single-shot
+  invocation by the time this trailing post-`agent_end` compaction runs,
+  so its emission guard silently no-ops — meaning compaction needs to land
+  genuinely *inside* the active loop, not just chronologically during an
+  active goal, to ever reach extensions in `pi -p` mode at all. Concrete
+  next step: a task engineered to need several corrective rounds (this
+  model rarely needs them, per the n=9 finding above), not more
+  compaction-threshold aggressiveness — today's data shows the latter
+  doesn't address the real gap. See `pi-harness-history.md`'s 2026-08-19
+  "Task 8" entry.
 - **"Many nudge rounds" / multi-round corrective recovery endurance**:
   closed out as a negative finding for this model on tasks tried so far —
   `goal-gate.ts` n=7 (all `rounds: 0` or `1`) and now `build_app.py` n=5
@@ -281,8 +303,10 @@ evidence-cited version of each):
   with `meta.json`, `spec.md`, starter package, and hidden tests. **Live
   baseline/harness pair run 2026-08-19 (Task 7)** — see `stack-router.ts`'s
   table row above; closed.
-- **`co-change-suggest.ts` / `continuation-nudge.ts`**: both still need live
-  (non-retrospective) field validation before they clear the adoption bar.
+- **`co-change-suggest.ts` / `continuation-nudge.ts`**: resolved 2026-08-19
+  (Task 6) — see their table rows above. `co-change-suggest.ts` documented
+  as structurally untestable by the battery methodology, not adopted;
+  `continuation-nudge.ts` live-trialed and adopted.
 - **`quality-gate.ts` overhead**: the checked-in nine-pair JSON reports a
   median paired runtime overhead of 100.311% (2.0031x), with 212.6% prompt
   token overhead; the thinking-enabled hardened JSON reports 312% on the
@@ -319,6 +343,11 @@ evidence-cited version of each):
   is still required. A safe repo-controlled setting exists in Pi itself:
   `httpIdleTimeoutMs` is read by `settings-manager.js:560-562`, and `sdk.js:179-183`
   maps `0`/`disabled` to `2147483647`; no vendored-file patch is warranted.
+  **Partial live evidence added same day (Task 8)**: two forced-aggressive-
+  compaction `/goal` runs with `httpIdleTimeoutMs: 0` both survived,
+  where the identical reproduction recipe killed both 2026-08-12 attempts
+  — see the "Background-process kills" bullet above. n=2, not a controlled
+  A/B, but consistent with this mechanism.
 - **Resolved by narrowing, 2026-08-19, for `quality-gate.ts` and
   `cross-model-review.ts` specifically: corrective nudges can't interrupt an
   active tool-call loop.** (Originally logged 2026-08-18.) Both extensions

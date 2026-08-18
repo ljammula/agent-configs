@@ -4529,3 +4529,107 @@ backlog's Tasks 1-7. Artifacts:
 `/private/tmp/pi-screen-02-harness-9kndxuqv/`,
 `/private/tmp/pi-screen-03-harness-ed5colmg/` (all local temp, not
 committed).
+
+## 2026-08-19 — Task 8: two live forced-compaction `/goal` runs, both survive (unlike 2026-08-12's two kills); `session_compact` still never fires, now root-caused to a structural timing gap
+
+Same methodology as the two 2026-08-12 attempts that both died
+unexplained: `~/.pi/agent/settings.json`'s `compaction` block temporarily
+set aggressive enough to force compaction to trigger mid-session
+(`contextWindow: 49152`, so `reserveTokens: 45000` puts the trigger at
+~4152 tokens), original file backed up first and restored after (`diff`
+confirmed identical post-restore). **New this time**: `httpIdleTimeoutMs`
+also set to `0` (disabled) — Task 5's same-day root-cause finding was that
+Pi's client-side 5-minute *idle* HTTP timeout, not the proxy's 30-minute
+total cap, was the most likely killer of these exact runs; disabling it
+was the natural mitigation to test alongside the same reproduction
+methodology.
+
+**Attempt 1** (`keepRecentTokens: 2000`, workdir
+`/private/tmp/pi-task8-goal-compact-1787092125`, task: a single-package Go
+CLI task manager): **survived cleanly — `agent_settled`, not a kill**, the
+first time this exact forced-compaction methodology has ever completed
+without dying (both 2026-08-12 attempts died silently, no result either
+way). 28 turns, 6071 log lines. `pi-goal-trace` shows `{event: "complete",
+rounds: 1}` at line 6064. A real threshold-triggered compaction did fire
+(`compaction_start`/`compaction_end`, `reason: "threshold"`, a real
+generated summary) — but only at line 6068, **after** `agent_end` (line
+6067), i.e. after the goal had already completed and been cleared.
+`goal-gate.ts`'s own `if (!goal || event.willRetry) return` guard
+correctly no-op'd — matches its own existing unit test ("session_compact
+is a no-op with no active goal") exactly; not a goal-gate defect.
+
+**Attempt 2** (`keepRecentTokens` dropped further to `500`, same
+`reserveTokens`, workdir `/private/tmp/pi-task8b-goal-compact-1787093289`,
+a larger two-package Go CLI — notes + reminders — chosen to need more
+turns before convergence): **also survived cleanly.** 12 turns, 7606 log
+lines. `pi-goal-trace` shows `{event: "complete", rounds: 0}` — converged
+even faster than attempt 1. The identical structural shape recurred
+exactly: `agent_end` at line 7603, `compaction_start` at line 7604,
+`compaction_end` at 7605, `agent_settled` at 7606 — compaction again
+landed as trailing post-completion housekeeping, not mid-loop, despite
+the far more aggressive `keepRecentTokens`.
+
+**Two consistent survivals is a real, if small (n=2), positive signal for
+Task 5's `httpIdleTimeoutMs` mitigation** — the exact forced-aggressive-
+compaction methodology that killed both 2026-08-12 attempts produced zero
+kills across two more attempts today. Not proven (n=2, and the earlier
+kills' precise trigger — a long prefill gap exceeding 5 minutes — was
+never deliberately reproduced independent of compaction, so this isn't a
+controlled A/B), but it's the first time this reproduction recipe hasn't
+killed the process, and it's exactly the change Task 5's root-cause
+predicted would help.
+
+**The `session_compact` question is now more precisely characterized, not
+resolved.** `grep -c '"type":"session_compact"'` returned **0 in both
+attempts** — the raw pi-coding-agent extension event, distinct from the
+core `compaction_end` lifecycle event, never appears even though
+`compaction_end` fires with real content both times. This extends an
+already-documented 3-for-3 pattern from 2026-08-12 (see this file's
+"Update 2026-08-12 (live-testing pass...)" entry) to **5-for-5 overall**.
+New, sharper structural lead from today's two attempts, both showing the
+identical line ordering (`agent_end` → `compaction_start` →
+`compaction_end` → `agent_settled`): the compaction that actually fires in
+these runs happens **after** `agent_end`, as trailing session-close
+housekeeping, not during the active turn loop. Reading
+`pi-coding-agent`'s `agent-session.js` source (the auto-compaction
+function, `reason: "threshold"`), `session_compact`'s emission is gated on
+`if (this._extensionRunner && savedCompactionEntry)` — the working,
+not-yet-independently-confirmed hypothesis is that `_extensionRunner` is
+already torn down for a `pi -p` single-shot invocation by the time this
+trailing compaction runs post-`agent_end`, so the emit silently no-ops.
+If correct, this means landing compaction genuinely **inside** the active
+loop (before `agent_end` fires) — not just "while the goal is
+chronologically still active" — is structurally required to ever observe
+`session_compact` fire in `pi -p` mode at all, regardless of how
+aggressive the compaction thresholds are set. Both of today's tasks
+converged in round 0 or 1 (matching the same-day negative finding
+elsewhere in this file: this model rarely needs many corrective rounds
+under the hardened config), so neither ran long enough inside the active
+loop to cross the threshold before finishing — the real blocker is task
+convergence speed vs. compaction threshold, not compaction aggressiveness
+itself, which is the opposite of what both 2026-08-12 and today's attempts
+assumed going in.
+
+**Deliberately not chased further today** (per the "two attempts, no
+third" budget set going in): a task engineered to need several corrective
+rounds (e.g. deliberately requesting something the model is likely to get
+wrong first, mirroring `go/lru-cache`'s track record) would force enough
+turns inside the active loop, before `agent_end`, to actually test whether
+compaction firing *there* reaches `session_compact` — that's the concrete
+next step, not another "make compaction more aggressive" attempt, which
+today's data shows doesn't address the real gap.
+
+Verified: `~/.pi/agent/settings.json` restored from backup and diffed
+identical to the pre-trial original. `npm run typecheck` clean, `npm test`
+190/190 (no extension code touched — this task is pure live-session
+investigation). Preflight matched every other run today: Pi `0.83.0`, both
+routes reachable.
+
+Closes Task 8, the last item from the entire 2026-08-18 hardening backlog
+(Tasks 1-8). Artifacts:
+`/private/tmp/pi-task8-goal-compact-1787092125-logs/goal-session.jsonl`,
+`/private/tmp/pi-task8b-goal-compact-1787093289-logs/goal-session.jsonl`
+(both local temp, not committed); working trees at
+`/private/tmp/pi-task8-goal-compact-1787092125/` and
+`/private/tmp/pi-task8b-goal-compact-1787093289/` (both real, passing Go
+modules, also local temp, not committed).
