@@ -4844,3 +4844,150 @@ firings before adoption; this mechanism has zero), that live confirmation
 is still owed before calling the gap closed, not just the fingerprinting
 bug. A fourth rerun is the natural next step but was not run in this pass;
 this entry documents what changed and why, not a new live result.
+
+## 2026-08-19 (later still) — quality-gate reason in stall intercept, an Opus design review, and a live fourth pair-5 rerun
+
+Follows the cycle-detection entry immediately above. Two pieces of follow-on
+work, both scoped from the same design discussion: whether `quality-gate.ts`'s
+now-decoupled settlement rejection should ever redirect the model in-band
+again. Conclusion reached by reasoning, not by trying it: **no, not via
+`followUp`** -- that's the exact delivery mode already proven undeliverable to
+a model that keeps calling tools (the reason quality-gate was decoupled from
+it in the first place, and the reason `progress-stall-guard.ts`'s own
+intercept uses the synchronous `tool_result`-content-append channel instead).
+But the *diagnosis* quality-gate's shared `lib/verification.ts` already
+computes with certainty -- which specific pattern made a pipeline's exit code
+untrustworthy -- had never been surfaced to the model at all, even though
+`progress-stall-guard.ts`'s intercept fires in exactly the situation where
+that diagnosis would be most useful.
+
+**Implementation**: `explainVerificationMasking`, a reason-carrying sibling of
+`verificationPipelineCanMaskFailure` (both in `lib/verification.ts`),
+returning `{ masks, reason }` instead of a bare boolean.
+`verificationPipelineCanMaskFailure` becomes a thin wrapper over it --
+behavior-preserving by construction, confirmed both by a new consistency test
+and by an independent trace-through during the Opus review below. Five
+reasons: `negated`, `or-fallback`, `unguarded-pipe`, `trailing-command`,
+`backgrounded`. `progress-stall-guard.ts` calls the reason-carrying form once
+per diagnostic `tool_result` and folds the reason into whichever intercept
+text fires (the sameFailure-threshold one or the new cycle one), stating the
+mechanism as a fact ("the exit code being reported is the pipe's last
+command's, not the test command's") rather than a suggested fix -- preserving
+the file's existing "never guess at intent" invariant. A genuinely unmasked
+failure carries no reason and the text is byte-identical to before this
+change.
+
+**Opus design review**, following this repo's established pattern (an earlier
+Opus review preceded the intercept-action feature itself), of the full diff
+across both this change and the prior cycle-detection commit. Found the
+design sound and the `verification.ts` refactor behavior-preserving (traced
+character-for-character through the `;`/`\n` and `#`-comment branches), but
+surfaced three real issues, all fixed same day:
+
+1. **A genuine inversion in `detectsCycle`.** The shipped version checked
+   only distinct-value count (2 to `CYCLE_DISTINCT_THRESHOLD`). Repro:
+   `["a","a","a","a","a","b"]` -- five identical results plus one novel one
+   -- satisfies `distinct === 2` and fires at call 6; `["a","a","a","a","a",
+   "a"]` -- six genuinely identical results, strictly stronger evidence of a
+   stall -- doesn't fire at all until the `ACTION_SAME_FAILURE_THRESHOLDS`
+   streak mechanism's first entry (9 consecutive matches). This directly
+   contradicted the file's own stated rationale for those thresholds being
+   high ("firing content into the model's own tool result is a bigger
+   intervention than a trace entry, so it waits for much stronger evidence").
+   A single novel result mixed into an otherwise-uniform window fired *more*
+   readily than the uniform window itself. **Fixed**: `detectsCycle` now also
+   requires every distinct value in the window to repeat at least twice
+   (`Math.min(...counts.values()) >= 2`), rejecting the outlier shape while
+   still accepting true alternation and same-window rotation-like mixes.
+2. **A documented capability the code could not deliver.** The header claimed
+   cycle detection catches "small rotations (A, B, C, A, B, C)"; at
+   `CYCLE_DISTINCT_THRESHOLD = 2` a 3-state rotation has 3 distinct values and
+   can never satisfy the threshold, regardless of window size. **Fixed**:
+   docs corrected to state this as a known, explicit gap (verified false by a
+   pinned test), not a claimed capability. Widening the threshold to cover
+   rotations would also widen how little repetition each value needs
+   (worsening issue 1's territory), so left as a future revisit rather than
+   changed now.
+3. **A budget-lifetime mismatch between comments and code.** The header said
+   the cycle intercept fires "at most once per session"; the code actually
+   resets `cycleIntercepted` at the same four points `sameFailure` resets at
+   (source edit, trustworthy success, new input, true agent start) -- a
+   per-stall-*episode* budget, not the per-*session* budget `intercepts`
+   (the streak mechanism's counter) genuinely is. The code's behavior was
+   already correct and arguably the better design (two edit-separated
+   stalls each deserve their own warning); only the comments were wrong.
+   **Fixed**: comments corrected in three places, no behavior change.
+
+Two wording nits also addressed: `unguarded-pipe`'s note said "without
+`pipefail` set," which names the missing shell option -- close enough to an
+implied remedy that the review flagged it even while agreeing it doesn't
+cross the "never suggest a fix" line; reworded to describe the observable
+effect instead ("the exit code being reported is the pipe's last command's").
+And a comment in `verification.ts` claiming reason-selection follows the
+`MaskReason` type's declaration order was corrected -- it's actually decided
+by character position in the scanned command, the declaration order is
+incidental.
+
+Test suite grew from 202 to 212: the A1 inversion repro pinned both ways
+(`["a","a","a","a","a","b"]` false, and the alternating/mixed-repeat shapes
+still true), the 3-state-rotation gap pinned as false, per-episode firing
+across two edit-separated stalls, a mixed masked/genuine-failure window
+(documents that the reason note reflects only the triggering call, not the
+whole window -- a known, accepted, non-wrong gap, not fixed), and updated
+wording assertions on the two existing reason-text tests. `npm run typecheck`
+clean.
+
+**Live validation: a fourth pair-5 (`dart/sequential-runner`) rerun**, same
+seed (`20260802`), harness arm only, plain trace-only configuration (no
+`PI_STALL_GUARD_INTERCEPT` set -- this run exercises detection, not the
+intercept action). Launched via `run_single_arm.py`, with a live monitor
+watching the session JSONL's `pi-stall-trace` entries as they were written
+(Pi persists session entries incrementally to disk regardless of the
+subprocess's own stdout capture, which only materializes at process exit).
+
+The model hit a **fourth distinct loop shape**, different from all three
+prior reruns: an incrementally-widening pipe chain, `dart test --help 2>&1 |
+sed -n '<range>p' | cat -v | sed -n '1,3p' | od -c | sed -n '<range>p'`, with
+the outer `sed` range's start/end walked forward by roughly one on each call
+(`4,8` -> `4,6` -> `5,7` -> `5,9` -> `6,10` -> ... -> `12,500`). This is a
+masked pipe (multiple stages, no `pipefail`) but with output that keeps
+superficially changing as the range widens -- neither a byte-identical repeat
+nor a stable 2-state alternation, closer to a slow drift than either
+previously-seen shape.
+
+`sameFailure` climbed to 4 (some adjacent pairs produced identical `od -c`
+output as the range widened slowly), and at `sourcelessRounds: 41` the trace
+recorded `stalled: true, cycleDetected: true` -- **the first live
+`cycleDetected: true` under the fixed (post-Opus-review) algorithm**, on the
+exact fixture this whole investigation traces back to. `quality-gate.ts`
+independently and correctly recorded `outcome: "fail"` on the piped
+verification evidence, consistent with every prior rerun -- the masking
+detection itself was never in question, only whether anything could act on
+what it found.
+
+**This run was manually terminated, not left to complete or time out**: per
+an explicit operator decision going in (not to burn a fourth full 30-minute
+budget on a now well-characterized pattern), a monitor watching the session
+JSONL was armed to send `SIGTERM` after 3 cumulative `stalled: true` trace
+events. It fired at the third (`sourcelessRounds: 41`, the same call that
+produced `cycleDetected: true`). The direct child process (`pi`, a
+grandchild of the Python harness script) needed a second, explicit
+`SIGTERM` -- the first one delivered to the Python parent did not propagate
+to it within the observation window. Final record: `valid: false, passed:
+false, pi_exit: 143, timed_out: false, harness_seconds: 370.858,
+hidden_test_exit: 0, extension_errors: 0`. The `hidden_test_exit: 0` matches
+every prior pair-5 rerun exactly: the on-disk diff was already correct,
+minutes in, and the harness never got to report that because the model
+never stopped re-verifying it through an untrustworthy pipe.
+
+**What this does and doesn't prove**: real, live confirmation that the fixed
+cycle detector correctly identifies a genuine stall on a *novel* loop shape,
+not just the one that motivated it -- the detection mechanism generalizes,
+which was the open question after the third rerun. It is *not* evidence the
+opt-in intercept action helps (not enabled this run), and it is not evidence
+about what would have happened if the run had been left to its natural
+timeout -- the manual termination means this run's `valid: false` reflects
+an operator decision, not a fresh failure signature to add to the "0
+recoveries" tally. A fifth rerun with `PI_STALL_GUARD_INTERCEPT=1` is the
+natural next step to test the intercept action itself against this exact
+loop shape, not run in this pass.
