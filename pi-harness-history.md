@@ -5346,16 +5346,27 @@ candidate -- `ExtensionContext.isIdle()` misclassifying an in-flight tool
 call as idle and short-circuiting the timer's check
 (`progress-stall-guard.ts:574`) -- and ruled it out: `isIdle` is defined
 as `!this._isAgentRunActive` in pi's own `agent-session.js`, which stays
-`false` (not idle) for the full duration of an in-flight tool call. Root
-cause of why the independent `setInterval` timer didn't fire (or fired but
-didn't observe the elapsed time it should have) is **not yet found** --
-candidates not yet checked include the timer being stopped by a spurious
-`agent_end` before the true end of the run, or an uncaught exception in
-the timer's async tick silently degrading it on some later invocation
-(each tick is independent per `setInterval`, so a single failure shouldn't
-explain sustained silence, but a state corruption carried between ticks
-could). This needs live instrumentation to actually resolve, not another
-inference from trace evidence.
+`false` (not idle) for the full duration of an in-flight tool call.
+
+**Root cause found and fixed, same day.** `agent_end` fires per internal
+agent loop (retry, auto-compaction, queued continuation), not once per
+invocation -- confirmed against Pi's own SDK type docs, which distinguish
+it from `agent_settled` ("fired after an agent run has fully settled and
+no automatic retry, compaction, or queued continuation will run").
+`progress-stall-guard.ts`'s `startTimer()` was gated behind
+`seenFirstAgentStart`, so the *first* `agent_end` anywhere in a run
+permanently stopped the timer: the next `agent_start` saw
+`seenFirstAgentStart` already `true` and never called `startTimer()`
+again. Retries are common enough that this file's own header already
+documents one hitting 16 in a single run (item 2's fix, for a different
+piece of state) -- the exact same bug shape, reintroduced when the
+independent timer was added on top. Fixed by calling `startTimer()`
+unconditionally on every `agent_start` (already idempotent -- it calls
+`stopTimer()` first), keeping the state-reset gated to the true first
+start only, unchanged. Added a regression test that fails against the old
+code (verified directly by stashing the fix and re-running) and passes
+against the fix. Full detail: `progress-stall-guard.ts`'s file header,
+"Bug 5."
 
 **A planned `xhigh` follow-up (same task, same bug, per the original
 pair-7 precedent of retrying a failure at higher reasoning) was launched
@@ -5370,11 +5381,11 @@ near-certain repeat of the same non-signal.
 
 **Verdict**: pair 4's `handleList`/`handleVisit` race is fixable by the
 harness at `medium` thinking with no vendor-preset changes needed -- the
-2026-08-19 battery's pair-4 failure was not a thinking-level problem. The
-actionable follow-up is debugging why `progress-stall-guard.ts`'s
-always-on wall-clock hard backstop didn't fire on a real, unambiguous
-single-hung-bash-call stall -- not a config flip (`PI_STALL_GUARD_INTERCEPT`
-doesn't touch this code path at all) and not further reasoning-level
-tuning. Full per-pair working tree and evidence (including the 33MB
-`pi-output.jsonl` and full session trace) at
+2026-08-19 battery's pair-4 failure was not a thinking-level problem, and
+not a `PI_STALL_GUARD_INTERCEPT` config gap either. It was
+`progress-stall-guard.ts`'s always-on wall-clock hard backstop dying after
+the first internal `agent_end` of the run and never restarting -- found
+and fixed the same day, see `progress-stall-guard.ts`'s file header ("Bug
+5") and its matching regression test. Full per-pair working tree and
+evidence (including the 33MB `pi-output.jsonl` and full session trace) at
 `pi/evals/battery-results/2026-08-19-seed20260802/pair4-medium-rerun/`.

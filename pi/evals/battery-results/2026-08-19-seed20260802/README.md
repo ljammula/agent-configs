@@ -120,9 +120,17 @@ an unrelated reason.**
   backstop silently failing to fire**, not an opt-in one being left off.
   `isIdle()` misclassification was checked and ruled out (pi's
   `agent-session.js` defines it as `!_isAgentRunActive`, which stays
-  `false` throughout an in-flight tool call). Root cause not yet found —
-  see `pi-harness-history.md`'s matching entry for what's been ruled out
-  and what hasn't.
+  `false` throughout an in-flight tool call). **Root cause found and
+  fixed, same day**: `agent_end` fires per internal agent loop (retry,
+  auto-compaction, queued continuation), not once per invocation, so it
+  could stop the timer well before the run was over; `startTimer()` was
+  gated to only the true first `agent_start`, so the first such `agent_end`
+  permanently killed the timer for the rest of the session. Fixed in
+  `progress-stall-guard.ts` (`startTimer()` now runs unconditionally on
+  every `agent_start`, idempotently) with a regression test that fails
+  against the old code and passes against the fix. See
+  `pi-harness-history.md`'s matching entry and `progress-stall-guard.ts`'s
+  file header ("Bug 5") for full detail.
 
 A planned `xhigh` follow-up (same task, mirroring the pair-7 precedent)
 was launched, then deliberately killed at ~2 minutes in once the `medium`
@@ -133,9 +141,8 @@ artifact retained from that attempt.
 
 **Verdict**: pair 4's race is fixable at `medium` thinking with no vendor
 sampling-preset changes needed; the battery's pair-4 failure above was not
-a thinking-level problem. The actionable follow-up is debugging why the
-always-on wall-clock hard backstop didn't fire on a real, unambiguous
-stall — not a config flip and not further reasoning-level tuning. Full
+a thinking-level problem — it was `progress-stall-guard.ts`'s wall-clock
+hard backstop dying after the first internal `agent_end`, now fixed. Full
 working tree and evidence (including the 33MB `pi-output.jsonl` and full
 session trace) in `pair4-medium-rerun/`. Full narrative:
 `pi-harness-history.md`'s matching 2026-08-19 entry.
