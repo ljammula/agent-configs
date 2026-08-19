@@ -43,10 +43,11 @@
  * trace event; a false negative costs a killed multi-minute run, as it
  * did here.
  *
- * Ships in TRACE-ONLY mode: every fire is recorded via `appendEntry`. In-band
- * nudging was removed because `deliverAs: "followUp"` cannot interrupt a
- * model that keeps calling tools; this follows the established
- * cross-model-review.ts and quality-gate.ts precedent.
+ * Shape-specific detection remains trace-only by default. A separate,
+ * shape-agnostic wall-clock backstop is always evaluated on tool results:
+ * after the soft threshold it appends a synchronous recovery fact, and after
+ * twice that threshold it aborts the run with a distinguishable
+ * `stall-timeout` trace outcome.
  *
  * Two bugs found live 2026-08-16 re-running this exact scenario (see
  * pi-harness-validation-status.md):
@@ -273,6 +274,28 @@ const CYCLE_DISTINCT_THRESHOLD = 2;
 // goes silent rather than re-flagging every single call past the first hit.
 const ACTION_SAME_FAILURE_THRESHOLDS = [8, 25];
 
+const DEFAULT_BACKSTOP_MINUTES = 10;
+const MINUTE_MS = 60_000;
+
+export interface StallBackstopThresholds {
+	softMs: number;
+	hardMs: number;
+}
+
+export function resolveBackstopThresholds(env: NodeJS.ProcessEnv = process.env): StallBackstopThresholds {
+	const raw = Number(env.PI_STALL_GUARD_BACKSTOP_MINUTES ?? DEFAULT_BACKSTOP_MINUTES);
+	const minutes = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BACKSTOP_MINUTES;
+	return { softMs: minutes * MINUTE_MS, hardMs: minutes * MINUTE_MS * 2 };
+}
+
+function backstopMessage(kind: "soft" | "hard", elapsedMs: number): string {
+	const minutes = Math.max(1, Math.round(elapsedMs / MINUTE_MS));
+	if (kind === "hard") {
+		return `\n\n[pi-harness] No non-test source edit has occurred for about ${minutes} minutes. The run is being stopped as a confirmed stall.`;
+	}
+	return `\n\n[pi-harness] No non-test source edit has occurred for about ${minutes} minutes. This is a stall warning; change what you're doing or stop and report honestly what you have so far.`;
+}
+
 /**
  * True once `window` is full, holds between 2 and `CYCLE_DISTINCT_THRESHOLD`
  * distinct values, AND every one of those distinct values repeats at least
@@ -399,8 +422,12 @@ export default function (pi: ExtensionAPI) {
 	let cycleIntercepted = false;
 	let sawTestThisTurn = false;
 	let intercepts = 0;
+	let lastSourceEditAt = Date.now();
+	let backstopSoftFired = false;
+	let backstopHardFired = false;
 
 	const interceptEnabled = resolveInterceptEnabled();
+	const backstopThresholds = resolveBackstopThresholds();
 
 	let seenFirstAgentStart = false;
 	pi.on("agent_start", () => {
@@ -416,6 +443,9 @@ export default function (pi: ExtensionAPI) {
 		cycleIntercepted = false;
 		sawTestThisTurn = false;
 		intercepts = 0;
+		lastSourceEditAt = Date.now();
+		backstopSoftFired = false;
+		backstopHardFired = false;
 	});
 
 	// A new ask (steering message, injected message from another extension)
@@ -427,9 +457,12 @@ export default function (pi: ExtensionAPI) {
 		lastFailureCategory = undefined;
 		recentCategories = [];
 		cycleIntercepted = false;
+		lastSourceEditAt = Date.now();
+		backstopSoftFired = false;
+		backstopHardFired = false;
 	});
 
-	pi.on("tool_result", (event) => {
+	pi.on("tool_result", (event, ctx) => {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const path = (event.input as { path?: string }).path;
 			if (path && !event.isError && !isTestFile(path)) {
@@ -438,9 +471,43 @@ export default function (pi: ExtensionAPI) {
 				lastFailureCategory = undefined;
 				recentCategories = [];
 				cycleIntercepted = false;
+				lastSourceEditAt = Date.now();
+				backstopSoftFired = false;
+				backstopHardFired = false;
 			}
 			return undefined;
 		}
+
+		const elapsedMs = Date.now() - lastSourceEditAt;
+		if (!backstopHardFired && elapsedMs >= backstopThresholds.hardMs) {
+			backstopHardFired = true;
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				stallTimeout: true,
+				outcome: "stall-timeout",
+				stallElapsedMs: elapsedMs,
+			});
+			ctx.abort();
+			return {
+				content: [...event.content, { type: "text" as const, text: backstopMessage("hard", elapsedMs) }],
+			};
+		}
+		if (!backstopSoftFired && elapsedMs >= backstopThresholds.softMs) {
+			backstopSoftFired = true;
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				stallBackstop: true,
+				stallElapsedMs: elapsedMs,
+			});
+			return {
+				content: [...event.content, { type: "text" as const, text: backstopMessage("soft", elapsedMs) }],
+			};
+		}
+
 		if (event.toolName !== "bash") return undefined;
 		const command = event.input?.command;
 		if (typeof command !== "string" || !matchesDiagnosticExecution(command)) return undefined;

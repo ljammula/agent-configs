@@ -33,6 +33,11 @@ export class ExtensionHarness {
 	readonly execCalls: ExecCall[] = [];
 	readonly messages: { content: unknown; options: unknown }[] = [];
 	readonly notifications: { message: string; type: string | undefined }[] = [];
+	private abortCallCount = 0;
+
+	get abortCalls(): number {
+		return this.abortCallCount;
+	}
 	readonly handlers = new Map<EventType, Handler[]>();
 	readonly commands = new Map<string, RegisteredCommandCall["options"]>();
 	readonly tools = new Map<string, any>();
@@ -62,6 +67,9 @@ export class ExtensionHarness {
 			// Command-handler-only members (ExtensionCommandContext), stubbed here too
 			// so commands registered via registerCommand can be exercised directly.
 			waitForIdle: async () => undefined,
+			abort: () => {
+				this.abortCallCount += 1;
+			},
 		} as unknown as ExtensionContext;
 
 		this.api = {

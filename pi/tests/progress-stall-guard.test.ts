@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import progressStallGuard, { detectsCycle, fingerprintFailure, resolveInterceptEnabled } from "../extensions/progress-stall-guard.ts";
+import progressStallGuard, {
+	detectsCycle,
+	fingerprintFailure,
+	resolveBackstopThresholds,
+	resolveInterceptEnabled,
+} from "../extensions/progress-stall-guard.ts";
 import { ExtensionHarness } from "./extension-api-harness.ts";
 
 const FAILURE_TEXT = "--- FAIL: TestEvictionWithDistinctKeysAndValues (0.00s)\n    lru_test.go:95: key 10 should have been evicted\nFAIL";
@@ -63,6 +68,99 @@ test("does not inject a nudge when the stall pattern reproduces", async () => {
 	}
 
 	assert.equal(harness.messages.length, 0);
+});
+
+test("backstop thresholds default to ten minutes and a two-times hard ceiling", () => {
+	assert.deepEqual(resolveBackstopThresholds({}), { softMs: 600_000, hardMs: 1_200_000 });
+	assert.deepEqual(resolveBackstopThresholds({ PI_STALL_GUARD_BACKSTOP_MINUTES: "2.5" }), {
+		softMs: 150_000,
+		hardMs: 300_000,
+	});
+	assert.deepEqual(resolveBackstopThresholds({ PI_STALL_GUARD_BACKSTOP_MINUTES: "invalid" }), {
+		softMs: 600_000,
+		hardMs: 1_200_000,
+	});
+});
+
+test("unconditional backstop warns on non-diagnostic tool activity and then aborts", async () => {
+	const originalNow = Date.now;
+	let now = 0;
+	Date.now = () => now;
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		now = 60_000;
+		const [warning] = await harness.emit({
+			type: "tool_result",
+			toolCallId: "ls-1",
+			toolName: "bash",
+			input: { command: "git ls-files" },
+			content: [{ type: "text", text: "lib/lru.go" }],
+			isError: false,
+		} as any);
+		assert.match((warning as any).content.at(-1).text, /stall warning/);
+		assert.equal(harness.abortCalls, 0);
+
+		now = 120_000;
+		const [aborted] = await harness.emit({
+			type: "tool_result",
+			toolCallId: "ls-2",
+			toolName: "ls",
+			input: {},
+			content: [{ type: "text", text: "lib" }],
+			isError: false,
+		} as any);
+		assert.match((aborted as any).content.at(-1).text, /stall-timeout|run is being stopped/);
+		assert.equal(harness.abortCalls, 1);
+		const trace = harness.entries.at(-1)?.data as any;
+		assert.equal(trace.outcome, "stall-timeout");
+		assert.equal(trace.stallTimeout, true);
+	} finally {
+		Date.now = originalNow;
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+	}
+});
+
+test("a successful non-test source edit resets the wall-clock backstop", async () => {
+	const originalNow = Date.now;
+	let now = 0;
+	Date.now = () => now;
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		now = 60_000;
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: "edit-1",
+			toolName: "edit",
+			input: { path: "lib/lru.go" },
+			content: [],
+			isError: false,
+		} as any);
+		now = 119_999;
+		const [result] = await harness.emit({
+			type: "tool_result",
+			toolCallId: "ls-1",
+			toolName: "ls",
+			input: {},
+			content: [],
+			isError: false,
+		} as any);
+		assert.equal(result, undefined);
+		assert.equal(harness.abortCalls, 0);
+	} finally {
+		Date.now = originalNow;
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+	}
 });
 
 test("an edit to a non-test source file resets the stall counters", async () => {
