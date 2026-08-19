@@ -61,8 +61,79 @@
  *    proxy contention wiped sourcelessRounds/sameFailure 16 times, making
  *    real evidence of repeated inaction invisible. Fixed the same way as
  *    `wall-clock-budget-nudge.ts`: only the first `agent_start` resets state.
+ *
+ * Two more bugs found live 2026-08-19, both from the same `dart/sequential-
+ * runner` (pair 5) clean-isolation rerun, reproducing the stall a second
+ * time with a different shape than the first (see pi-harness-history.md's
+ * "post-backlog pair-5 rerun" entry):
+ *
+ * 3. **The same-failure signal was keyed on command shape plus failure
+ *    category, and command shape was too strict.** The model settled into
+ *    alternating between ~15 near-identical `dart test --help | grep
+ *    '<term>'` probes (different search terms, different -A/-B context
+ *    sizes) hunting for an explanation of `dart test`'s exit 79 ("No tests
+ *    were found" -- the fixture's test/ dir is legitimately empty from the
+ *    agent's side). Two of those variants alone accounted for ~2,000 of the
+ *    session's 2,375 tool calls. Every non-matching grep produced the exact
+ *    same empty output -- `failureCategory()` was already identical across
+ *    all of them -- but the combined shape+category key kept resetting
+ *    `sameFailure` on every alternation between variants, since the command
+ *    text (not just a heredoc body) genuinely differed. Command shape's
+ *    original purpose (Task 2, above) was to stop heredoc-body variation
+ *    from masking a repeated failure; it was never meant to require the
+ *    whole command to match. Fixed by dropping shape from the key entirely
+ *    -- `sameFailure` now tracks `failureCategory()` alone, which was
+ *    already invariant to exactly this kind of surface variation.
+ * 4. **A `!event.isError` diagnostic result unconditionally reset the
+ *    counters, even when the pipeline could be masking a real failure.**
+ *    This is the exact class Task 4's *first* pair-5 rerun hit (127 calls
+ *    piped through `head`, every one reporting `isError: false` because
+ *    `head`'s exit code -- not `dart test`'s -- is what the shell actually
+ *    returns without `pipefail`), already root-caused there but left
+ *    unfixed pending this revisit. `quality-gate.ts` has carried the fix for
+ *    its own settlement check since before this file existed
+ *    (`verificationPipelineCanMaskFailure`); this file just never called it.
+ *    Reused directly (generalized to take a patterns list, since this file's
+ *    TEST_EXECUTION_PATTERNS is deliberately broader than quality-gate's
+ *    BROAD_VERIFICATION_PATTERNS) rather than reimplemented. A maskable
+ *    exit-0 result is now treated as inconclusive -- neither a trustworthy
+ *    "this worked" (no reset) nor forced evidence of a specific failure
+ *    (still fingerprinted from its own output, so genuinely new output still
+ *    breaks the streak).
+ *
+ * Both fixes are detection-only and preserve the file's central invariant:
+ * still zero calls to `sendUserMessage`, ever. See ACTION below for the one
+ * new thing that changed on the response side.
+ *
+ * ACTION (new 2026-08-19, opt-in): trace-only detection means a correctly
+ * diagnosed stall still runs out the wall-clock timeout with nothing able to
+ * act on it -- exactly what happened in both pair-5 reruns even after this
+ * file's fingerprint work. `sendUserMessage(..., {deliverAs: "followUp"})`
+ * still can't help (see the file-level nudge-removal note below); it
+ * structurally cannot interrupt a model that keeps calling tools, which is
+ * the precise shape of this failure. But `tool_result` can append content to
+ * the model's *own, currently in-flight* tool call -- no new turn, no
+ * sendUserMessage, no budget -- the same channel `error-leak-guard.ts` and
+ * `artifact-guard.ts` already use to act synchronously mid-session. That
+ * sidesteps the failure mode the 2026-08-19 decoupling was actually
+ * defending against (a queued correction with nowhere to drain), because
+ * nothing is queued: the note lands in the result of the very call that
+ * tripped the threshold, which the model is about to read regardless.
+ *
+ * Deliberately narrow in what it's allowed to say: a fact about the
+ * session's own history the model may no longer be able to see (compaction
+ * can evict the earlier repeats from context entirely, so "you already
+ * tried this" may not be something the model can otherwise know), never a
+ * suggested fix -- guessing at intent and guessing wrong would just add a
+ * second red herring on top of the first. Fires at most twice per session
+ * (8 and 25 repeats of the same failure category), gated off by default
+ * behind `PI_STALL_GUARD_INTERCEPT` pending its own live-trial adoption bar,
+ * matching this repo's convention for anything not yet proven live
+ * (continuation-nudge.ts needed 3 live firings before adoption; this has
+ * one so far -- see pi-harness-history.md).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { verificationPipelineCanMaskFailure } from "./lib/verification.ts";
 
 // Deliberately broader than lib/verification.ts's BROAD_VERIFICATION_PATTERNS
 // requires a whole-suite invocation (`go test ... ./...`) because it exists
@@ -109,6 +180,16 @@ const TEST_FILE_PATTERNS = [
 const STALL_ROUNDS_THRESHOLD = 3;
 const SAME_FAILURE_THRESHOLD = 2;
 
+// Action thresholds are deliberately much higher than the trace threshold
+// above: 2 consecutive same-category results is enough to be worth recording,
+// but not enough to be confident this is a genuine stall rather than a
+// legitimate short bisection streak (see the file-level "known false-positive
+// case" note). Firing content into the model's own tool result is a bigger
+// intervention than a trace entry, so it waits for much stronger evidence.
+// Two thresholds, not a `>=` on one, so it fires exactly twice total and then
+// goes silent rather than re-flagging every single call past the first hit.
+const ACTION_SAME_FAILURE_THRESHOLDS = [8, 25];
+
 function isTestFile(path: string): boolean {
 	return TEST_FILE_PATTERNS.some((re) => re.test(path));
 }
@@ -119,6 +200,12 @@ function matchesTestExecution(command: string): boolean {
 
 function matchesDiagnosticExecution(command: string): boolean {
 	return matchesTestExecution(command) || SCRATCH_EXECUTION_PATTERNS.some((re) => re.test(command));
+}
+
+/** Opt-in, off by default -- see the file header's ACTION section. */
+export function resolveInterceptEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	const raw = env.PI_STALL_GUARD_INTERCEPT;
+	return raw === "1" || raw === "true";
 }
 
 /**
@@ -147,15 +234,12 @@ export function fingerprintFailure(text: string): string {
 	return `${tail.length}:${hash}`;
 }
 
-function diagnosticCommandShape(command: string): string {
-	// Keep the redirection target and command after it, but discard the
-	// deliberately variable scratch probe body.
-	return command
-		.replace(/<<-?\s*(['"]?)([A-Za-z_][\w-]*)\1[\s\S]*?\n\2/g, "<<HEREDOC")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
+// Deliberately keyed on failure category alone, not command shape -- see the
+// file header, "Two more bugs found live 2026-08-19," item 3. Category is
+// already invariant to the kind of surface variation (heredoc bodies, grep
+// flags, search terms) a model tries while stuck on one underlying problem;
+// adding shape back on top only reintroduces the false-negative that item 3
+// found.
 function failureCategory(text: string): string {
 	const normalized = text.replace(/\r/g, "");
 	const goTest = normalized.match(/--- FAIL:\s*([^\s(]+)/);
@@ -167,15 +251,14 @@ function failureCategory(text: string): string {
 	return `output:${fingerprintFailure(text)}`;
 }
 
-function fingerprintDiagnostic(command: string, text: string): string {
-	return `${diagnosticCommandShape(command)}|${failureCategory(text)}`;
-}
-
 export default function (pi: ExtensionAPI) {
 	let sourcelessRounds = 0;
 	let sameFailure = 0;
-	let lastDiagnosticFingerprint: string | undefined;
+	let lastFailureCategory: string | undefined;
 	let sawTestThisTurn = false;
+	let intercepts = 0;
+
+	const interceptEnabled = resolveInterceptEnabled();
 
 	let seenFirstAgentStart = false;
 	pi.on("agent_start", () => {
@@ -186,8 +269,9 @@ export default function (pi: ExtensionAPI) {
 		seenFirstAgentStart = true;
 		sourcelessRounds = 0;
 		sameFailure = 0;
-		lastDiagnosticFingerprint = undefined;
+		lastFailureCategory = undefined;
 		sawTestThisTurn = false;
+		intercepts = 0;
 	});
 
 	// A new ask (steering message, injected message from another extension)
@@ -196,7 +280,7 @@ export default function (pi: ExtensionAPI) {
 	// prior ask must not count toward this one.
 	pi.on("input", () => {
 		sameFailure = 0;
-		lastDiagnosticFingerprint = undefined;
+		lastFailureCategory = undefined;
 	});
 
 	pi.on("tool_result", (event) => {
@@ -205,7 +289,7 @@ export default function (pi: ExtensionAPI) {
 			if (path && !event.isError && !isTestFile(path)) {
 				sourcelessRounds = 0;
 				sameFailure = 0;
-				lastDiagnosticFingerprint = undefined;
+				lastFailureCategory = undefined;
 			}
 			return undefined;
 		}
@@ -214,18 +298,48 @@ export default function (pi: ExtensionAPI) {
 		if (typeof command !== "string" || !matchesDiagnosticExecution(command)) return undefined;
 
 		sawTestThisTurn = true;
-		if (!event.isError) {
+
+		// A trustworthy success -- exit 0, and not run through a pipeline that
+		// could be hiding the real exit code -- is the one case that's actually
+		// evidence of progress. See file header, "Two more bugs found live
+		// 2026-08-19," item 4: a maskable exit-0 (e.g. `dart test | head`) is
+		// NOT trustworthy and falls through to be fingerprinted like a failure
+		// instead of silently resetting the streak.
+		if (!event.isError && !verificationPipelineCanMaskFailure(command, TEST_EXECUTION_PATTERNS)) {
 			sameFailure = 0;
-			lastDiagnosticFingerprint = undefined;
+			lastFailureCategory = undefined;
 			return undefined;
 		}
+
 		const text = event.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
 			.map((c) => c.text)
 			.join("\n");
-		const fp = fingerprintDiagnostic(command, text);
-		sameFailure = fp === lastDiagnosticFingerprint ? sameFailure + 1 : 0;
-		lastDiagnosticFingerprint = fp;
+		const category = failureCategory(text);
+		sameFailure = category === lastFailureCategory ? sameFailure + 1 : 0;
+		lastFailureCategory = category;
+
+		if (
+			interceptEnabled &&
+			intercepts < ACTION_SAME_FAILURE_THRESHOLDS.length &&
+			sameFailure === ACTION_SAME_FAILURE_THRESHOLDS[intercepts]
+		) {
+			intercepts += 1;
+			pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled: true, intercepted: true });
+			return {
+				content: [
+					...event.content,
+					{
+						type: "text" as const,
+						text:
+							`\n\n[pi-harness] This command has now produced the same result ${sameFailure} times ` +
+							"in this session with no source edit in between. Earlier repeats may no longer be " +
+							"visible in your context if it's been compacted. This is not new information -- " +
+							"change what you're doing, or stop and report honestly what you have so far.",
+					},
+				],
+			};
+		}
 		return undefined;
 	});
 

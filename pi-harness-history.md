@@ -4685,3 +4685,107 @@ accepted going in, now demonstrated rather than assumed. Artifacts:
 local temp, not committed), underlying task artifact
 `/private/tmp/pi-screen-05-harness-crfd7xt5/` (session log, working tree;
 also local temp, not committed).
+
+## 2026-08-19 — two real fixes to `progress-stall-guard.ts`, an Opus-reviewed opt-in intercept action, and a third live pair-5 rerun that finds a third, harder loop shape neither fix generalizes to
+
+Prompted directly by the previous entry: since `followUp` structurally can't
+interrupt a tool-calling loop, is there anything that *can* act without
+reintroducing the three risk classes the 8/19 decoupling removed?
+
+**Design review first, before any code.** An Opus subagent reviewed the
+proposal (act synchronously via `tool_result` content, the same channel
+`error-leak-guard.ts`/`artifact-guard.ts` already use, instead of `followUp`)
+against the actual source and the three prior incidents. Verdict: the
+mechanism is sound and structurally different from what caused the three
+incidents (no new turn is ever created — the append rides an already
+in-flight tool call), but the proposal as first framed would not have fired
+on its own motivating example: `sameFailure` is keyed on command shape plus
+failure category, and the dart-help-grep loop's ~2,000 calls were near-
+identical, not byte-identical, so the shape half of the key reset the streak
+on every alternation between grep variants. Full review text preserved in
+this session's transcript, not reproduced here; recommendation was two
+stages (fix the signal first, stay trace-only; only then add the action) and
+several concrete open questions, both followed below.
+
+**Fix 1 (the signal Opus's review predicted was needed): dropped command
+shape from the `sameFailure` key, keeping failure category alone.** Category
+was already invariant to the kind of surface variation (heredoc bodies, grep
+flags, search terms) that was defeating shape matching — Task 2's original
+heredoc-stripping fix only special-cased one kind of variation instead of
+the general case. All 11 pre-existing tests pass unchanged with the shape
+requirement removed, confirming it was never load-bearing for anything the
+test suite actually exercised.
+
+**Fix 2: reused `quality-gate.ts`'s `verificationPipelineCanMaskFailure`
+instead of reimplementing it**, generalized to take a patterns list (default
+unchanged for its 4 existing call sites) so `progress-stall-guard.ts` could
+pass its own broader `TEST_EXECUTION_PATTERNS`. This is the fix for Task 4's
+*original* pair-5 shape (127 calls piped through `head`, every one reporting
+`isError: false`) — left explicitly unfixed at the time, now closed. A
+maskable exit-0 result is now inconclusive rather than a trustworthy reset.
+
+**Action (new, opt-in, off by default): `PI_STALL_GUARD_INTERCEPT`.** When
+set, appends a fact-only note (no suggested fix, an explicit `[pi-harness]`
+provenance marker per the review's false-positive-mitigation advice) into
+the model's own tool result at 8 and 25 repeats of the same failure
+category, capped at two fires per session. Never calls `sendUserMessage` —
+asserted directly in tests. Deliberately not adopted by default yet, matching
+this repo's bar for anything unproven live (`continuation-nudge.ts` needed 3
+live firings first; this has one live attempt so far, see below).
+
+7 new tests added (18 total in this file, up from 11), all passing; 197/197
+across the full suite (up from 190); `npm run typecheck` clean.
+
+**Live validation, third pair-5 attempt overall (harness arm only, same
+clean-isolation methodology, `PI_STALL_GUARD_INTERCEPT=1` set):** `valid:
+false, passed: false, timed_out: true`, 1800.019s — times out a third time.
+`hidden_test_exit: 0` a third time too. The intercept never fired
+(`sameFailure` peaked at 4, never reached the action threshold of 8).
+
+**Root cause of this attempt's specific shape, read directly from the
+session log**: the model built a real scratch Dart test package at `/tmp/dt`
+(a genuine, passing test, "All tests passed!"), then legitimately explored
+`dart test`'s CLI flags for a while (`-j1`, `-p vm`, `--total-shards`, `-n
+'.*'`, each producing meaningfully different output -- correctly not
+flagged), before settling into alternating between exactly two commands
+~132 times combined:
+
+```
+dart test test/ --name 'x' --name 'y' 2>&1 | head -3
+dart test test/ -n 'ok' -n 'zzz' 2>&1 | head -3
+```
+
+Both piped through `head` (exactly the case Fix 2 targets) and both landing
+on the same "no tests match" dead end -- but the literal filter names get
+echoed into the output text itself (`No tests match regular expression "x"
+and regular expression "y"` vs `..."ok"... "zzz"`), so `failureCategory()`'s
+output-hash fallback sees genuinely different text every time and the streak
+resets on every alternation, the same way command-shape variation used to
+defeat the pre-fix key. This is a third distinct loop shape from the same
+task across three live attempts: shell-masked pipe (Task 4's first rerun) →
+shape-sensitive alternation (Task 4's second/this-file's 2026-08-19
+"post-backlog" rerun) → argument-echoed-into-output alternation (this
+attempt). Both shipped fixes are confirmed correct for the shapes they
+target (regression tests reproduce each exactly); neither generalizes to
+this one.
+
+**Deliberately not chased with a fourth same-day live rerun.** Patching this
+specific new shape and immediately re-running would be the same "found one,
+add complexity, repeat" pattern the 8/19 decoupling was reacting against,
+just relocated to the detection side instead of the correction side. The
+real fix this points to is structurally different from both landed fixes:
+cycle detection over a trailing window (has the model bounced between a
+small, non-growing set of distinct diagnostic attempts recently, regardless
+of whether any two are byte- or category-identical) rather than consecutive-
+match fingerprinting of any kind. That's a bigger design change, deserving
+its own review pass the way the tool_result-interception idea got one, not a
+rushed fourth patch on a third consecutive 30-minute live rerun of the same
+task. Flagged as the next open item, not fixed here.
+
+Verified: `npm run typecheck` clean, `npm test` 197/197, both immediately
+before and unaffected by this live attempt (no code changed between the two
+pair-5 reruns in this entry). Artifacts:
+`/private/tmp/pi-pair5-rerun2-1787101673/` (manifest, summary,
+results.jsonl; local temp, not committed), underlying task artifact
+`/private/tmp/pi-screen-05-harness-z38nqo0m/` (session log, working tree;
+also local temp, not committed).

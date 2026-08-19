@@ -61,10 +61,18 @@ function unquotedShellSyntax(command: string): string {
 	return syntax.join("");
 }
 
-export function verificationPipelineCanMaskFailure(command: string): boolean {
+// `patterns` defaults to BROAD_VERIFICATION_PATTERNS (quality-gate.ts's own
+// settlement-evidence use). progress-stall-guard.ts passes its own, deliberately
+// broader TEST_EXECUTION_PATTERNS instead -- same shell-parsing logic, a
+// different notion of "what counts as the command under test," so the patterns
+// are parameterized rather than duplicating unquotedShellSyntax/scan below.
+export function verificationPipelineCanMaskFailure(
+	command: string,
+	patterns: RegExp[] = BROAD_VERIFICATION_PATTERNS,
+): boolean {
 	const syntax = unquotedShellSyntax(command);
 	const pipefail = PIPEFAIL_PATTERN.test(syntax);
-	const ends = BROAD_VERIFICATION_PATTERNS.flatMap((pattern) =>
+	const ends = patterns.flatMap((pattern) =>
 		[...syntax.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))].map(
 			(match) => ({ start: match.index, end: match.index + match[0].length }),
 		),

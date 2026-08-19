@@ -339,7 +339,7 @@
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="num">13</div><div class="label">Dated milestones below, spanning 18 days</div></div>
+    <div class="stat"><div class="num">14</div><div class="label">Dated milestones below, spanning 18 days</div></div>
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, paired battery</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">0→4/4</div><div class="label">Qwen3.8 replicated failure flipped to a replicated pass</div></div>
@@ -351,9 +351,9 @@
   </div>
 
   <div class="filters" role="group" aria-label="Filter by result">
-    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">13</span></button>
+    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">14</span></button>
     <button class="filter-chip" type="button" data-filter="pass" aria-pressed="false">Passed <span class="n">4</span></button>
-    <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">5</span></button>
+    <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">6</span></button>
     <button class="filter-chip" type="button" data-filter="fail" aria-pressed="false">Failure <span class="n">1</span></button>
     <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">3</span></button>
   </div>
@@ -818,6 +818,49 @@
           </p>
           <div class="links">
             <a href="pi-harness-history.md">Post-backlog pair-5 rerun entry</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-fixed" data-result="fixed">
+        <div class="date">Aug 19</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-19</div>
+          <div class="badges"><span class="badge fixed">2 detection bugs fixed</span><span class="badge fixed">Opus-reviewed action added</span><span class="badge open">3rd loop shape, 0/3 recovered</span></div>
+          <h3>Two real fixes land, tested and Opus-reviewed — a third live rerun finds a third loop shape neither one generalizes to</h3>
+          <p>
+            Design-reviewed by an Opus subagent before any code: the proposed
+            fix (act synchronously via <code>tool_result</code> content, the
+            same channel <code>error-leak-guard.ts</code>/<code>artifact-guard.ts</code>
+            already use) was judged structurally sound and distinct from the
+            8/19 decoupling's three incidents — but the review caught that the
+            proposal as first framed wouldn't have fired on its own motivating
+            example, because <code>sameFailure</code>'s command-shape half
+            reset on every alternation between near-identical grep probes.
+            Two real fixes followed: dropped shape from the key (category
+            alone was already invariant to the surface variation that mattered),
+            and reused <code>quality-gate.ts</code>'s masked-pipe guard instead
+            of reimplementing it, closing Task 4's original unfixed gap. An
+            opt-in, off-by-default intercept action shipped alongside, capped
+            at two fact-only fires per session, never calling
+            <code>sendUserMessage</code>. 197/197 tests pass, typecheck clean.
+          </p>
+          <p>
+            A third live pair-5 rerun, with both fixes and the intercept live,
+            still timed out at 1800s a third time. The model hit a
+            <b>third distinct loop shape</b>: two commands whose literal filter
+            arguments got echoed into the output text itself, defeating even
+            the category-based fingerprint the same way shape once did.
+            <code>sameFailure</code> peaked at 4 again, never reaching the
+            action threshold. Deliberately not chased with a fourth same-day
+            rerun — the real fix now looks like cycle detection over a
+            trailing window, not another fingerprinting refinement, and that's
+            a bigger design change earning its own review rather than a rushed
+            patch on attempt three.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">"Two real fixes... a third live pair-5 rerun" entry</a>
           </div>
         </div>
       </div>
