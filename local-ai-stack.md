@@ -1,19 +1,21 @@
 # Local ai-stack model endpoints
 
-Operational snapshot: 2026-08-16. The owning runtime repository is
-`~/code/ai-stack`; its `PLAN.md`, launchers, exact package locks, and
-`mlx-vlm-rollback.md` remain the source of truth. This file records only the
-facts agent configurations need when choosing or calling a local route.
+Operational snapshot: 2026-08-19 (`ai-stack` pulled to `953c540`). The owning
+runtime repository is `~/code/ai-stack`; its `PLAN.md`, launchers, exact
+package locks, and `mlx-vlm-rollback.md` remain the source of truth. This
+file records only the facts agent configurations need when choosing or
+calling a local route.
 
 ## Resident routes
 
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
-| `:8080/v1` | `Qwen3.8-27B-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 3 | 51.1 tok/s median, short context (see table below) |
+| `:8080/v1` | `Qwen3.8-27B-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 5 (`--draft-block-size 5`, confirmed live via `ps aux` on `kannasmacstudio.lan`) | 54.51 tok/s median, short context, synthetic (see tables below) -- but see "Live vs. synthetic decode gap" for what real tool-calling turns actually get |
 | `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05, 118.1 tok/s solo short-context (2026-08-16) |
 
 **`:8080` decode throughput by context length (2026-08-16, 3 runs/point,
-median shown, 256-token forced completions, temp 0, solo load):**
+median shown, 256-token forced completions, temp 0, solo load, MTP block 3
+-- the default at the time):**
 
 | Prompt tokens | Median decode tok/s |
 |---:|---:|
@@ -28,6 +30,60 @@ regression. Roughly in line with the prior Qwen3.6-27B-8bit checkpoint's
 short-context numbers (43.2-43.4 tok/s in ai-stack's PLAN.md at similar
 settings, 51.76-51.95 tok/s under this repo's own methodology), so 3.8 is not
 obviously slower or faster than 3.6 at the low end.
+
+**MTP block-size re-sweep, 2026-08-19** (`ai-stack`'s
+`qwen38-throughput-tuning-2026-08-19.md`; block 3 had carried over unexamined
+from the 3.6 checkpoint's own A/B rather than being independently retuned for
+3.8): `scripts/bench_qwen38_mtp_blocksize.sh` against the live `:8080` proxy
+route, 3 runs/size, temp 0, fixed 400-token completion, short context.
+
+| block size | median decode tok/s |
+|---:|---:|
+| 2 | 36.69 |
+| 3 (old default) | 46.55 |
+| 4 | 53.39 |
+| **5 (new default)** | **54.51** |
+| 6 | 44.04 |
+| 7 | 37.75 |
+
+Clean peak at 5 (+17% over the old default of 3). **Adopted** in
+`scripts/serve_qwen38.sh` and confirmed live on the running process (not
+just committed to the repo) -- see "Live vs. synthetic decode gap" below for
+why this real win doesn't fully explain live turn latency.
+
+## Live vs. synthetic decode gap (found 2026-08-19, unconfirmed root cause)
+
+Pulled real per-request numbers straight from `kannasmacstudio.lan`'s
+`qwen38.log` (`Request completed: ... prompt_tokens=... generated_tokens=...
+decode=... tok/s`) for a live `pi -p` harness session (46 requests,
+`dart/sequential-runner` pair-5 stall-backstop smoke test, 2026-08-19
+13:13-13:18 local), confirmed running with MTP block 5 already live
+(`--draft-block-size 5` in the process args, started 10:25AM, well before
+this session):
+
+| | context | generated tokens/call | decode tok/s |
+|---|---:|---:|---:|
+| Synthetic benchmark (block 5, forced 400-tok, short context) | short | 400 | 54.51 median |
+| Live tool-calling session (block 5, real turns) | ~11,025 median (6,277-14,415) | 77 median (33-310) | **23.1 median** (20.7-35.6) |
+
+Prefill is not the bottleneck -- APC is working as designed (`cached_tokens`
+on each request is almost exactly the prior request's `prompt_tokens`, so
+only ~100 genuinely new tokens get prefilled per turn; median prefill
+12,616 tok/s). Not a concurrency artifact either: every request in the
+window shows `in_flight=0`.
+
+So live decode throughput is under half the current synthetic benchmark at
+comparable context, even after the block-5 retune. Leading unconfirmed
+hypothesis: the benchmark forces long (256-400 token) completions while
+real tool-calling turns are short and bursty (33-310, median 77) --
+per-request ramp-up cost (and, if MTP's speculative-token acceptance rate is
+lower on structured tool-call-formatted output than on free text) amortizes
+worse over a short burst. **Not yet verified** -- would need a live
+benchmark using actual short, tool-call-shaped completions (not another
+forced-256/400-token run) to isolate generation-length amortization from an
+acceptance-rate effect. Flagged here rather than chased further; whoever
+picks this up next should design that benchmark before assuming either
+explanation.
 
 **Concurrent-load check (2026-08-16, short context, both routes fired
 simultaneously, 2 runs):** `:8080` dropped from 51.1 to ~46.2 tok/s median
