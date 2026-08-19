@@ -72,6 +72,13 @@ launch, only the extension/skill/prompt-template stack is stripped — mirrors
 off` is that script's determinism pin for the battery, not part of "no
 harness," so `pi-baseline` doesn't force it).
 
+`pi-no-extensions` is the same idea but keeps skills and prompt-templates —
+it strips only the always-on extension hooks, not the model's ability to
+opt into a documented procedure (`/skill:feature-dev`, `/before-done`) if it
+chooses to. Extensions and skills are genuinely different mechanisms (see
+"Adding a new customization" above); this isn't a `run_screening.py` arm, so
+nothing depends on its flag set matching anything exactly.
+
 The one thing this depends on: **`AI_STACK_HOST` must already be exported
 in your shell** (it is, via `~/.zshrc`) before `pi` starts, since both the
 `ai-stack-local` and `cross-model-review.ts`'s reviewer call read it once from
