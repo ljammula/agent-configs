@@ -53,6 +53,7 @@ class ScheduledPair:
     pair: int
     task: str
     arm_order: tuple[str, str]
+    thinking_level: str
 
 
 def run(
@@ -74,7 +75,17 @@ def run(
     )
 
 
-def schedule(seed: int, skip_tasks: frozenset[str] = frozenset()) -> list[ScheduledPair]:
+def schedule(
+    seed: int,
+    skip_tasks: frozenset[str] = frozenset(),
+    default_thinking: str = "off",
+    thinking_overrides: dict[int, str] | None = None,
+) -> list[ScheduledPair]:
+    # thinking_overrides keys are 1-based pair numbers, assigned *after*
+    # shuffling below -- they target a position in the randomized schedule
+    # (e.g. "rerun pair 7 with reasoning on"), not a task name, since the
+    # same task can appear at a different pair number every seed.
+    overrides = thinking_overrides or {}
     rng = random.Random(seed)
     tasks = TASKS.copy()
     rng.shuffle(tasks)
@@ -86,7 +97,8 @@ def schedule(seed: int, skip_tasks: frozenset[str] = frozenset()) -> list[Schedu
         if task in skip_tasks:
             continue
         index += 1
-        result.append(ScheduledPair(index, task, (arms[0], arms[1])))
+        thinking_level = overrides.get(index, default_thinking)
+        result.append(ScheduledPair(index, task, (arms[0], arms[1]), thinking_level))
     return result
 
 
@@ -204,11 +216,8 @@ def model_identity(host: str) -> dict[str, Any]:
 
 
 def arm_command(
-    arm: str, prompt: str, session_dir: Path, baseline_agent_dir: Path
+    arm: str, prompt: str, session_dir: Path, baseline_agent_dir: Path, thinking_level: str
 ) -> tuple[list[str], Path]:
-    # Overridable for one-off thinking-level trials (e.g. PI_EVAL_THINKING_LEVEL=xhigh);
-    # defaults to "off", matching every prior battery run's behavior unchanged.
-    thinking_level = os.environ.get("PI_EVAL_THINKING_LEVEL", "off")
     common = [
         "pi",
         "--print",
@@ -276,7 +285,9 @@ def execute_arm(
         if result.returncode != 0:
             raise RuntimeError(f"fixture git setup failed: {result.stderr.strip()}")
 
-    command, agent_dir = arm_command(arm, prompt, session_dir, baseline_agent_dir)
+    command, agent_dir = arm_command(
+        arm, prompt, session_dir, baseline_agent_dir, pair.thinking_level
+    )
     env = os.environ.copy()
     env["AI_STACK_HOST"] = host
     env["PI_CODING_AGENT_DIR"] = str(agent_dir)
@@ -351,11 +362,12 @@ def execute_arm(
         and setup_exit == 0
     )
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "pair": pair.pair,
         "task": pair.task,
         "arm": arm,
         "arm_position": pair.arm_order.index(arm) + 1,
+        "thinking_level": pair.thinking_level,
         "valid": valid,
         "passed": valid and tested.returncode == 0,
         "pi_exit": pi_result.returncode,
@@ -398,6 +410,23 @@ def main() -> int:
         "runtime config so they aren't re-run from scratch.",
     )
     parser.add_argument(
+        "--thinking",
+        default=os.environ.get("PI_EVAL_THINKING_LEVEL", "off"),
+        help="default --thinking level applied to every scheduled pair unless "
+        "overridden with --thinking-override; defaults to $PI_EVAL_THINKING_LEVEL "
+        'or "off", matching every prior battery run\'s behavior unchanged.',
+    )
+    parser.add_argument(
+        "--thinking-override",
+        action="append",
+        default=[],
+        metavar="PAIR=LEVEL",
+        help="per-pair thinking-level override, e.g. --thinking-override 7=xhigh; "
+        "repeatable. PAIR is the 1-based position in the randomized schedule "
+        "(printed by --plan), not a task name -- the same task lands at a "
+        "different pair number under a different seed.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="continue an interrupted run found at --output: reuse its manifest's "
@@ -418,6 +447,14 @@ def main() -> int:
         prior_manifest = json.loads(manifest_path.read_text())
         args.seed = prior_manifest["seed"]
         skip_tasks = frozenset(prior_manifest.get("skipped_tasks", []))
+        # Ignore --thinking/--thinking-override too on resume, same rationale
+        # as seed/skip-task above: a resumed run must reproduce the exact
+        # schedule (including per-pair thinking levels) it started with.
+        args.thinking = prior_manifest.get("default_thinking", args.thinking)
+        thinking_overrides = {
+            int(pair): level
+            for pair, level in prior_manifest.get("thinking_overrides", {}).items()
+        }
         if results_path.exists():
             for line in results_path.read_text().splitlines():
                 record = json.loads(line)
@@ -428,8 +465,16 @@ def main() -> int:
         unknown_skips = skip_tasks - frozenset(TASKS)
         if unknown_skips:
             parser.error(f"--skip-task not in TASKS: {sorted(unknown_skips)}")
+        thinking_overrides = {}
+        for entry in args.thinking_override:
+            pair_str, _, level = entry.partition("=")
+            if not level or not pair_str.isdigit():
+                parser.error(
+                    f"--thinking-override must be PAIR=LEVEL with PAIR numeric, got {entry!r}"
+                )
+            thinking_overrides[int(pair_str)] = level
 
-    planned = schedule(args.seed, skip_tasks)
+    planned = schedule(args.seed, skip_tasks, args.thinking, thinking_overrides)
     if args.max_pairs is None:
         args.max_pairs = len(planned)
     if args.plan:
@@ -459,10 +504,12 @@ def main() -> int:
         baseline_agent_dir = artifact_root / "baseline-agent"
         baseline_agent_dir.mkdir()
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "seed": args.seed,
             "skipped_tasks": sorted(skip_tasks),
+            "default_thinking": args.thinking,
+            "thinking_overrides": {str(k): v for k, v in thinking_overrides.items()},
             "pi_version": pi_version,
             "agent_configs_revision": git_revision(REPO_ROOT),
             "model": MODEL,
@@ -480,7 +527,8 @@ def main() -> int:
     records: list[dict[str, Any]] = []
     for pair in planned[: args.max_pairs]:
         print(
-            f"PAIR={pair.pair}/{len(planned)} TASK={pair.task} ORDER={','.join(pair.arm_order)}",
+            f"PAIR={pair.pair}/{len(planned)} TASK={pair.task} ORDER={','.join(pair.arm_order)} "
+            f"THINKING={pair.thinking_level}",
             flush=True,
         )
         for arm in pair.arm_order:
