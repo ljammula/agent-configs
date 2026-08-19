@@ -206,6 +206,9 @@ def model_identity(host: str) -> dict[str, Any]:
 def arm_command(
     arm: str, prompt: str, session_dir: Path, baseline_agent_dir: Path
 ) -> tuple[list[str], Path]:
+    # Overridable for one-off thinking-level trials (e.g. PI_EVAL_THINKING_LEVEL=xhigh);
+    # defaults to "off", matching every prior battery run's behavior unchanged.
+    thinking_level = os.environ.get("PI_EVAL_THINKING_LEVEL", "off")
     common = [
         "pi",
         "--print",
@@ -216,7 +219,7 @@ def arm_command(
         "--model",
         MODEL,
         "--thinking",
-        "off",
+        thinking_level,
         "--session-dir",
         str(session_dir),
     ]

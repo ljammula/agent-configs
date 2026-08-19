@@ -1,0 +1,9 @@
+name: sequential_runner
+description: A small package for running async tasks one at a time.
+publish_to: "none"
+environment:
+  sdk: ^3.0.0
+
+dev_dependencies:
+  test: ^1.25.0
+  coverage: ^1.7.0

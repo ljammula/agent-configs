@@ -1,0 +1,76 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "blocked"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 9,
+    "task": "go/notes-api",
+    "arm": "harness",
+    "arm_position": 1,
+    "valid": true,
+    "passed": true,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 0,
+    "harness_seconds": 167.245,
+    "usage": {
+      "prompt_tokens": 86260,
+      "completion_tokens": 3400,
+      "assistant_messages": 10,
+      "tool_calls": 11
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "blocked"
+      }
+    ],
+    "diff_stat": "notesapi.go | 111 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++---\n 1 file changed, 107 insertions(+), 4 deletions(-)",
+    "artifact_dir": "/private/tmp/pi-screen-09-harness-smnc5xbz"
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 4,
+    "task": "go-flutter/bookmarks-app",
+    "arm": "harness",
+    "arm_position": 2,
+    "valid": true,
+    "passed": false,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 1,
+    "harness_seconds": 2554.391,
+    "usage": {
+      "prompt_tokens": 2401812,
+      "completion_tokens": 15991,
+      "assistant_messages": 87,
+      "tool_calls": 91
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "artifact-guard",
+        "event": "nudge",
+        "outcome": "flagged"
+      },
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      }
+    ],
+    "diff_stat": "client/lib/bookmarks_client.dart     | 101 ++++++++++++++---\n client/lib/bookmarks_view_model.dart |  52 +++++++--\n server/bookmarksapi.go               | 206 ++++++++++++++++++++++++++++++++++-\n 3 files changed, 329 insertions(+), 30 deletions(-)",
+    "artifact_dir": "/private/tmp/pi-screen-04-harness-c4lw5w9z"
+  }
+}

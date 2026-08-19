@@ -1,0 +1,111 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "flagged"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "blocked"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "blocked"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 7,
+    "task": "go/lru-cache",
+    "arm": "harness",
+    "arm_position": 2,
+    "valid": true,
+    "passed": false,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 1,
+    "harness_seconds": 272.441,
+    "usage": {
+      "prompt_tokens": 291016,
+      "completion_tokens": 4084,
+      "assistant_messages": 27,
+      "tool_calls": 26
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "flagged"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "blocked"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "blocked"
+      }
+    ],
+    "diff_stat": "lru.go | 37 +++++++++++++++++++++++--------------\n 1 file changed, 23 insertions(+), 14 deletions(-)",
+    "artifact_dir": "/private/tmp/pi-screen-07-harness-xgsqlpow"
+  }
+}

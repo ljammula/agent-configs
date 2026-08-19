@@ -5193,3 +5193,93 @@ Artifacts (local temp, not committed): session JSONL at
 `/private/tmp/pi-screen-05-harness-r02f6i2d/session/`, working tree at
 `/private/tmp/pi-screen-05-harness-r02f6i2d/work/`, summary at
 `/private/tmp/pi-arm-20260819T181312Z-wn7i89yf/summary.json`.
+
+## 2026-08-19: Recommendation-2 intercept-recovery trial -- null result
+
+Attempted to exercise Recommendation 2 from the 2026-08-19 hardening plan
+(validate `PI_STALL_GUARD_INTERCEPT`'s actual recovery rate, never observed
+live because `sameFailure` has never reached the production
+`ACTION_SAME_FAILURE_THRESHOLDS` of `[8, 25]` before a run either finished
+or timed out). Per the plan's own sequencing note, thresholds were
+temporarily lowered in `progress-stall-guard.ts` to `[3, 6]` (marked with an
+inline `TEMPORARY` comment tied to this trial) and `PI_STALL_GUARD_INTERCEPT=1`
+set, then `dart/sequential-runner` pair 5 (seed `20260802`) reran via
+`run_single_arm.py --arm harness`, default 10/20-minute backstop left in
+place as a safety net.
+
+**Result: the run never stalled.** `valid: true, passed: true,
+harness_seconds: 158.509`, 17 assistant messages / 18 tool calls, 2
+quality-gate failures self-corrected, reviewer went `blocked` twice then
+`clean`. Zero stall-guard trace events of any kind -- `sameFailure` never
+even reached the low-severity trace threshold, let alone the lowered `[3,
+6]` action threshold. This is a **null result, not a negative one**: it
+says nothing about whether the intercept recovers a genuine stall, only
+that this particular attempt didn't produce a stall to test it against --
+consistent with this fixture's already-documented run-to-run variance
+(compare the fourth pair-5 rerun's clean 110.4s pass with no timeout,
+above, against the five earlier reruns that all stalled the same way).
+
+Threshold change reverted immediately after
+(`ACTION_SAME_FAILURE_THRESHOLDS` back to `[8, 25]`), confirmed via
+`npm run typecheck` and a clean `git diff --stat`. Recommendation 2 remains
+open -- the intercept's recovery rate is still unobserved live. Next
+attempt at this validation should either retry the same lowered-threshold
+setup enough times to catch a stall on this flaky fixture, or target a
+fixture/seed combination known to stall more reliably.
+
+## 2026-08-19: full 9-pair harness-arm battery, seed 20260802
+
+Ran `run_single_arm.py --arm harness` across every pair in the seeded
+schedule (baseline not rerun), default stall-guard settings throughout.
+**7/9 passed.** Full per-pair table, timings, and root-cause detail
+committed at `pi/evals/battery-results/2026-08-19-seed20260802/README.md`
+alongside each pair's working tree and full session evidence. Headline
+findings:
+
+- **Pair 4 (`go-flutter/bookmarks-app`) failed on a real data race**:
+  `handleList` appends live `*Bookmark` pointers into its response slice
+  and releases the lock before sorting/JSON-encoding, while `handleVisit`
+  mutates the same struct under lock elsewhere -- missed by 2 reviewer
+  `clean` verdicts and 8 local quality-gate rounds (neither runs `-race`),
+  caught only by the hidden test's `-race`-enabled `TestConcurrentVisits`.
+- **Pair 7 (`go/lru-cache`) failed on a fresh recurrence of the
+  already-documented key/value-confusion eviction bug**
+  (`delete(c.data, oldest.Value.(int))` instead of the key) -- reviewer
+  correctly flagged it twice but the model settled without applying the
+  fix.
+- No stall-guard backstop or intercept activity anywhere in the battery --
+  both failures are correctness gaps the model shipped past its own
+  verification, not harness-mechanism issues.
+
+**Follow-up same day: pair 7 rerun 2x with reasoning enabled.** Pair 7's
+failure ran under this eval script's hardcoded `--thinking off`
+(`run_screening.py`'s `arm_command()`, unchanged by every prior battery
+run including this one). Added a `PI_EVAL_THINKING_LEVEL` env override
+(defaults to `"off"`, no behavior change for any existing call site) and
+reran pair 7's harness arm twice with `PI_EVAL_THINKING_LEVEL=xhigh`:
+**2/2 clean passes**, both landing on the correct `delete(c.data, oldest)`
+fix, 358.5s and 436.7s (vs. 272.4s reasoning-off). Reasoning was confirmed
+genuinely active, not a silent no-op from Qwen3.8 having no
+`thinkingLevelMap` entry in Pi's model registry (open upstream gap,
+[pi#6951](https://github.com/earendil-works/pi/issues/6951)): both trials'
+session traces contain real `{"type": "thinking", ...}` content blocks (16
+blocks / 13,714 chars in trial 1) versus zero in the reasoning-off run.
+Because of that missing level map, `xhigh` and any other non-`off` value
+produce an identical `enable_thinking: true` request -- this trial
+establishes reasoning-on-vs-off, not a genuine dial between
+medium/high/xhigh; the model reasons at its own chat-template default
+(documented as `xhigh` by Qwen3.8 itself) whenever thinking is enabled at
+all.
+
+n=2 doesn't rule out this task's known run-to-run variance (pair 8, also
+reasoning-off, passed clean in the same battery) as an alternative
+explanation, but 2/2 clean on the exact bug class this investigation keeps
+flagging is consistent with the earlier `defaultThinkingLevel` finding
+(0/4 -> 3/3 on this same task after enabling thinking) recorded above.
+Cost: ~1.3-1.6x wall time per run, and much larger session traces (29-37MB
+vs. ~3MB) from streamed per-token thinking deltas. **Open, not resolved by
+this trial**: whether `run_screening.py`'s hardcoded `--thinking off`
+should change for future battery runs -- left as-is; the override is
+opt-in only. Full detail, both trial dirs' code and evidence:
+`pi/evals/battery-results/2026-08-19-seed20260802/README.md`'s "Follow-up"
+section.

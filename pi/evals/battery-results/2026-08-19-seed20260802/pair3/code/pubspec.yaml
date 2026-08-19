@@ -1,0 +1,9 @@
+name: task_manager
+description: A small task manager library.
+publish_to: "none"
+environment:
+  sdk: ^3.0.0
+
+dev_dependencies:
+  test: ^1.25.0
+  coverage: ^1.7.0

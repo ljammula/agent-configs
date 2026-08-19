@@ -1,0 +1,8 @@
+00:00 +0: loading test/task_manager_test.dart
+00:00 +0: test/task_manager_test.dart: addTask assigns unique ids and stores tasks
+00:00 +1: test/task_manager_test.dart: completeTask marks a task done and throws for unknown id
+00:00 +2: test/task_manager_test.dart: removeTask removes a task and throws for unknown id
+00:00 +3: test/task_manager_test.dart: listTasks filters by done status and preserves insertion order
+00:00 +4: test/task_manager_test.dart: sortedByPriority sorts descending and is stable for ties
+00:00 +5: test/task_manager_test.dart: toJson/loadJson round-trip preserves tasks and order
+00:00 +6: All tests passed!

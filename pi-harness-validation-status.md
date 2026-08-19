@@ -608,3 +608,15 @@ instead of running out the 30-minute budget or needing a manually-armed
 `SIGTERM` monitor — the backstop turned a previously-unrecoverable stall
 into a clean, bounded, correctly-recorded outcome. Full account in
 `pi-harness-history.md`.
+
+**Recommendation 2 (intercept recovery rate) attempted, 2026-08-19, null
+result.** Same pair-5 fixture, thresholds temporarily lowered to `[3, 6]`
+and `PI_STALL_GUARD_INTERCEPT=1` set to force a fire without waiting on
+Recommendation 1's infra. The run never stalled (`valid: true, passed:
+true`, 158.5s, zero stall-guard trace events) — this fixture's known
+run-to-run variance means the attempt tested nothing about intercept
+recovery, not that recovery failed. Threshold change reverted immediately
+after. **Still open**: whether the synchronous intercept actually gets a
+stalled model unstuck has never been observed live. Full account in
+`pi-harness-history.md`'s 2026-08-19 "Recommendation-2 intercept-recovery
+trial" entry.

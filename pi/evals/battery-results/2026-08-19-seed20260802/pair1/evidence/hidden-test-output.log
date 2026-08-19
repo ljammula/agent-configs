@@ -1,0 +1,30 @@
+ok  	notesapi	1.362s
+00:00 +0: loading test/notes_client_test.dart
+00:00 +0: test/notes_client_test.dart: Note fromJson / toJson roundtrip
+00:00 +1: test/notes_test.dart: Note fromJson/toJson round trip
+00:00 +2: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +3: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +4: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +5: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +6: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +7: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +8: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +9: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +10: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +11: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +12: test/notes_client_test.dart: NotesApiClient createNote returns the created note
+00:00 +13: test/notes_client_test.dart: NotesApiClient createNote defaults
+00:00 +14: test/notes_client_test.dart: NotesApiClient createNote validation error throws NotesApiException
+00:00 +15: test/notes_client_test.dart: NotesApiClient listNotes returns notes sorted by priority then id
+00:00 +16: test/notes_client_test.dart: NotesApiClient getNote returns the note, throws on missing id
+00:00 +17: test/notes_client_test.dart: NotesApiClient updateNote patches only given fields
+00:00 +18: test/notes_client_test.dart: NotesApiClient deleteNote removes the note, throws on missing id
+00:00 +19: test/notes_client_test.dart: NotesViewModel notes is empty before load
+00:00 +20: test/notes_client_test.dart: NotesViewModel load populates notes sorted by priority
+00:00 +21: test/notes_client_test.dart: NotesViewModel addNote appends and is reflected in notes
+00:00 +22: test/notes_client_test.dart: NotesViewModel pending and completed partition notes
+00:00 +23: test/notes_client_test.dart: NotesViewModel toggleDone flips done via the API
+00:00 +24: test/notes_client_test.dart: NotesViewModel toggleDone on unknown id throws without an API call
+00:00 +25: test/notes_client_test.dart: NotesViewModel remove deletes the note
+00:00 +26: test/notes_client_test.dart: NotesViewModel remove on unknown id throws without an API call
+00:00 +27: All tests passed!

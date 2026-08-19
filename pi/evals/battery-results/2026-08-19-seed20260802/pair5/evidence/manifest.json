@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-19T20:08:15.793768+00:00",
+  "seed": 20260802,
+  "pair": 5,
+  "task": "dart/sequential-runner",
+  "arm_order": [
+    "harness",
+    "baseline"
+  ],
+  "arm_run": "harness",
+  "pi_version": "0.83.0",
+  "agent_configs_revision": "747ede8905ba90c737d5fdbc0711f1ef81800da0",
+  "model_endpoint": "http://kannasmacstudio.lan:8080/v1",
+  "model_response": {
+    "object": "list",
+    "data": [
+      {
+        "id": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
+        "object": "model",
+        "created": 1787170094
+      }
+    ]
+  },
+  "reviewer_route": {
+    "base_url": "http://kannasmacstudio.lan:8081/v1",
+    "model": "/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit",
+    "response": {
+      "object": "list",
+      "data": [
+        {
+          "id": "/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit",
+          "object": "model",
+          "created": 1787170094
+        }
+      ]
+    }
+  },
+  "installed_runtime": {
+    "agent_dir": "/Users/kanna/.pi/agent",
+    "global_instructions_sha256": "b7a383a593dd693b383e0b4ecbe07a7dacef64e42a434a212f7550771cfdf96a",
+    "settings_sha256": "1444c0b0a7a4679bcd5d8ac2943539b05a0d5753cdc89bf004d4e47d64ff085f",
+    "skills_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "extensions": {
+      "ai-stack-local.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/ai-stack-local.ts",
+        "sha256": "51d15d06c896427fd8fe35896afa4cfc7ce22d0b2fac2814dd0158fc39bfbb52"
+      },
+      "artifact-guard.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/artifact-guard.ts",
+        "sha256": "15f29bb9dfac996470267f58e0ecd827285813a9df407505650a8c21e746f490"
+      },
+      "continuation-nudge.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/continuation-nudge.ts",
+        "sha256": "248ad6035724df4e2580b92b3181c9bba1fa7eff9c7bee1829d0dcbfa576d0c2"
+      },
+      "cross-model-review.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/cross-model-review.ts",
+        "sha256": "b0ff951bec751f70da31ac62cb7df8358a4170e3933d3420033c46e83ba8993f"
+      },
+      "error-leak-guard.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/error-leak-guard.ts",
+        "sha256": "2d8c9d5fa5db3ec944781f8e17e5acc73ab45ec4f167ad075ca003b83ad6d412"
+      },
+      "external-effects.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/external-effects.ts",
+        "sha256": "ec152fb32cdb94a44361fb4844147a181b23735f7a45f3dc641248e99cf3dbb6"
+      },
+      "format-on-edit.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/format-on-edit.ts",
+        "sha256": "389c97bad24c45c11c677e1643c983a6bea6edf384ffee44271c539040a0d0a8"
+      },
+      "full-stack-dev.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/full-stack-dev.ts",
+        "sha256": "4d5317e1399271522903d16f262c37880cf02bcac5d38c36de8fea86106ed5c4"
+      },
+      "git-checkpoint.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/git-checkpoint.ts",
+        "sha256": "529d9842fd95a1ed9d64b6ab6b11933fcd17303b969ee4c4b3b7ed978befd915"
+      },
+      "git-safety.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/git-safety.ts",
+        "sha256": "bf37c1b2a6fa3ccc8150ce865f525703cf90836c64927ffde063fc0251023b4f"
+      },
+      "goal-gate.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/goal-gate.ts",
+        "sha256": "17605aa00126038315ec856ea8eac630dc454483c93d2152f620a609e3f09ff2"
+      },
+      "karpathy-guardrail.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/karpathy-guardrail.ts",
+        "sha256": "753b874d367b2f856169b53137fe4e2af795cf21a5ab26fa2a7c81851bf34e59"
+      },
+      "lib": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/lib",
+        "sha256": "078e4e07f5a46d82e918fd2c5d6e0ac51d0734015a4a050837af21f172a14baf"
+      },
+      "makefile-scaffold-nudge.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/makefile-scaffold-nudge.ts",
+        "sha256": "9f6f2921c16e45b52f9f9a1f2635bb61d720cd28bde62a89d51963430cb2ca91"
+      },
+      "new-project-scaffold.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/new-project-scaffold.ts",
+        "sha256": "27b0484582f929e92203350ca4acfaf078e2ea354d17cd62d85f63a2d80f24c9"
+      },
+      "notify.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/notify.ts",
+        "sha256": "d0462ab2a15541f702d4c2c1320e8e41b46006379e9f47a3c341f0027300654d"
+      },
+      "plan-mode": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/plan-mode",
+        "sha256": "35a0af875fd19be085c1b615c9b013cb6f162c764c1325adeb4a3f86f69c9389"
+      },
+      "progress-stall-guard.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/progress-stall-guard.ts",
+        "sha256": "d56003376f397798dd01e75be9561976707acca75b2c63b410be7bcfb390cae1"
+      },
+      "project-skill-overlay.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/project-skill-overlay.ts",
+        "sha256": "f34c92720e1911c4cc4dd301d0eb65db07020e8e22914b1510ad85e014f6f985"
+      },
+      "protected-paths.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/protected-paths.ts",
+        "sha256": "c62fd74920c958737f11146a41c1a0c3a724aa2d64b69c2fa9d070d169c5d3f3"
+      },
+      "quality-gate.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/quality-gate.ts",
+        "sha256": "a2ec72f656fdd39e206654067f6dec9d7dae9ea5fe763b713ea557615e6fd0d0"
+      },
+      "rtk-rewrite.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/rtk-rewrite.ts",
+        "sha256": "27745a5c805a31fb9a6cfb1f4b30f66196469b0a861e03edb9be8623d177591f"
+      },
+      "searxng-search.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/searxng-search.ts",
+        "sha256": "fd5f4ece6bb8069af76d565d00436c635f0ae6ea0a8aaa7ae2514d7a7d781eec"
+      },
+      "stack-router.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/stack-router.ts",
+        "sha256": "53055cd4b5f2a230e885f6ed9f67a5da1c9a8b3f7ca72a229c58efa432c54861"
+      },
+      "stack-skill-overlay.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/stack-skill-overlay.ts",
+        "sha256": "e7c79afa81d71ee90bc89f5c858b51d35ff1c647ea5c679fed38170146456264"
+      },
+      "todo.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/todo.ts",
+        "sha256": "7bf986d059eab0f3cbcf5667f6f73445908ac7bce79a823e89c776749d1d70c8"
+      },
+      "wall-clock-budget-nudge.ts": {
+        "resolved_path": "/Users/kanna/code/agent-configs/pi/extensions/wall-clock-budget-nudge.ts",
+        "sha256": "e6ad46bf0359c156819d25f5c2fed572d9f7d0cc42bbe1558b44fe7c2250ba0b"
+      }
+    }
+  }
+}

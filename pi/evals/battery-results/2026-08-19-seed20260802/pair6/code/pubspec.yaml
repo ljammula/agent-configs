@@ -1,0 +1,11 @@
+name: notes_app
+description: A small CLI notes/task app.
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ^3.0.0
+
+dev_dependencies:
+  test: ^1.24.0
+  coverage: ^1.7.0

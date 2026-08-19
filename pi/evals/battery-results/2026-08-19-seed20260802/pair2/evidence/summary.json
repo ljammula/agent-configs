@@ -1,0 +1,106 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 2,
+    "task": "go/notes-api",
+    "arm": "harness",
+    "arm_position": 2,
+    "valid": true,
+    "passed": true,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 0,
+    "harness_seconds": 238.495,
+    "usage": {
+      "prompt_tokens": 241609,
+      "completion_tokens": 4795,
+      "assistant_messages": 24,
+      "tool_calls": 22
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      }
+    ],
+    "diff_stat": "notesapi.go | 108 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++---\n 1 file changed, 104 insertions(+), 4 deletions(-)",
+    "artifact_dir": "/private/tmp/pi-screen-02-harness-yh3ees2o"
+  }
+}

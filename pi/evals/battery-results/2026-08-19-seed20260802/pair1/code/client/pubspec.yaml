@@ -1,0 +1,13 @@
+name: notes_client
+description: Data/service layer for the notes app, talking to the Go notes API.
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  http: ^1.2.0
+
+dev_dependencies:
+  test: ^1.24.0
+  coverage: ^1.7.0

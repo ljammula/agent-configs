@@ -1,0 +1,16 @@
+00:00 +0: loading test/notes_app_test.dart
+00:00 +0: test/notes_app_test.dart: (setUpAll)
+00:01 +0: test/notes_app_test.dart: add prints the assigned id and persists the note
+00:01 +1: test/notes_app_test.dart: add defaults body to empty string and priority to 3
+00:01 +2: test/notes_app_test.dart: list shows all notes in id order with status and priority
+00:01 +3: test/notes_app_test.dart: list with no notes prints "No notes"
+00:01 +4: test/notes_app_test.dart: list filters by status
+00:01 +5: test/notes_app_test.dart: done marks a note complete and reports unknown ids
+00:01 +6: test/notes_app_test.dart: remove deletes a note and reports unknown ids
+00:02 +7: test/notes_app_test.dart: ids are never reused after removal
+00:02 +8: test/notes_app_test.dart: search is case-insensitive and matches title or body
+00:02 +9: test/notes_app_test.dart: sorted orders by priority then id, stable for ties
+00:02 +10: test/notes_app_test.dart: sorted with no notes prints "No notes"
+00:02 +11: test/notes_app_test.dart: full workflow persists state across separate invocations
+00:02 +12: test/notes_app_test.dart: (tearDownAll)
+00:02 +12: All tests passed!

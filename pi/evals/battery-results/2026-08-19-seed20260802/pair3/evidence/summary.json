@@ -1,0 +1,89 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 3,
+    "task": "dart/task-manager",
+    "arm": "harness",
+    "arm_position": 1,
+    "valid": true,
+    "passed": true,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 0,
+    "harness_seconds": 276.004,
+    "usage": {
+      "prompt_tokens": 331466,
+      "completion_tokens": 4583,
+      "assistant_messages": 28,
+      "tool_calls": 26
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      }
+    ],
+    "diff_stat": "lib/task_manager.dart | 75 +++++++++++++++++++++++++++++++++++++++++++++------\n 1 file changed, 67 insertions(+), 8 deletions(-)",
+    "artifact_dir": "/private/tmp/pi-screen-03-harness-w4c2hgq7"
+  }
+}

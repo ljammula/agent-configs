@@ -1,0 +1,80 @@
+{
+  "runs_attempted": 1,
+  "valid_runs": 1,
+  "invalid_runs": 0,
+  "reviewer_traces": [
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "clean"
+    },
+    {
+      "arm": "harness",
+      "extension": "reviewer",
+      "event": "review",
+      "outcome": "blocked"
+    }
+  ],
+  "record": {
+    "schema_version": 1,
+    "pair": 1,
+    "task": "go-flutter/notes-app",
+    "arm": "harness",
+    "arm_position": 1,
+    "valid": true,
+    "passed": true,
+    "pi_exit": 0,
+    "timed_out": false,
+    "connection_error": false,
+    "extension_errors": 0,
+    "setup_exit": 0,
+    "hidden_test_exit": 0,
+    "harness_seconds": 1322.609,
+    "usage": {
+      "prompt_tokens": 1201061,
+      "completion_tokens": 14027,
+      "assistant_messages": 51,
+      "tool_calls": 56
+    },
+    "trace_events": [
+      {
+        "extension": "stack-router",
+        "event": "routing",
+        "outcome": "pass"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "fail"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "clean"
+      },
+      {
+        "extension": "reviewer",
+        "event": "review",
+        "outcome": "blocked"
+      },
+      {
+        "extension": "quality-gate",
+        "event": "verification",
+        "outcome": "pass"
+      }
+    ],
+    "diff_stat": "",
+    "artifact_dir": "/private/tmp/pi-screen-01-harness-2h0kn876"
+  }
+}

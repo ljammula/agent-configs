@@ -1,0 +1,5 @@
+--- FAIL: TestEvictsByKeyNotValue (0.00s)
+    lru_test.go:69: expected key 10 to be evicted
+FAIL
+FAIL	lru	0.242s
+FAIL
