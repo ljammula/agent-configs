@@ -105,6 +105,44 @@
  * still zero calls to `sendUserMessage`, ever. See ACTION below for the one
  * new thing that changed on the response side.
  *
+ * A third live pair-5 rerun (2026-08-19, same day, with both fixes above
+ * plus the intercept action already live) found a *third* loop shape neither
+ * fix generalizes to: the model alternated between two `dart test ... |
+ * head` commands whose literal filter arguments (e.g. `'x'`/`'y'` vs.
+ * `'ok'`/`'zzz'`) get echoed into the output text itself. `failureCategory()`
+ * falls through to `fingerprintFailure()`'s output hash for output that
+ * doesn't match a recognized go-test/panic/error shape, so genuinely
+ * different echoed text produces a genuinely different fingerprint on every
+ * alternation -- `sameFailure` peaked at 4 and reset each time it flipped
+ * back, never sustaining a streak long enough to reach either the trace
+ * threshold's spirit or the action thresholds. This is not a fingerprinting
+ * bug like items 3-4 above (the fingerprints are honestly different, each
+ * one individually); it's that *consecutive-match* streak tracking is the
+ * wrong shape of detector for *alternation* between a small, non-growing set
+ * of distinct attempts.
+ *
+ * CYCLE DETECTION (new, trace-only like the base heuristic): a trailing
+ * window of the last `CYCLE_WINDOW` diagnostic fingerprints is kept
+ * alongside `sameFailure`. If that window is full and contains at most
+ * `CYCLE_DISTINCT_THRESHOLD` distinct fingerprints, the model is cycling
+ * among a small closed set of attempts even though no single fingerprint
+ * repeated consecutively enough to trip `sameFailure`. This catches
+ * alternation (A, B, A, B, A, B) and small rotations (A, B, C, A, B, C) that
+ * consecutive-match streaks structurally cannot, without reintroducing the
+ * "whole command must match" over-strictness item 3 already found and
+ * reverted -- the window only ever compares fingerprints already computed by
+ * the existing `failureCategory()` logic, nothing new to get wrong. It
+ * shares every existing reset point with `sameFailure` (source edit,
+ * trustworthy success, new input, true agent restart) since a cycle
+ * spanning across one of those events wouldn't be the same stall. When
+ * `interceptEnabled`, a detected cycle fires the same synchronous
+ * `tool_result`-content-append action `ACTION_SAME_FAILURE_THRESHOLDS`
+ * fires for a consecutive streak, but independently and at most once per
+ * session -- alternation doesn't get a second and third warning at 8 and 25
+ * repeats the way a true streak does, since "distinct count stayed low over
+ * the window" doesn't sharpen the same way a growing consecutive count does.
+ *
+
  * ACTION (new 2026-08-19, opt-in): trace-only detection means a correctly
  * diagnosed stall still runs out the wall-clock timeout with nothing able to
  * act on it -- exactly what happened in both pair-5 reruns even after this
@@ -180,6 +218,16 @@ const TEST_FILE_PATTERNS = [
 const STALL_ROUNDS_THRESHOLD = 3;
 const SAME_FAILURE_THRESHOLD = 2;
 
+// See file header, "CYCLE DETECTION": a trailing window over the same
+// per-attempt fingerprints failureCategory() already computes, checked for
+// low cardinality instead of consecutive repetition. 6 gives room for a
+// 2-state alternation (A,B,A,B,A,B) or a 3-state rotation (A,B,C,A,B,C) to
+// fill the window at least once each before firing; 2 distinct values is
+// deliberately permissive -- 3+ distinct fingerprints in a 6-window reads as
+// varied exploration, not a closed loop, and should not fire.
+const CYCLE_WINDOW = 6;
+const CYCLE_DISTINCT_THRESHOLD = 2;
+
 // Action thresholds are deliberately much higher than the trace threshold
 // above: 2 consecutive same-category results is enough to be worth recording,
 // but not enough to be confident this is a genuine stall rather than a
@@ -189,6 +237,22 @@ const SAME_FAILURE_THRESHOLD = 2;
 // Two thresholds, not a `>=` on one, so it fires exactly twice total and then
 // goes silent rather than re-flagging every single call past the first hit.
 const ACTION_SAME_FAILURE_THRESHOLDS = [8, 25];
+
+/**
+ * True once `window` is full and holds between 2 and
+ * `CYCLE_DISTINCT_THRESHOLD` distinct values -- alternation or a small
+ * rotation. Deliberately excludes a single repeated value (distinct === 1):
+ * that shape is pure consecutive repetition, already `sameFailure`'s job and
+ * reported with its own escalating thresholds -- this detector would only
+ * preempt it with a flatter, less informative signal. A full window with
+ * more distinct values than the threshold reads as varied exploration, not
+ * a closed loop, and also does not count.
+ */
+export function detectsCycle(window: readonly string[]): boolean {
+	if (window.length < CYCLE_WINDOW) return false;
+	const distinct = new Set(window).size;
+	return distinct >= 2 && distinct <= CYCLE_DISTINCT_THRESHOLD;
+}
 
 function isTestFile(path: string): boolean {
 	return TEST_FILE_PATTERNS.some((re) => re.test(path));
@@ -255,6 +319,8 @@ export default function (pi: ExtensionAPI) {
 	let sourcelessRounds = 0;
 	let sameFailure = 0;
 	let lastFailureCategory: string | undefined;
+	let recentCategories: string[] = [];
+	let cycleIntercepted = false;
 	let sawTestThisTurn = false;
 	let intercepts = 0;
 
@@ -270,6 +336,8 @@ export default function (pi: ExtensionAPI) {
 		sourcelessRounds = 0;
 		sameFailure = 0;
 		lastFailureCategory = undefined;
+		recentCategories = [];
+		cycleIntercepted = false;
 		sawTestThisTurn = false;
 		intercepts = 0;
 	});
@@ -281,6 +349,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("input", () => {
 		sameFailure = 0;
 		lastFailureCategory = undefined;
+		recentCategories = [];
+		cycleIntercepted = false;
 	});
 
 	pi.on("tool_result", (event) => {
@@ -290,6 +360,8 @@ export default function (pi: ExtensionAPI) {
 				sourcelessRounds = 0;
 				sameFailure = 0;
 				lastFailureCategory = undefined;
+				recentCategories = [];
+				cycleIntercepted = false;
 			}
 			return undefined;
 		}
@@ -308,6 +380,8 @@ export default function (pi: ExtensionAPI) {
 		if (!event.isError && !verificationPipelineCanMaskFailure(command, TEST_EXECUTION_PATTERNS)) {
 			sameFailure = 0;
 			lastFailureCategory = undefined;
+			recentCategories = [];
+			cycleIntercepted = false;
 			return undefined;
 		}
 
@@ -318,6 +392,14 @@ export default function (pi: ExtensionAPI) {
 		const category = failureCategory(text);
 		sameFailure = category === lastFailureCategory ? sameFailure + 1 : 0;
 		lastFailureCategory = category;
+
+		// See file header, "CYCLE DETECTION": tracked alongside, not instead of,
+		// sameFailure -- alternation between a small closed set of attempts
+		// never sustains a consecutive-match streak, but does fill this window
+		// with few distinct values.
+		recentCategories.push(category);
+		if (recentCategories.length > CYCLE_WINDOW) recentCategories.shift();
+		const cycling = detectsCycle(recentCategories);
 
 		if (
 			interceptEnabled &&
@@ -340,6 +422,28 @@ export default function (pi: ExtensionAPI) {
 				],
 			};
 		}
+
+		// Independent of the consecutive-streak action above: fires at most once
+		// per session, since a low-cardinality window doesn't sharpen with more
+		// repeats the way a growing consecutive count does.
+		if (interceptEnabled && !cycleIntercepted && cycling) {
+			cycleIntercepted = true;
+			pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled: true, cycleDetected: true, intercepted: true });
+			return {
+				content: [
+					...event.content,
+					{
+						type: "text" as const,
+						text:
+							`\n\n[pi-harness] The last ${recentCategories.length} diagnostic commands in this session ` +
+							"have alternated between only a couple of distinct results, with no source edit in " +
+							"between. Earlier repeats may no longer be visible in your context if it's been " +
+							"compacted. This is not new information -- change what you're doing, or stop and " +
+							"report honestly what you have so far.",
+					},
+				],
+			};
+		}
 		return undefined;
 	});
 
@@ -349,7 +453,12 @@ export default function (pi: ExtensionAPI) {
 		sawTestThisTurn = false;
 		sourcelessRounds += 1;
 
-		const stalled = sourcelessRounds >= STALL_ROUNDS_THRESHOLD && sameFailure >= SAME_FAILURE_THRESHOLD;
-		pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled });
+		const cycling = detectsCycle(recentCategories);
+		const stalled =
+			sourcelessRounds >= STALL_ROUNDS_THRESHOLD && (sameFailure >= SAME_FAILURE_THRESHOLD || cycling);
+		pi.appendEntry(
+			"pi-stall-trace",
+			cycling ? { sourcelessRounds, sameFailure, stalled, cycleDetected: true } : { sourcelessRounds, sameFailure, stalled },
+		);
 	});
 }

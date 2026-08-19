@@ -4789,3 +4789,58 @@ pair-5 reruns in this entry). Artifacts:
 results.jsonl; local temp, not committed), underlying task artifact
 `/private/tmp/pi-screen-05-harness-z38nqo0m/` (session log, working tree;
 also local temp, not committed).
+
+## 2026-08-19 (later) — cycle detection added to progress-stall-guard.ts, closing the third loop shape in source and under test
+
+Follows directly from the entry above ("two real fixes... a third live
+pair-5 rerun that finds a third, harder loop shape neither fix generalizes
+to"), which flagged the needed fix as structurally different from both
+landed ones: cycle detection over a trailing window rather than any form of
+consecutive-match fingerprinting.
+
+Implemented in `pi/extensions/progress-stall-guard.ts`: a trailing window
+(`CYCLE_WINDOW = 6`) of the same per-attempt fingerprints `failureCategory()`
+already computes for `sameFailure` is checked each diagnostic `tool_result`
+for low cardinality — full window, 2 to `CYCLE_DISTINCT_THRESHOLD` (also 2)
+distinct values. Deliberately excludes a window of a single repeated value:
+that shape is pure consecutive repetition, already `sameFailure`'s job with
+its own escalating action thresholds (8, 25) — letting the cycle detector
+also fire on it would just preempt that mechanism with a flatter, less
+informative signal, confirmed by writing the case as an explicit unit test
+(`detectsCycle` on six identical entries is `false`) before wiring the
+extension's own state machine, to catch exactly this collision before it
+could show up as a live regression.
+
+The window shares every existing reset point `sameFailure` already had:
+first `agent_start`, `input`, a non-test source edit, and a trustworthy
+(non-maskable) exit-0 success — a cycle spanning across one of those
+wouldn't be the same stall. Wired into two places: the `turn_end` trace now
+carries `cycleDetected: true` and factors into `stalled` alongside the
+existing `sameFailure` condition; and, only when `PI_STALL_GUARD_INTERCEPT`
+is opted in, a detected cycle fires the same synchronous
+`tool_result`-content-append action the sameFailure thresholds use — but
+independently, and at most once per session, since a low-cardinality window
+doesn't sharpen with more repeats the way a growing consecutive count does
+(no equivalent of the 8-then-25 two-stage escalation).
+
+A regression test replays the exact argument-echoed-into-output alternation
+from the third live pair-5 rerun (two distinct outputs differing only in
+their echoed literal filter arguments, alternating for 6 calls): confirms
+`sameFailure` stays at 0 the whole time (matching the live observation that
+it never sustained a streak) while `cycleDetected` becomes `true` and
+`stalled` becomes `true` once the window fills — the exact gap the live
+rerun exposed. A second test confirms the intercept action fires exactly
+once on the call that fills the window, is not preempted by or double-fired
+alongside the sameFailure-threshold action, and never calls
+`sendUserMessage`. 202/202 tests pass (up from 197), `npm run typecheck`
+clean.
+
+**Deliberately not claimed as adopted or as closing the pair-5 gap**: this
+is a source-level and unit-test-level fix for the specific mechanism the
+third rerun's failure required (alternation between a small closed set of
+outputs). It has not been exercised against a fourth live pair-5 attempt —
+per this repo's own established bar (`continuation-nudge.ts` needed 3 live
+firings before adoption; this mechanism has zero), that live confirmation
+is still owed before calling the gap closed, not just the fingerprinting
+bug. A fourth rerun is the natural next step but was not run in this pass;
+this entry documents what changed and why, not a new live result.

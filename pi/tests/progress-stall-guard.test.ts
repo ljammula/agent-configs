@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import progressStallGuard, { fingerprintFailure, resolveInterceptEnabled } from "../extensions/progress-stall-guard.ts";
+import progressStallGuard, { detectsCycle, fingerprintFailure, resolveInterceptEnabled } from "../extensions/progress-stall-guard.ts";
 import { ExtensionHarness } from "./extension-api-harness.ts";
 
 const FAILURE_TEXT = "--- FAIL: TestEvictionWithDistinctKeysAndValues (0.00s)\n    lru_test.go:95: key 10 should have been evicted\nFAIL";
@@ -332,6 +332,83 @@ test("a maskable exit-0 pipeline does not reset the streak, unlike a genuinely t
 	const trace = harness.entries.at(-1)?.data as any;
 	assert.equal(trace.sameFailure, 2, "masked exit-0 results must not be treated as a trustworthy reset");
 	assert.equal(trace.stalled, true);
+});
+
+test("detectsCycle: a 2-state alternation fills the window as a cycle", () => {
+	assert.equal(detectsCycle(["a", "b", "a", "b", "a"]), false, "window not full yet (5 < 6)");
+	assert.equal(detectsCycle(["a", "b", "a", "b", "a", "b"]), true);
+});
+
+test("detectsCycle: a single repeated value is NOT a cycle -- that's sameFailure's job", () => {
+	assert.equal(detectsCycle(["a", "a", "a", "a", "a", "a"]), false);
+});
+
+test("detectsCycle: more distinct values than the threshold reads as varied exploration, not a cycle", () => {
+	assert.equal(detectsCycle(["a", "b", "c", "d", "e", "f"]), false);
+});
+
+// Regression test for the third live pair-5 (dart/sequential-runner) rerun,
+// 2026-08-19: the model alternated between two `dart test ... | head`
+// commands whose literal filter arguments got echoed into the output text
+// itself, so failureCategory()'s output-hash fallback saw genuinely
+// different text on every alternation and sameFailure never sustained a
+// streak. See file header, "CYCLE DETECTION."
+test("alternating between two distinct diagnostic outputs is caught as a cycle even though sameFailure never accumulates", async () => {
+	const harness = new ExtensionHarness();
+	progressStallGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+
+	const outputs = [
+		"Command exited with code 1\nfilter: 'x'/'y' matched nothing",
+		"Command exited with code 1\nfilter: 'ok'/'zzz' matched nothing",
+	];
+	for (let i = 0; i < 6; i += 1) {
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: `alt-${i}`,
+			toolName: "bash",
+			input: { command: "dart test 2>&1 | head -20" },
+			content: [{ type: "text", text: outputs[i % 2] }],
+			isError: true,
+		} as any);
+		await harness.emit(nonEmptyTurnEnd());
+	}
+
+	const trace = harness.entries.at(-1)?.data as any;
+	assert.equal(trace.sameFailure, 0, "strict alternation never sustains a consecutive-match streak");
+	assert.equal(trace.cycleDetected, true, "the trailing window catches the alternation sameFailure misses");
+	assert.equal(trace.stalled, true);
+});
+
+test("the cycle intercept fires once, independent of and not preempted by the sameFailure action thresholds", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		const outputs = [
+			"Command exited with code 1\nfilter: 'x'/'y' matched nothing",
+			"Command exited with code 1\nfilter: 'ok'/'zzz' matched nothing",
+		];
+		const fires: number[] = [];
+		for (let i = 0; i < 12; i += 1) {
+			const [outcome] = await harness.emit({
+				type: "tool_result",
+				toolCallId: `alt-${i}`,
+				toolName: "bash",
+				input: { command: "dart test 2>&1 | head -20" },
+				content: [{ type: "text", text: outputs[i % 2] }],
+				isError: true,
+			} as any);
+			if (outcome !== undefined) fires.push(i);
+		}
+
+		assert.deepEqual(fires, [5], "fires once, the call that fills the window (index 5 = the 6th call)");
+		assert.equal(harness.messages.length, 0, "action goes through tool_result content, never sendUserMessage");
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
 });
 
 test("resolveInterceptEnabled is opt-in and off for anything but an explicit '1' or 'true'", () => {
