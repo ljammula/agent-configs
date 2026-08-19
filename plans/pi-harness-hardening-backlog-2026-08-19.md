@@ -94,6 +94,31 @@ missing piece is the **generic, shape-agnostic backstop**, which this repo
 has not built. That reframes Task 1 below as higher-priority than further
 fingerprint-widening work.
 
+## User priority note (2026-08-19, added after initial draft)
+
+The user's actual goal, stated directly: **correctness without significant
+overhead** — not just "eventually get reliable, speed can wait
+indefinitely." That sharpens Recommendation 4 (overhead attribution +
+reasoning-token-budget cap) from "do last" to "don't treat as an afterthought
+once 1-3 land": the 100-312% overhead figure is itself a form of not
+meeting Sonnet parity (Sonnet's 32.4s vs. the harness's multi-minute turns
+is exactly the overhead this recommendation targets), not a separate,
+lesser concern. Practically: Recommendation 4's investigation phase (the
+profiling breakdown, no code risk) should start in parallel with
+Recommendation 1, not wait — only the actual overhead-reducing code change
+(if the profiling justifies one) should wait behind the reliability work,
+since a faster harness that still fails outright on a meaningful fraction
+of runs isn't the win either. The reasoning-token-budget cap in particular
+is worth prioritizing over deeper `quality-gate.ts` overhead surgery: it's
+a config change (no extension code risk) directly targeting the
+thinking-mode latency that's the dominant, already-measured cost driver
+(312% vs. 100% once thinking was enabled), where the settlement-check
+overhead itself was separately measured as small (842ms-2,398ms against
+110-270s totals) — i.e. the cheapest lever is also the one aimed at the
+biggest known cost, so it shouldn't sit behind three other tasks in
+practice even though it's still sequenced last below for the
+reliability-first reasoning already laid out.
+
 ## Prioritized recommendations
 
 ### 1. Add a generic, shape-agnostic stall backstop with a two-stage response (new — highest priority)
