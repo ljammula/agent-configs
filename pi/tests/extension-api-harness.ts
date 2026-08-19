@@ -21,6 +21,9 @@ export interface HarnessOptions {
 	appendEntry?: (type: string, data: unknown) => void;
 	branch?: any[];
 	activeTools?: string[];
+	/** Backing value for `ctx.isIdle()`. Defaults to false (agent mid-run) --
+	 *  the common case for extensions reacting to in-flight events. */
+	idle?: boolean;
 }
 
 export interface RegisteredCommandCall {
@@ -33,20 +36,28 @@ export class ExtensionHarness {
 	readonly execCalls: ExecCall[] = [];
 	readonly messages: { content: unknown; options: unknown }[] = [];
 	readonly notifications: { message: string; type: string | undefined }[] = [];
+	private abortCallCount = 0;
+
+	get abortCalls(): number {
+		return this.abortCallCount;
+	}
 	readonly handlers = new Map<EventType, Handler[]>();
 	readonly commands = new Map<string, RegisteredCommandCall["options"]>();
 	readonly tools = new Map<string, any>();
 	readonly api: ExtensionAPI;
 	readonly context: ExtensionContext;
 	private activeTools: string[];
+	idle: boolean;
 
 	constructor(options: HarnessOptions = {}) {
 		this.activeTools = options.activeTools ?? [];
+		this.idle = options.idle ?? false;
 		const branch = options.branch ?? [];
 		this.context = {
 			cwd: options.cwd ?? "/workspace",
 			hasUI: false,
 			signal: new AbortController().signal,
+			isIdle: () => this.idle,
 			sessionManager: {
 				getLeafEntry: () => branch.at(-1),
 				getBranch: () => branch,
@@ -62,6 +73,9 @@ export class ExtensionHarness {
 			// Command-handler-only members (ExtensionCommandContext), stubbed here too
 			// so commands registered via registerCommand can be exercised directly.
 			waitForIdle: async () => undefined,
+			abort: () => {
+				this.abortCallCount += 1;
+			},
 		} as unknown as ExtensionContext;
 
 		this.api = {

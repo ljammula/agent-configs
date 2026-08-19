@@ -550,3 +550,61 @@ evidence-cited version of each):
 
 Full investigation history — dated narrative, superseded partial results,
 live-run-by-live-run detail — is in `pi-harness-history.md`.
+
+**Reliability/speed-vs-`claude-sonnet-5` hardening plan, 2026-08-19, self-
+reviewed same day:** `plans/pi-harness-hardening-backlog-2026-08-19.md`
+supersedes the prior 2026-08-18 backlog's Tasks 2-8 prioritization with a
+community-informed re-ranking (OpenHands' `Stuck Detector` design, general
+agent-harness watchdog/backstop patterns, Qwen3.8-specific reasoning-budget
+tuning, escalate-on-structural-signal patterns), then critically
+self-reviewed and revised (an Opus review subagent spawned for this went
+unresponsive after multiple pings; the critique was done directly instead —
+see the plan's own "Review note" section for exactly what changed and why).
+Top-line reframing: the correctness gap to `claude-sonnet-5` is closed
+(0/4 → 4/4 on `go/lru-cache`); the remaining gap is reliability (five
+distinct stall shapes on `dart/sequential-runner`, zero recoveries) and
+speed (100-312% overhead). Recommends, in order: (1) a generic
+shape-agnostic "no source edit in N minutes" backstop in
+`progress-stall-guard.ts` with a two-stage response (soft intercept, then a
+hard abort producing a distinguishable `stall-timeout` outcome) — merged
+from what the first draft described as two separate recommendations, and
+now specified to run unconditionally rather than gated behind
+diagnostic-command matching, which would otherwise inherit the file's own
+documented read-only-inspection blind spot; (2) validating
+`PI_STALL_GUARD_INTERCEPT`'s actual recovery rate, testable now via
+temporarily lowered thresholds rather than waiting on (1); (3) a bounded
+Sonnet-escalation fallback on confirmed stalls, with its architectural
+placement (inside the extension vs. `build_app.py`'s orchestrator) left as
+an open question rather than assumed, and explicit user sign-off required
+before implementation; (4) overhead attribution plus a not-yet-tried
+reasoning-token-budget cap, lower priority since it affects already-
+succeeding runs, not the reliability gap itself.
+
+**Recommendation 1 implemented, PR-reviewed, and live-validated, 2026-08-19
+(same day):** `progress-stall-guard.ts`'s unconditional backstop shipped,
+then a Codex automated PR review (PR #20) caught two real gaps in the
+initial implementation — the hard-abort stage only ran inside the
+`tool_result` handler (never firing for a hang with zero tool calls, or one
+bash call that itself never returns), and the sourceless clock only reset
+on `write`/`edit` tool calls (never on a bash-driven edit like `sed -i`).
+Both fixed with a single independent `setInterval` mechanism: it checks
+elapsed time on its own 15s cadence regardless of tool events and calls
+`ctx.abort()` directly, and it also polls `git status --porcelain` each
+tick to catch bash-driven source edits. `npm run typecheck && npm test`:
+220/220.
+
+**Live-validated the same day** against the exact fixture the whole
+investigation traces back to: `dart/sequential-runner` (pair 5, seed
+`20260802`), harness arm, `PI_STALL_GUARD_BACKSTOP_MINUTES=2` for a fast
+confirmation cycle. The model hit the same `dart test --help | grep`
+re-verification loop as every prior rerun. Soft backstop fired at 2:03
+elapsed; no recovery; hard backstop fired at exactly 4:00 elapsed with
+`source: "wall-clock-timer"` — confirming the new independent-timer path,
+not the old tool_result-gated one, caught it. `ctx.abort()` cleanly
+stopped the run: `valid: true, passed: true, timed_out: false, pi_exit: 0,
+harness_seconds: 330.9, extension_errors: 0`. This is the **first pair-5
+rerun in the entire investigation to end `valid: true, passed: true`**
+instead of running out the 30-minute budget or needing a manually-armed
+`SIGTERM` monitor — the backstop turned a previously-unrecoverable stall
+into a clean, bounded, correctly-recorded outcome. Full account in
+`pi-harness-history.md`.

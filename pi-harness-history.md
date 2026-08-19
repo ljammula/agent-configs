@@ -5080,3 +5080,116 @@ investigation. Artifacts (local temp, not committed):
 `/private/tmp/pi-screen-05-harness-1nh7k9v3/` (session log, empty working
 tree diff), summary at
 `/private/tmp/claude-501/-Users-kanna-code-agent-configs/9d0b7f60-8788-4f88-9f15-28281898433f/scratchpad/pair5-intercept-validate/summary.json`.
+
+## Update 2026-08-19 (later still): unconditional stall backstop hardened per PR #20 Codex review
+
+`progress-stall-guard.ts`'s unconditional wall-clock backstop (added earlier
+today, see the plan doc `plans/pi-harness-hardening-backlog-2026-08-19.md`'s
+Recommendation 1) shipped with the elapsed-time check evaluated only inside
+the `tool_result` handler. Codex's automated PR review of PR #20 caught two
+real gaps in that design, both confirmed against the actual implementation
+(not just the plan text it commented on) and fixed:
+
+1. **The hard-abort stage could never fire for its own worst case.** A hang
+   with no tool call at all, or a single bash invocation that itself never
+   returns, produces no `tool_result` event -- so the handler checking
+   elapsed time never runs, and the "hard ceiling, no manual intervention"
+   claim didn't hold exactly where it mattered most. Fixed with an
+   independent `setInterval` (15s cadence) started at the true first
+   `agent_start`, stopped at `agent_end`, calling the live
+   `ExtensionContext.abort()` directly -- it doesn't depend on any tool
+   event firing. Only acts while `!ctx.isIdle()`.
+2. **The sourceless clock only reset on `write`/`edit` tool calls**, so a
+   model editing source through `bash` (`sed -i`, `tee`, a codegen or
+   formatter script) never registered as progress and could be falsely
+   flagged as a stall. Fixed by having the same timer poll `git status
+   --porcelain` each tick (same non-test-file filtering and directory
+   exclusions as `lib/verification.ts`'s `snapshotDiff`) and treat a newly
+   dirty non-test path as a real, tool-agnostic edit signal. Known, accepted
+   narrower gap: catches a path going dirty, not further edits to a file
+   already dirty from an earlier tick (would need per-tick content diffing,
+   a meaningfully heavier cost not yet justified by a live-observed case).
+
+Both fixes are covered by new regression tests in
+`pi/tests/progress-stall-guard.test.ts` (independent-timer hard abort with
+zero `tool_result` events, idle-session non-abort, bash-driven edit
+detection, and an already-dirty-tree noise case that confirms the detector
+doesn't over-fire) -- `npm run typecheck && npm test` passes, 220/220.
+`pi/tests/extension-api-harness.ts` gained an `idle` option (default
+`false`) so tests can control `ctx.isIdle()`, which the new timer logic
+depends on and the harness previously left unstubbed.
+
+Also addressed, in the plan doc rather than code: Codex separately flagged
+that the doc's framing risked reading as "correctness is fully closed,"
+when `pi-harness-validation-status.md` lines 535-544 record a run that
+settled cleanly (`valid: true`, `timed_out: false`) while still leaving the
+`go/lru-cache` eviction bug in and failing the hidden test -- a non-stall
+correctness failure the stall backstop can't and shouldn't try to catch
+(that's `quality-gate.ts`/eval-battery scope). Added as an explicit
+open-gap note in the doc rather than a new recommendation.
+
+## Update 2026-08-19 (later still): sixth pair-5 rerun — first live confirmation the backstop actually recovers a stall, no manual intervention
+
+Direct live validation of the fixes above (commit `599a4b7`), not just the
+unit-test coverage that shipped with them. Same fixture as every prior
+rerun this investigation has used: `dart/sequential-runner`, pair 5, seed
+`20260802`, harness arm, via `run_single_arm.py --seed 20260802 --pair 5
+--arm harness --host kannasmacstudio.lan`. `AI_STACK_HOST` reachable,
+`/v1/models` responding, Pi `0.83.0` matched. One deliberate deviation from
+the usual methodology: `PI_STALL_GUARD_BACKSTOP_MINUTES=2` (soft=2min,
+hard=4min) instead of the 10/20-minute defaults, purely to get a fast
+confirmation cycle rather than waiting out the full default window or the
+30-minute harness timeout -- this was a smoke test of the mechanism, not a
+battery run, and doesn't change what the trace demonstrates.
+
+The model hit the same core loop shape as reruns two through five: `dart
+test --help 2>&1 | grep -iE '<terms>'`, hunting for an explanation of the
+empty `test/` directory, no source edits, `sameFailure` climbing without
+ever resetting. This time:
+
+1. **Soft backstop fired at `stallElapsedMs: 123311`** (~2:03), right at
+   the configured 2-minute threshold: `stallBackstop: true`, `sourcelessRounds:
+   17`, `sameFailure: 1`. No recovery followed -- the model kept probing
+   variations of the same `dart test --help | grep` command, `sameFailure`
+   climbing to 15 over the next two minutes.
+2. **Hard backstop fired at `stallElapsedMs: 240068`** (~4:00, right at the
+   configured hard threshold): `stallTimeout: true, outcome: "stall-timeout",
+   source: "wall-clock-timer"`. The `source` field is the load-bearing
+   confirmation here -- it proves this fired through the *new* independent
+   `setInterval` mechanism added for the Codex review fixes, not the
+   pre-existing tool_result-gated check (which this exact run's loop shape,
+   being made entirely of `bash` tool calls, would likely also have caught --
+   but the field removes the ambiguity rather than leaving it inferred).
+3. **`ctx.abort()` cleanly stopped the run.** Final record: `valid: true,
+   passed: true, timed_out: false, pi_exit: 0, harness_seconds: 330.888,
+   hidden_test_exit: 0, extension_errors: 0`.
+
+**This is the headline result**: every one of the five prior pair-5 reruns
+in this investigation either ran out the full 30-minute timeout
+(`timed_out: true`) or required a human-armed monitor watching the session
+JSONL to send manual `SIGTERM`s, because nothing in the harness could act
+on a confirmed stall on its own. This is the first rerun to end cleanly,
+correctly, and unattended in under six minutes -- `valid: true, passed:
+true` is not evidence the model "succeeded" at the task in the sense of
+working through to a self-recognized done state (`hidden_test_exit: 0`
+matches every prior rerun exactly: the on-disk diff was already correct
+minutes in, same as always, the model just never stopped re-verifying it).
+It is evidence the *harness* now succeeds where it didn't before: turning
+an unrecoverable stall into a bounded, distinguishable, correctly-recorded
+outcome without a human in the loop. That is exactly what Recommendation 1
+in the 2026-08-19 hardening plan set out to do, and this run is the first
+live proof it does it.
+
+**What this does not establish**: the default 10/20-minute thresholds
+weren't exercised (only the shortened 2/4-minute smoke config was); the
+bash-driven-edit detection (the other Codex-flagged fix) wasn't exercised
+live, since this run's loop shape never touched a file through bash either
+-- that fix has unit coverage only so far, same as before this rerun. A
+future live run that happens to hit a bash-only-edit shape (or a
+deliberately constructed one) would be the natural next confirmation for
+that specific mechanism.
+
+Artifacts (local temp, not committed): session JSONL at
+`/private/tmp/pi-screen-05-harness-r02f6i2d/session/`, working tree at
+`/private/tmp/pi-screen-05-harness-r02f6i2d/work/`, summary at
+`/private/tmp/pi-arm-20260819T181312Z-wn7i89yf/summary.json`.

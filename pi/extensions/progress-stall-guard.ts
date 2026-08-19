@@ -43,10 +43,11 @@
  * trace event; a false negative costs a killed multi-minute run, as it
  * did here.
  *
- * Ships in TRACE-ONLY mode: every fire is recorded via `appendEntry`. In-band
- * nudging was removed because `deliverAs: "followUp"` cannot interrupt a
- * model that keeps calling tools; this follows the established
- * cross-model-review.ts and quality-gate.ts precedent.
+ * Shape-specific detection remains trace-only by default. A separate,
+ * shape-agnostic wall-clock backstop is always evaluated on tool results:
+ * after the soft threshold it appends a synchronous recovery fact, and after
+ * twice that threshold it aborts the run with a distinguishable
+ * `stall-timeout` trace outcome.
  *
  * Two bugs found live 2026-08-16 re-running this exact scenario (see
  * pi-harness-validation-status.md):
@@ -203,6 +204,41 @@
  * matching this repo's convention for anything not yet proven live
  * (continuation-nudge.ts needed 3 live firings before adoption; this has
  * one so far -- see pi-harness-history.md).
+ *
+ * INDEPENDENT WALL-CLOCK TIMER (new 2026-08-19, PR #20 Codex review): the
+ * unconditional backstop above was still only evaluated inside the
+ * `tool_result` handler, so it inherited that handler's own precondition --
+ * a `tool_result` event has to fire. Two real shapes defeat that: a hang
+ * with no tool call at all, and a single bash invocation that itself never
+ * returns. Neither produces a `tool_result`, so the hard-abort stage could
+ * never actually fire for either -- the file's "hard ceiling, no manual
+ * intervention" claim didn't hold for its own worst case. Fixed with a
+ * `setInterval` (`TIMER_INTERVAL_MS`, 15s) started at the true first
+ * `agent_start` and stopped at `agent_end`, checking elapsed time on its own
+ * cadence and calling the live `ExtensionContext`'s `abort()` directly --
+ * independent of whether any tool event ever fires. Only acts while
+ * `!ctx.isIdle()`; an idle session between turns is not a stall. The soft
+ * stage stays `tool_result`-only, since there's no in-flight tool result to
+ * append warning text to when nothing is running -- the timer's job is only
+ * to guarantee the hard ceiling actually is one.
+ *
+ * The same timer also closes a second reviewer-flagged gap: the
+ * `tool_result` handler only resets the sourceless clock on `write`/`edit`
+ * tool calls, so a model editing source through `bash` (`sed -i`, `tee`, a
+ * codegen or formatter script) never registered as progress. Rather than
+ * pattern-match bash commands for edit-shaped ones (the same trap
+ * `SCRATCH_EXECUTION_PATTERNS` above deliberately stays narrow to avoid --
+ * redirects into scratch paths, decoy `2>&1`, a long tail of editor CLIs),
+ * each tick asks git directly: `git status --porcelain` for non-test-file
+ * paths, same exclusions as `lib/verification.ts`'s `snapshotDiff`. A path
+ * that's newly dirty since the previous tick is real, tool-agnostic
+ * evidence of progress and triggers the same full reset a trustworthy
+ * write/edit does. Known, accepted narrower gap: this catches a path going
+ * dirty, not further edits to a file already dirty from an earlier tick --
+ * repeatedly rewriting the same already-modified file produces no new
+ * signature and doesn't keep re-resetting the clock. Widening that would
+ * mean diffing file *content* every tick instead of just `status`, a
+ * meaningfully heavier per-tick cost for a case not yet observed live.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
@@ -272,6 +308,28 @@ const CYCLE_DISTINCT_THRESHOLD = 2;
 // Two thresholds, not a `>=` on one, so it fires exactly twice total and then
 // goes silent rather than re-flagging every single call past the first hit.
 const ACTION_SAME_FAILURE_THRESHOLDS = [8, 25];
+
+const DEFAULT_BACKSTOP_MINUTES = 10;
+const MINUTE_MS = 60_000;
+
+export interface StallBackstopThresholds {
+	softMs: number;
+	hardMs: number;
+}
+
+export function resolveBackstopThresholds(env: NodeJS.ProcessEnv = process.env): StallBackstopThresholds {
+	const raw = Number(env.PI_STALL_GUARD_BACKSTOP_MINUTES ?? DEFAULT_BACKSTOP_MINUTES);
+	const minutes = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BACKSTOP_MINUTES;
+	return { softMs: minutes * MINUTE_MS, hardMs: minutes * MINUTE_MS * 2 };
+}
+
+function backstopMessage(kind: "soft" | "hard", elapsedMs: number): string {
+	const minutes = Math.max(1, Math.round(elapsedMs / MINUTE_MS));
+	if (kind === "hard") {
+		return `\n\n[pi-harness] No non-test source edit has occurred for about ${minutes} minutes. The run is being stopped as a confirmed stall.`;
+	}
+	return `\n\n[pi-harness] No non-test source edit has occurred for about ${minutes} minutes. This is a stall warning; change what you're doing or stop and report honestly what you have so far.`;
+}
 
 /**
  * True once `window` is full, holds between 2 and `CYCLE_DISTINCT_THRESHOLD`
@@ -391,6 +449,13 @@ function failureCategory(text: string): string {
 	return `output:${fingerprintFailure(text)}`;
 }
 
+// How often the independent wall-clock timer below re-checks elapsed time
+// and bash-driven source changes. Deliberately much finer-grained than the
+// backstop thresholds themselves (minutes) so the timer's own polling
+// interval never meaningfully inflates the elapsed time reported at either
+// threshold.
+const TIMER_INTERVAL_MS = 15_000;
+
 export default function (pi: ExtensionAPI) {
 	let sourcelessRounds = 0;
 	let sameFailure = 0;
@@ -399,23 +464,162 @@ export default function (pi: ExtensionAPI) {
 	let cycleIntercepted = false;
 	let sawTestThisTurn = false;
 	let intercepts = 0;
+	let lastSourceEditAt = Date.now();
+	let backstopSoftFired = false;
+	let backstopHardFired = false;
+	// git-status snapshot of non-test-file paths as of the last timer tick --
+	// see resolveBashEditSignature below. `undefined` until the first tick
+	// establishes a baseline, so that baseline itself never counts as an edit.
+	let lastBashEditSignature: string | undefined;
 
 	const interceptEnabled = resolveInterceptEnabled();
+	const backstopThresholds = resolveBackstopThresholds();
+
+	// Reset the failure/backstop fields common to every reset point --
+	// factored out so the (agent_start | write/edit | bash-detected-edit |
+	// input) call sites can't drift out of sync on what "progress" clears.
+	// Deliberately does NOT touch `sourcelessRounds`: a new ask (`input`)
+	// isn't itself evidence a source edit happened, so it keeps its own
+	// narrower reset below, same as before this refactor.
+	function resetFailureState() {
+		sameFailure = 0;
+		lastFailureCategory = undefined;
+		recentCategories = [];
+		cycleIntercepted = false;
+		lastSourceEditAt = Date.now();
+		backstopSoftFired = false;
+		backstopHardFired = false;
+	}
+
+	// Full reset, including sourcelessRounds -- for the reset points that
+	// really are evidence of progress (a trustworthy write/edit, a
+	// bash-detected edit, agent_start).
+	function resetStallState() {
+		sourcelessRounds = 0;
+		resetFailureState();
+	}
+
+	// Live context captured from whichever event handler last ran, reused by
+	// the independent timer below. `ExtensionContext`'s `abort()`/`isIdle()`
+	// read current session state at call time, not at capture time (see
+	// `runner.d.ts`: "Create an ExtensionContext for use in event handlers" --
+	// one long-lived object, not a per-event snapshot), so holding onto a
+	// stale-looking reference across ticks is safe.
+	let liveCtx: import("@earendil-works/pi-coding-agent").ExtensionContext | undefined;
+	let liveCwd: string | undefined;
+	let timer: ReturnType<typeof setInterval> | undefined;
+
+	// Reviewer-flagged gap (Codex, PR #20): checking elapsed time only inside
+	// the `tool_result` handler below cannot enforce a genuine hard deadline,
+	// because a hang with no tool call at all -- or a single bash invocation
+	// that itself never returns -- produces no `tool_result` event for that
+	// handler to run on. This timer is the independent backstop: it re-checks
+	// elapsed time on a fixed wall-clock cadence regardless of whether any
+	// tool event fires, and can call `ctx.abort()` on its own. It only aborts
+	// while the agent is actually mid-run (`!isIdle()`) -- an idle session
+	// waiting on the next user turn is not a stall.
+	//
+	// Also folds in bash-driven source-edit detection (Codex, same PR): the
+	// `tool_result` handler only resets on `write`/`edit` tool calls, so a
+	// model editing source through `bash` (`sed -i`, `tee`, a codegen script)
+	// never resets the sourceless clock there. Rather than pattern-match bash
+	// commands (fragile -- redirects into scratch paths, `2>&1` decoys, a
+	// dozen editor CLIs), each tick asks git directly what actually changed:
+	// the set of non-test-file paths `git status` reports. A change to that
+	// set is real, tool-agnostic evidence of progress. This only catches a
+	// path *newly* appearing dirty, not further edits to a file already
+	// dirty from a prior tick -- an accepted, narrower gap than the one
+	// closed, not a claim of catching every subsequent bash edit.
+	async function resolveBashEditSignature(cwd: string): Promise<string | undefined> {
+		const result = await pi
+			.exec(
+				"git",
+				[
+					"status",
+					"--porcelain=v1",
+					"-z",
+					"--untracked-files=all",
+					"--",
+					".",
+					":(exclude)node_modules",
+					":(exclude)build",
+					":(exclude)dist",
+					":(exclude).dart_tool",
+				],
+				{ cwd, timeout: 5_000 },
+			)
+			.catch(() => undefined);
+		if (!result || result.code !== 0) return undefined;
+		const paths = result.stdout
+			.split(/[\0\n]/)
+			.filter(Boolean)
+			.map((entry) => entry.slice(3))
+			.filter((path) => path.length > 0 && !isTestFile(path));
+		return paths.sort().join("\0");
+	}
+
+	function stopTimer() {
+		if (timer) {
+			clearInterval(timer);
+			timer = undefined;
+		}
+	}
+
+	function startTimer() {
+		stopTimer();
+		lastBashEditSignature = undefined;
+		timer = setInterval(() => {
+			void (async () => {
+				if (!liveCtx || !liveCwd) return;
+				if (liveCtx.isIdle()) return; // no run in progress -- nothing to time out
+
+				const signature = await resolveBashEditSignature(liveCwd);
+				if (signature !== undefined) {
+					if (lastBashEditSignature === undefined) {
+						lastBashEditSignature = signature;
+					} else if (signature !== lastBashEditSignature) {
+						lastBashEditSignature = signature;
+						resetStallState();
+						return;
+					}
+				}
+
+				const elapsedMs = Date.now() - lastSourceEditAt;
+				if (!backstopHardFired && elapsedMs >= backstopThresholds.hardMs) {
+					backstopHardFired = true;
+					pi.appendEntry("pi-stall-trace", {
+						sourcelessRounds,
+						sameFailure,
+						stalled: true,
+						stallTimeout: true,
+						outcome: "stall-timeout",
+						stallElapsedMs: elapsedMs,
+						source: "wall-clock-timer",
+					});
+					liveCtx?.abort();
+				}
+			})();
+		}, TIMER_INTERVAL_MS);
+		timer.unref?.();
+	}
 
 	let seenFirstAgentStart = false;
-	pi.on("agent_start", () => {
+	pi.on("agent_start", (_event, ctx) => {
+		liveCtx = ctx;
+		liveCwd = ctx.cwd;
 		// Only the true first start of this invocation resets state -- a retry
 		// restart must not wipe real evidence of repeated inaction. See file
 		// header, "Two bugs found live 2026-08-16," item 2.
 		if (seenFirstAgentStart) return;
 		seenFirstAgentStart = true;
-		sourcelessRounds = 0;
-		sameFailure = 0;
-		lastFailureCategory = undefined;
-		recentCategories = [];
-		cycleIntercepted = false;
+		resetStallState();
 		sawTestThisTurn = false;
 		intercepts = 0;
+		startTimer();
+	});
+
+	pi.on("agent_end", () => {
+		stopTimer();
 	});
 
 	// A new ask (steering message, injected message from another extension)
@@ -423,24 +627,50 @@ export default function (pi: ExtensionAPI) {
 	// scope, mirroring continuation-nudge.ts -- a stale fingerprint from a
 	// prior ask must not count toward this one.
 	pi.on("input", () => {
-		sameFailure = 0;
-		lastFailureCategory = undefined;
-		recentCategories = [];
-		cycleIntercepted = false;
+		resetFailureState();
 	});
 
-	pi.on("tool_result", (event) => {
+	pi.on("tool_result", (event, ctx) => {
+		liveCtx = ctx;
+		liveCwd = ctx.cwd;
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const path = (event.input as { path?: string }).path;
 			if (path && !event.isError && !isTestFile(path)) {
-				sourcelessRounds = 0;
-				sameFailure = 0;
-				lastFailureCategory = undefined;
-				recentCategories = [];
-				cycleIntercepted = false;
+				resetStallState();
 			}
 			return undefined;
 		}
+
+		const elapsedMs = Date.now() - lastSourceEditAt;
+		if (!backstopHardFired && elapsedMs >= backstopThresholds.hardMs) {
+			backstopHardFired = true;
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				stallTimeout: true,
+				outcome: "stall-timeout",
+				stallElapsedMs: elapsedMs,
+			});
+			ctx.abort();
+			return {
+				content: [...event.content, { type: "text" as const, text: backstopMessage("hard", elapsedMs) }],
+			};
+		}
+		if (!backstopSoftFired && elapsedMs >= backstopThresholds.softMs) {
+			backstopSoftFired = true;
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				stallBackstop: true,
+				stallElapsedMs: elapsedMs,
+			});
+			return {
+				content: [...event.content, { type: "text" as const, text: backstopMessage("soft", elapsedMs) }],
+			};
+		}
+
 		if (event.toolName !== "bash") return undefined;
 		const command = event.input?.command;
 		if (typeof command !== "string" || !matchesDiagnosticExecution(command)) return undefined;
