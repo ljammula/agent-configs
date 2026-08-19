@@ -1,21 +1,35 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
-// mlx-vlm's OpenAI-compatible server defaults temperature to 0.0 (greedy
-// decoding) whenever a request omits it, and pi-coding-agent has no
-// --temperature flag or settings.json field at all (confirmed by grepping
-// its dist/ for the string -- zero hits), so every request from this
+// mlx-vlm's OpenAI-compatible server defaults unset sampling fields to
+// greedy/no-op values (temperature 0.0, no top_p/top_k/presence_penalty
+// clamp at all) whenever a request omits them, and pi-coding-agent has no
+// CLI flags or settings.json fields for any of these (confirmed by grepping
+// its dist/ for each field name -- zero hits), so every request from this
 // harness was running fully greedy regardless of settings.json. mlx-vlm
 // also does not respect the model's own generation_config.json (a known
 // upstream bug, reported independently for the Gemma route on this same
-// stack), so there is no server-side default to fix either -- this must be
-// injected client-side. 0.6 matches Qwen3.6's own "precise coding" thinking
-// preset rather than the vendor's general thinking-mode default of 1.0,
-// chosen for lower variance on a coding-agent harness that also wants
-// reproducible trial comparisons. See
-// qwen38-agentic-coding-tuning-research.md's "Effective temperature during
-// all trials, resolved" section for the full trace of how this was found.
-const QWEN38_TEMPERATURE = 0.6;
+// stack), so there is no server-side default to fix either -- these must be
+// injected client-side.
+//
+// Values are Qwen3.8's own vendor-documented "precise coding" thinking
+// preset (huggingface.co/Qwen/Qwen3.8-27B model card + unsloth.ai/docs/
+// models/qwen3.8), confirmed 2026-08-19 to be a distinct, code-specific
+// preset from both the general thinking default (temp 1.0/top_p 0.95/
+// presence_penalty 0.0) and the non-thinking instruct default (temp 0.7/
+// top_p 0.80/presence_penalty 1.5) -- not an analogy carried over from the
+// 3.6 checkpoint's own "precise coding" preset, which happens to share the
+// same temperature. Chosen over the general thinking default for lower
+// variance on a coding-agent harness that also wants reproducible trial
+// comparisons. See qwen38-agentic-coding-tuning-research.md's "Effective
+// temperature during all trials, resolved" and "Vendor-recommended sampling
+// parameters" sections for the full trace of how this was found.
+const QWEN38_SAMPLING_PARAMS = {
+  temperature: 0.6,
+  top_p: 0.95,
+  top_k: 20,
+  presence_penalty: 0.0,
+} as const;
 
 export default function (pi: ExtensionAPI) {
   const host = process.env.AI_STACK_HOST || "127.0.0.1";
@@ -24,16 +38,19 @@ export default function (pi: ExtensionAPI) {
   // calls, not just this one -- so this must check the model id before
   // touching the payload. Mutates in place (same convention documented for
   // the sibling before_provider_headers hook); returning nothing is
-  // intentional, not an oversight.
+  // intentional, not an oversight. Each field is injected independently and
+  // only when the caller hasn't already set it, so an explicit per-call
+  // override (e.g. a future eval script deliberately pinning temperature: 0)
+  // still wins over this default.
   pi.on("before_provider_request", (event) => {
     const payload = event.payload as Record<string, unknown> | undefined;
-    if (
-      payload &&
-      typeof payload === "object" &&
-      payload.model === QWEN38_MODEL_ID &&
-      payload.temperature === undefined
-    ) {
-      payload.temperature = QWEN38_TEMPERATURE;
+    if (!payload || typeof payload !== "object" || payload.model !== QWEN38_MODEL_ID) {
+      return;
+    }
+    for (const [key, value] of Object.entries(QWEN38_SAMPLING_PARAMS)) {
+      if (payload[key] === undefined) {
+        payload[key] = value;
+      }
     }
   });
 

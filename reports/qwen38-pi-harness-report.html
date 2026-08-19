@@ -521,8 +521,30 @@ temperature: <span style="color:var(--ink-faint)">(unset → greedy)</span></cod
 compat.thinkingFormat: "qwen"
 compat.supportsDeveloperRole: false
 defaultThinkingLevel: "medium"
-temperature: 0.6 <span style="color:var(--ink-faint)">(injected client-side)</span></code></pre>
+temperature: 0.6
+top_p: 0.95
+top_k: 20
+presence_penalty: 0.0 <span style="color:var(--ink-faint)">(all injected client-side)</span></code></pre>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="callout">
+      <b>Sampling params, 2026-08-19:</b> the temperature-only fix above left
+      <code>top_p</code>/<code>top_k</code>/<code>presence_penalty</code> at
+      whatever the inference server defaults to when a request omits them.
+      A pass of vendor and community research (Qwen's own model card,
+      Unsloth's run guide) turned up a documented
+      <b>"precise coding" preset</b> for this model — distinct from both its
+      general thinking default and its non-thinking instruct default — and
+      confirmed <code>temperature: 0.6</code> was already the vendor's own
+      coding-specific value, not just an analogy carried over from the prior
+      checkpoint. The client-side injection hook now sets the full preset
+      (<code>temperature 0.6, top_p 0.95, top_k 20, presence_penalty 0.0</code>).
+      Not yet re-validated against a live battery run — treat as a config
+      change pending confirmation, the same way the temperature fix itself
+      was validated before being called settled.
     </div>
   </section>
 

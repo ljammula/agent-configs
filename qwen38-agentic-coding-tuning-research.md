@@ -477,6 +477,9 @@ the transcript again.
 - No live re-run of `go/lru-cache` (or any other task) with thinking
   enabled has happened; **the 0/4 baseline stands unchanged**. Step 2's
   config change is live but unvalidated against the actual failure mode.
+  (Superseded in part — see `pi-harness-history.md`'s 2026-08-19 pair-7
+  reasoning-on follow-up: 2/2 clean passes on `go/lru-cache` with
+  `PI_EVAL_THINKING_LEVEL=xhigh`.)
 - The temperature/sampling params actually in effect during the original
   4 trials are still unknown and have not been determined — this was not
   resolved by step 1 (step 1 deliberately pinned `temperature: 0` to
@@ -484,3 +487,50 @@ the transcript again.
   trials ran at).
 - The `rtk`-wrapped `diff` false-identical result noticed in step 2 is
   unexamined — worth a look, unrelated to this investigation's outcome.
+
+## Full precise-coding sampling params applied, 2026-08-19
+
+Follow-up to "Temperature applied, 2026-08-17" above, which only injected
+`temperature: 0.6` and left `top_p`/`top_k`/`presence_penalty` at whatever
+mlx-vlm defaults to when a request omits them (`top_p`/`top_k` effectively
+unclamped, `presence_penalty` 0 — i.e. accidentally already matching the
+coding preset's `presence_penalty`, but not by design).
+
+A fresh round of community/vendor research (HF model cards, Unsloth docs,
+web search) confirmed Qwen3.8-27B's model card documents a **"precise
+coding" preset distinct from both its general thinking default and its
+non-thinking instruct default**:
+
+| Preset | temp | top_p | top_k | min_p | presence_penalty | repetition_penalty |
+|---|---|---|---|---|---|---|
+| Thinking (general default) | 1.0 | 0.95 | 20 | 0.0 | 0.0 | 1.0 |
+| Instruct / non-thinking | 0.7 | 0.80 | 20 | 0.0 | 1.5 | 1.0 |
+| **Precise coding (thinking)** | **0.6** | **0.95** | **20** | 0.0 | **0.0** | 1.0 |
+
+Sources:
+[Qwen/Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B),
+[Unsloth run guide](https://unsloth.ai/docs/models/qwen3.8),
+[Qwen/Qwen3.6-27B discussion #10](https://huggingface.co/Qwen/Qwen3.6-27B/discussions/10)
+(confirms the 3.6 checkpoint's own precise-coding preset shares the same
+`temperature: 0.6`, `presence_penalty: 0.0` values — the 2026-08-17 choice
+of 0.6 turns out to match the *vendor's own coding preset* for 3.8 too, not
+just an analogy carried over from 3.6). No "alpha" sampling parameter
+(repetition-penalty alpha, DRY-sampler alpha, or otherwise) is documented
+anywhere in the 3.8 card or in community threads found.
+
+**Fix**: extended `ai-stack-local.ts`'s existing `before_provider_request`
+hook — previously injected `temperature` only — to inject the full preset
+(`temperature: 0.6, top_p: 0.95, top_k: 20, presence_penalty: 0.0`) as a
+single `QWEN38_SAMPLING_PARAMS` object, each field applied independently
+only when the caller hasn't already set it (so a future eval script that
+deliberately pins e.g. `temperature: 0` still overrides). `min_p` and
+`repetition_penalty` were left uninjected — both presets agree they should
+be `0.0`/`1.0`, which is mlx-vlm's unset-field behavior anyway, so there's
+nothing to correct there.
+
+**Not yet done**: no live re-run of any battery pair with the expanded
+param set — this is a config change made from vendor/community research,
+not yet validated against this harness's actual failure modes the way the
+temperature and thinking-level changes were. Should be validated the same
+way: rerun a known task (e.g. `go/lru-cache`) and confirm no regression
+before treating this as settled.
