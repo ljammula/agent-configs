@@ -1,0 +1,40 @@
+ok  	bookmarksapi	1.411s
+00:00 +0: loading test/bookmarks_client_test.dart
+00:00 +0: test/bookmarks_client_test.dart: Bookmark fromJson / toJson roundtrip
+00:00 +1: test/bookmarks_test.dart: Bookmark fromJson/toJson round trip
+00:00 +2: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +3: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +4: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +5: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +6: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +7: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +8: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +9: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +10: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +11: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +12: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +13: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +14: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +15: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +16: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +17: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +18: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +19: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +20: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +21: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark returns the created bookmark
+00:00 +22: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark defaults
+00:00 +23: test/bookmarks_client_test.dart: BookmarksApiClient createBookmark validation error throws BookmarksApiException
+00:00 +24: test/bookmarks_client_test.dart: BookmarksApiClient listBookmarks returns bookmarks sorted by visits then id
+00:00 +25: test/bookmarks_client_test.dart: BookmarksApiClient getBookmark returns the bookmark, throws on missing id
+00:00 +26: test/bookmarks_client_test.dart: BookmarksApiClient visitBookmark increments visits
+00:00 +27: test/bookmarks_client_test.dart: BookmarksApiClient updateBookmark patches only given fields
+00:00 +28: test/bookmarks_client_test.dart: BookmarksApiClient deleteBookmark removes the bookmark, throws on missing id
+00:00 +29: test/bookmarks_client_test.dart: BookmarksViewModel bookmarks is empty before load
+00:00 +30: test/bookmarks_client_test.dart: BookmarksViewModel load populates bookmarks sorted by visits descending
+00:00 +31: test/bookmarks_client_test.dart: BookmarksViewModel addBookmark appends and is reflected in bookmarks
+00:00 +32: test/bookmarks_client_test.dart: BookmarksViewModel allTags and byTag reflect in-memory bookmarks
+00:00 +33: test/bookmarks_client_test.dart: BookmarksViewModel visit increments visits via the API and reorders bookmarks
+00:00 +34: test/bookmarks_client_test.dart: BookmarksViewModel visit on unknown id throws without an API call
+00:00 +35: test/bookmarks_client_test.dart: BookmarksViewModel remove deletes the bookmark
+00:00 +36: test/bookmarks_client_test.dart: BookmarksViewModel remove on unknown id throws without an API call
+00:00 +37: All tests passed!

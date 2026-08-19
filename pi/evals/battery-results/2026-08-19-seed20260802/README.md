@@ -17,7 +17,7 @@ temporarily lowered thresholds and is not part of this battery).
 | 1 | `go-flutter/notes-app` | ✅ | ✅ | 1322.6s | Large dual-stack task; 78% of wall time was model decode (58 calls, 1035.8s, confirmed from `kannasmacstudio.lan`'s `qwen38.log`); 3 quality-gate fail rounds, 1 reviewer `blocked`→`clean` cycle before passing. |
 | 2 | `go/notes-api` | ✅ | ✅ | 238.5s | Clean. |
 | 3 | `dart/task-manager` | ✅ | ✅ | 276.0s | Clean. |
-| 4 | `go-flutter/bookmarks-app` | ✅ | ❌ | 2554.4s | **Real bug**: `handleList` in `server/bookmarksapi.go` appends live `*Bookmark` pointers from the map into the response slice and releases the lock before sorting/encoding, while `handleVisit` mutates the same struct under lock elsewhere — data race, caught by the hidden test's `-race` flag (`TestConcurrentVisits`), missed by 2 reviewer `clean` verdicts and 8 local quality-gate rounds (none run with `-race`). Also flagged (benign, unrelated): `artifact-guard` caught 2 untracked Dart toolchain-cache files >1MB at settle time — tooling exhaust, not model-authored, excluded from this repo copy. |
+| 4 | `go-flutter/bookmarks-app` | ✅ | ❌ | 2554.4s | **Real bug**: `handleList` in `server/bookmarksapi.go` appends live `*Bookmark` pointers from the map into the response slice and releases the lock before sorting/encoding, while `handleVisit` mutates the same struct under lock elsewhere — data race, caught by the hidden test's `-race` flag (`TestConcurrentVisits`), missed by 2 reviewer `clean` verdicts and 8 local quality-gate rounds (none run with `-race`). Also flagged (benign, unrelated): `artifact-guard` caught 2 untracked Dart toolchain-cache files >1MB at settle time — tooling exhaust, not model-authored, excluded from this repo copy. **Rerun at `medium` thinking produced the correct fix but the harness still recorded it as failed — see "Follow-up" section below.** |
 | 5 | `dart/sequential-runner` | ✅ | ✅ | 1320.9s | Passed clean this run — no stall, no backstop/intercept trace events. Another data point for this fixture's documented run-to-run variance (compare its stall history in `pi-harness-history.md`). |
 | 6 | `dart/notes-app` | ✅ | ✅ | 1389.4s | Clean, but slow — largest evidence trace of the non-failing pairs (3.9MB `pi-output.jsonl`, comparable to pair 1). |
 | 7 | `go/lru-cache` | ✅ | ❌ | 272.4s | **Recurrence of the well-documented key/value-confusion eviction bug**: `lru.go`'s eviction path deletes by `oldest.Value.(int)` (the cache value) instead of the map key — `delete(c.data, oldest.Value.(int))`. `TestEvictsByKeyNotValue` fails. The reviewer correctly flagged this twice (`blocked`, `blocked`) but the model settled without applying the fix — same failure shape as documented multiple times earlier in this investigation (see `pi-harness-history.md`'s `go/lru-cache` entries). **Rerun 2/2 clean with reasoning enabled — see "Follow-up" section below.** |
@@ -74,6 +74,72 @@ hardcoded `--thinking off` should change for future battery runs. Not
 changed here — the override is opt-in via env var, default behavior is
 unchanged.
 
+## Follow-up: pair 4 rerun at `medium` thinking, same day
+
+Pair 4's failure above ran with reasoning disabled, same as every pair in
+this battery. `run_screening.py`/`run_single_arm.py` gained real per-pair
+thinking control (`ScheduledPair.thinking_level`, a
+`--thinking-override PAIR=LEVEL` flag on `run_screening.py`, and a
+`--thinking`/`--timeout-minutes` override on `run_single_arm.py`) and pair
+4's harness arm was rerun once at `--thinking medium` with a 90-minute
+timeout ceiling (the stock 45-minute budget had no headroom left — the
+`off` run above already used 42.6 of it).
+
+**Result: the fix was correct, but the harness recorded it as failed for
+an unrelated reason.**
+
+- By ~24 minutes in, `handleList` had been rewritten to copy each
+  `Bookmark` value into the response slice while still holding the lock
+  (`list = append(list, *bm)` inside `s.mu.Lock()`/`Unlock()`) — the
+  correct fix for the race. Verified directly: `go test -race ./...`
+  reported `ok bookmarksapi 1.411s` (no `FAIL`, no `DATA RACE`), all 37
+  Dart tests passed.
+- After the fix was already complete, the model ran a manual smoke test —
+  `go run /tmp/bm_main.go 2>&1 | head -3`, where `bm_main.go` calls
+  `http.ListenAndServe(...)`, a call that never returns and never prints.
+  Piped through `head -3`, the shell call hung indefinitely. This burned
+  the remaining ~83 minutes with zero further progress until the outer
+  `--timeout-minutes 90` kill (`pi_exit: 124`) finally reaped it.
+- `progress-stall-guard.ts` correctly *detected* this exact pattern — its
+  `SCRATCH_EXECUTION_PATTERNS` regex matches `go run /tmp/...` — and its
+  independent wall-clock timer fired a soft backstop at the 12-minute mark
+  (`stallElapsedMs: 723021` in the session trace). The model's own
+  `thinking` block dismissed it as "a false positive — I'm in the middle
+  of a task" (reasonably, since it was) and continued, before hitting the
+  actual unrecoverable hang a few rounds later.
+  **Correction to this section's first pass**: this is *not* the
+  `PI_STALL_GUARD_INTERCEPT` gap. That env var only gates the
+  cycle-detection intercept (repeated identical test failures without a
+  source edit); the **wall-clock hard backstop** — the mechanism meant to
+  catch exactly this single-hung-tool-call case — calls `ctx.abort()`
+  unconditionally, independent of that env var, default-on 20 minutes past
+  the last source edit. The last real edit landed ~22:29:43 UTC; the
+  process wasn't killed until ~70 minutes later (the outer 90-minute
+  subprocess timeout) — 3x past the hard threshold, no `stall-timeout`
+  trace event ever appeared. So the real finding is an **always-on
+  backstop silently failing to fire**, not an opt-in one being left off.
+  `isIdle()` misclassification was checked and ruled out (pi's
+  `agent-session.js` defines it as `!_isAgentRunActive`, which stays
+  `false` throughout an in-flight tool call). Root cause not yet found —
+  see `pi-harness-history.md`'s matching entry for what's been ruled out
+  and what hasn't.
+
+A planned `xhigh` follow-up (same task, mirroring the pair-7 precedent)
+was launched, then deliberately killed at ~2 minutes in once the `medium`
+result was understood — it couldn't test anything `medium` hadn't already
+answered (the race was already fixed), and risked reproducing the same
+non-reasoning stall for another ~75-minute budget. No code changes, no
+artifact retained from that attempt.
+
+**Verdict**: pair 4's race is fixable at `medium` thinking with no vendor
+sampling-preset changes needed; the battery's pair-4 failure above was not
+a thinking-level problem. The actionable follow-up is debugging why the
+always-on wall-clock hard backstop didn't fire on a real, unambiguous
+stall — not a config flip and not further reasoning-level tuning. Full
+working tree and evidence (including the 33MB `pi-output.jsonl` and full
+session trace) in `pair4-medium-rerun/`. Full narrative:
+`pi-harness-history.md`'s matching 2026-08-19 entry.
+
 ## Layout
 
 Each `pairN/` contains:
@@ -86,6 +152,10 @@ Each `pairN/` contains:
   `hidden-test-output.log`, `setup-output.log`, `pi-stderr.log`,
   `summary.json`, `results.jsonl`, `manifest.json` (model/reviewer route
   identity, Pi version, `agent-configs` revision at run time).
+  `pair4-medium-rerun/evidence/` additionally has `session-trace.jsonl` —
+  Pi's own on-disk session file (copied from `--session-dir`, not just
+  stdout), used there to pull the `pi-stall-trace`/`thinking_level_change`
+  custom events directly; not part of every pair's evidence set.
 
 Not committed: the harness's own `/private/tmp/pi-screen-*` scratch dirs
 this was copied from (ephemeral, already gone after the run).

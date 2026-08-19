@@ -5283,3 +5283,98 @@ should change for future battery runs -- left as-is; the override is
 opt-in only. Full detail, both trial dirs' code and evidence:
 `pi/evals/battery-results/2026-08-19-seed20260802/README.md`'s "Follow-up"
 section.
+
+## 2026-08-19: pair-4 (`go-flutter/bookmarks-app`) rerun at `medium` thinking -- correct fix, but the harness recorded it as failed for an unrelated reason
+
+Extended `run_screening.py`/`run_single_arm.py` with real per-pair thinking
+control (`ScheduledPair.thinking_level`, a `--thinking-override PAIR=LEVEL`
+CLI flag, and an `execute_arm` timeout override) so a rerun no longer has
+to rely on the single process-wide `PI_EVAL_THINKING_LEVEL` env var. First
+use: pair 4's harness arm (the battery's other failure, the `handleList`
+data race -- see the battery entry above), rerun at `--thinking medium`,
+90-minute timeout ceiling (pair 4 at `off` had already used 42.6 of its
+stock 45-minute budget, so the stock ceiling had no headroom for any added
+reasoning cost).
+
+**The fix was correct.** By ~24 minutes in, `handleList` had been rewritten
+to copy each `Bookmark` value into the response slice while still holding
+the lock (`list = append(list, *bm)` inside `s.mu.Lock()`/`Unlock()`,
+instead of the original's live-pointer-then-unlock pattern), which is
+exactly the fix the race needed. Confirmed directly against the hidden
+tests: `go test -race ./...` reported `ok bookmarksapi 1.411s` (no `FAIL`,
+no `DATA RACE`), and all 37 Dart tests passed.
+
+**But the harness recorded `passed: false, timed_out: true`.** After the
+fix was already complete and verified (a `dart analyze` call came back
+clean), the model ran a manual smoke test:
+`go run /tmp/bm_main.go 2>&1 | head -3`, where `bm_main.go` calls
+`http.ListenAndServe(...)` -- a call that never returns and never prints
+to stdout. Piped through `head -3`, the shell call blocked forever waiting
+for output that would never come. This ran out the entire remaining
+83-minute window with zero further progress, until the outer
+`--timeout-minutes 90` subprocess kill (`pi_exit: 124`) finally reaped it.
+
+**`progress-stall-guard.ts` correctly detected the pattern and still
+didn't stop it -- and this is NOT the `PI_STALL_GUARD_INTERCEPT` gap.**
+(Correction to this section's first-pass write-up, which claimed exactly
+that; checked more carefully afterward and it was wrong -- left here
+rather than silently rewritten, since the corrected version below is what
+matters.) Its `SCRATCH_EXECUTION_PATTERNS` regex explicitly matches this
+exact shape
+(`` /\b(?:go|node|python(?:3)?|dart)\s+run\s+\/?(?:tmp|var\/tmp)\// ``,
+`progress-stall-guard.ts:271`), and its independent wall-clock timer fired
+a soft backstop at the 12-minute mark
+(`{"stallBackstop": true, "stallElapsedMs": 723021}` in the session trace).
+The model's own next `thinking` block called it "a false positive -- I'm
+in the middle of a task" and continued -- reasonably, since it *was*
+mid-task at that point (the fix landed shortly after). It then hit the
+actual unrecoverable hang a few rounds later.
+
+`PI_STALL_GUARD_INTERCEPT` (`interceptEnabled`) only gates the *cycle-detection*
+intercept -- repeated identical test failures without a source edit
+(`progress-stall-guard.ts:721,758`). The **wall-clock hard backstop** --
+the mechanism that should have caught this single-hung-tool-call case --
+calls `ctx.abort()`/`liveCtx?.abort()` unconditionally
+(`progress-stall-guard.ts:599,655`), independent of that env var. It's
+default-on 20 minutes past the last source edit, and the last real edit
+landed around 22:29:43 UTC while the process wasn't killed until roughly
+70 minutes later (the 90-minute outer subprocess timeout) -- more than 3x
+past the hard threshold, with no `stall-timeout` trace event ever
+appearing. So the actual finding is that **an always-on backstop silently
+failed to fire**, not that an opt-in one was left off. Checked the obvious
+candidate -- `ExtensionContext.isIdle()` misclassifying an in-flight tool
+call as idle and short-circuiting the timer's check
+(`progress-stall-guard.ts:574`) -- and ruled it out: `isIdle` is defined
+as `!this._isAgentRunActive` in pi's own `agent-session.js`, which stays
+`false` (not idle) for the full duration of an in-flight tool call. Root
+cause of why the independent `setInterval` timer didn't fire (or fired but
+didn't observe the elapsed time it should have) is **not yet found** --
+candidates not yet checked include the timer being stopped by a spurious
+`agent_end` before the true end of the run, or an uncaught exception in
+the timer's async tick silently degrading it on some later invocation
+(each tick is independent per `setInterval`, so a single failure shouldn't
+explain sustained silence, but a state corruption carried between ticks
+could). This needs live instrumentation to actually resolve, not another
+inference from trace evidence.
+
+**A planned `xhigh` follow-up (same task, same bug, per the original
+pair-7 precedent of retrying a failure at higher reasoning) was launched
+then deliberately killed before completion.** Once the `medium` result was
+understood -- correct code, failure caused by an unrelated tool-usage
+habit -- rerunning at `xhigh` would not have tested anything the `medium`
+run hadn't already answered (whether more reasoning fixes the race: it
+already was fixed) and risked reproducing the identical non-reasoning
+stall. Killed at ~2 minutes in (`bl2cp8bsa`, no code changes made, no
+artifact retained) rather than spend another ~75-minute budget for a
+near-certain repeat of the same non-signal.
+
+**Verdict**: pair 4's `handleList`/`handleVisit` race is fixable by the
+harness at `medium` thinking with no vendor-preset changes needed -- the
+2026-08-19 battery's pair-4 failure was not a thinking-level problem. The
+actionable follow-up is debugging why `progress-stall-guard.ts`'s
+always-on wall-clock hard backstop didn't fire on a real, unambiguous
+single-hung-bash-call stall -- not a config flip (`PI_STALL_GUARD_INTERCEPT`
+doesn't touch this code path at all) and not further reasoning-level
+tuning. Full per-pair working tree and evidence (including the 33MB
+`pi-output.jsonl` and full session trace) at
+`pi/evals/battery-results/2026-08-19-seed20260802/pair4-medium-rerun/`.
