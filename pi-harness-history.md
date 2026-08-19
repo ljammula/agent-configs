@@ -4991,3 +4991,92 @@ an operator decision, not a fresh failure signature to add to the "0
 recoveries" tally. A fifth rerun with `PI_STALL_GUARD_INTERCEPT=1` is the
 natural next step to test the intercept action itself against this exact
 loop shape, not run in this pass.
+
+## 2026-08-19 (later still) — a fifth pair-5 rerun with the intercept enabled finds a different, undetected stall shape entirely
+
+Direct follow-on to the fourth rerun above, which deliberately left the
+intercept action's own effectiveness untested (that run used plain
+trace-only config). This rerun set `PI_STALL_GUARD_INTERCEPT=1` for the
+first time against pair 5 specifically, to test whether the intercept
+action changes model behavior once it fires on this fixture's known
+masked-pipe/cycling failure. It did not get the chance to.
+
+**Result: `valid: false, passed: false, pi_exit: 124, timed_out: true,
+harness_seconds: 1800.029, hidden_test_exit: 1, diff_stat: ""`.** Full
+natural 30-minute timeout, this time with a completely empty diff -- the
+model never wrote or edited a single file the entire run.
+
+**Root cause, read directly from the session log (182 bash calls, 1 read
+call, 0 write/edit calls, 0 `pi-stall-trace` entries, 0 intercepts):**
+
+1. The model's very first tool call correctly read
+   `lib/sequential_runner.dart` and the file's own doc comment states the
+   bug outright (`// BUG: this currently runs all tasks concurrently via
+   Future.wait, so a task does not wait for the previous one to finish`) --
+   the model had everything it needed to fix this in the first two tool
+   calls.
+2. It never acted on that. Instead, starting at `2026-08-19T02:21:44Z` and
+   continuing for the rest of the 30-minute budget, it ran two near-
+   identical read-only commands over and over -- `ls -la; echo ---; ls -la
+   test 2>&1; echo ---; git -C . ls-files` and the same with a leading
+   `pwd;` -- **176 times**, every single one producing byte-identical
+   output confirming `test/` is empty (the fixture's own test directory is
+   legitimately empty from the agent's side, the exact same root confusion
+   that originally motivated dropping "shape" from `sameFailure`'s key
+   back on 2026-08-19's first entry today). The model appears to have
+   gotten stuck re-confirming "there really are no tests here" rather than
+   either writing the fix or accepting the absence of a visible test
+   directory and proceeding anyway.
+3. **`progress-stall-guard.ts` never saw any of this.** `matchesDiagnosticExecution()`
+   only recognizes test-runner invocations (`TEST_EXECUTION_PATTERNS`) or
+   scratch-heredoc-plus-run patterns (`SCRATCH_EXECUTION_PATTERNS`); plain
+   `ls`/`git ls-files` environment inspection matches neither. `sawTestThisTurn`
+   never became true, so `sourcelessRounds` never incremented, `sameFailure`
+   never accumulated, and the cycle-detection window never received a single
+   entry -- the extension's entire detection surface requires the model to be
+   running something recognizable as a diagnostic; a stall built entirely out
+   of read-only environment re-inspection, with no diagnostic command and no
+   edit, is structurally invisible to it. `quality-gate.ts` and
+   `cross-model-review.ts` were equally silent, for the same underlying
+   reason -- `agent_end`'s settlement check requires a material diff, and
+   there never was one to check.
+
+**This is not evidence about the intercept action's effectiveness one way or
+the other.** The fourth rerun's masked-pipe/cycling shape never recurred
+this time; a different, arguably more basic failure mode did instead, and
+it happened to be one this file cannot detect regardless of whether the
+intercept is enabled. The `PI_STALL_GUARD_INTERCEPT=1` question -- does the
+model actually change behavior once the synchronous intercept text reaches
+it -- remains genuinely untested. Stochastic variance across runs of the
+same fixture against the same model continues to surface a new shape almost
+every time (masked pipe -> shape-sensitive alternation -> argument-echoed
+alternation -> incrementally-widening pipe chain -> now pure read-only
+environment re-inspection with zero code ever written); five reruns, five
+distinct shapes.
+
+One secondary observation, not chased further this session: `stack-router.ts`
+routed this run's skill as `flutter-app` (`{"skills":"flutter-app"}` in its
+trace) despite the fixture's `pubspec.yaml` having no Flutter SDK dependency
+(`dev_dependencies: test, coverage` only) -- the same "pubspec.yaml without
+the flutter SDK dependency" case `resolveVerificationCommand()` was
+specifically hardened to resolve to `dart test`, not `flutter test`, per its
+existing test coverage. That hardening lives in a different function
+(verification-command resolution for settlement, in `lib/verification.ts`)
+than `stack-router.ts`'s own skill-selection logic, and this run gives no
+evidence the routing mismatch caused or contributed to the stall -- the
+model's commands were plain `dart`/`git`/`ls`, never `flutter`. Flagged as a
+possible latent stack-router.ts routing gap worth checking independently,
+not established as related to this incident.
+
+**Open item, more consequential than the routing note**: a stall shape
+`progress-stall-guard.ts` cannot detect at all -- repeated read-only
+environment inspection with zero diagnostic-pattern-matching commands and
+zero edits. Widening `matchesDiagnosticExecution()` (or adding a parallel
+"repeated identical read-only command, no code written at all" signal) is
+the natural next fix, but not attempted this session -- flagged for
+whoever next revisits this file, consistent with this repo's convention of
+recording a real gap honestly rather than patching reactively mid-
+investigation. Artifacts (local temp, not committed):
+`/private/tmp/pi-screen-05-harness-1nh7k9v3/` (session log, empty working
+tree diff), summary at
+`/private/tmp/claude-501/-Users-kanna-code-agent-configs/9d0b7f60-8788-4f88-9f15-28281898433f/scratchpad/pair5-intercept-validate/summary.json`.
