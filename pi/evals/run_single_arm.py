@@ -21,6 +21,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dataclasses import replace
+
 from run_screening import (
     REPO_ROOT,
     execute_arm,
@@ -40,6 +42,22 @@ def main() -> int:
     parser.add_argument("--arm", required=True, choices=("baseline", "harness"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--thinking",
+        default=None,
+        help="override this pair's --thinking level for this ad-hoc run "
+        "(e.g. medium, xhigh); default reproduces the seeded schedule's "
+        "normal level unchanged.",
+    )
+    parser.add_argument(
+        "--timeout-minutes",
+        type=float,
+        default=None,
+        help="override the task fixture's harness_timeout_minutes for this "
+        "run. Use when raising --thinking above the fixture's normal level "
+        "-- higher reasoning effort adds wall time the fixture's stock "
+        "budget wasn't sized for.",
+    )
     args = parser.parse_args()
 
     planned = schedule(args.seed)
@@ -49,6 +67,8 @@ def main() -> int:
     pair = matches[0]
     if args.arm not in pair.arm_order:
         parser.error(f"arm {args.arm!r} not scheduled for pair {args.pair} (order: {pair.arm_order})")
+    if args.thinking is not None:
+        pair = replace(pair, thinking_level=args.thinking)
 
     reviewer = check_reviewer_route()
     model_payload = model_identity(args.host)
@@ -63,13 +83,15 @@ def main() -> int:
     baseline_agent_dir.mkdir()
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "seed": args.seed,
         "pair": pair.pair,
         "task": pair.task,
         "arm_order": list(pair.arm_order),
         "arm_run": args.arm,
+        "thinking_level": pair.thinking_level,
+        "timeout_minutes_override": args.timeout_minutes,
         "pi_version": pi_version,
         "agent_configs_revision": git_revision(REPO_ROOT),
         "model_endpoint": f"http://{args.host}:8080/v1",
@@ -81,7 +103,9 @@ def main() -> int:
     print(f"ARTIFACT_ROOT={artifact_root}", flush=True)
     print(f"PAIR={pair.pair} TASK={pair.task} ARM={args.arm}", flush=True)
 
-    record = execute_arm(pair, args.arm, artifact_root, baseline_agent_dir, args.host)
+    record = execute_arm(
+        pair, args.arm, artifact_root, baseline_agent_dir, args.host, args.timeout_minutes
+    )
     print(
         f"PAIR={pair.pair} ARM={args.arm} VALID={record['valid']} "
         f"PASS={record['passed']} SECONDS={record['harness_seconds']}",

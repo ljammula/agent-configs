@@ -254,11 +254,20 @@ def execute_arm(
     artifact_root: Path,
     baseline_agent_dir: Path,
     host: str,
+    timeout_minutes_override: float | None = None,
 ) -> dict[str, Any]:
     task_dir = TASK_ROOT / pair.task
     metadata = json.loads((task_dir / "meta.json").read_text())
     prompt = (task_dir / "spec.md").read_text()
-    timeout_minutes = float(metadata.get("harness_timeout_minutes", 30))
+    # Override exists for ad-hoc reruns at a higher thinking level, where the
+    # fixture's stock budget (sized for --thinking off) may not leave enough
+    # headroom -- see run_single_arm.py's --timeout-minutes. Absent an
+    # override, behavior is unchanged from the fixture's own metadata.
+    timeout_minutes = (
+        timeout_minutes_override
+        if timeout_minutes_override is not None
+        else float(metadata.get("harness_timeout_minutes", 30))
+    )
 
     run_dir = Path(tempfile.mkdtemp(prefix=f"pi-screen-{pair.pair:02d}-{arm}-", dir="/tmp")).resolve()
     work_dir = run_dir / "work"
@@ -377,6 +386,7 @@ def execute_arm(
         "setup_exit": setup_exit,
         "hidden_test_exit": tested.returncode,
         "harness_seconds": round(harness_seconds, 3),
+        "timeout_minutes": timeout_minutes,
         "usage": usage,
         "trace_events": [
             {
