@@ -311,6 +311,52 @@ test("git status noise present since the baseline tick does not repeatedly reset
 	}
 });
 
+// Regression test, live-observed 2026-08-19 (`go-flutter/bookmarks-app`,
+// pair 4 -- see the file header's "Bug 5"): agent_end fires per internal
+// agent loop (retry, auto-compaction, queued continuation), not once per
+// invocation, so it can stop the independent timer well before the run is
+// actually over. The timer must restart on every subsequent agent_start,
+// not just the true first one, or a single mid-run agent_end permanently
+// kills the one mechanism that can catch a tool call that never returns.
+test("the independent timer restarts after an agent_end mid-run, not just on the first agent_start", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+
+		// First agent loop segment: starts, then ends (e.g. an internal retry
+		// or auto-compaction boundary) well before any stall threshold.
+		await harness.emit({ type: "agent_start" } as any);
+		await mock.timers.tick(1_000);
+		await harness.emit({ type: "agent_end" } as any);
+		assert.equal(harness.abortCalls, 0);
+
+		// Second segment of the SAME invocation (not seenFirstAgentStart's
+		// first start) -- the timer must be running again from here.
+		await harness.emit({ type: "agent_start" } as any);
+
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(
+			harness.abortCalls,
+			1,
+			"the timer must restart on the second agent_start, not stay dead after the first agent_end",
+		);
+		const trace = harness.entries.at(-1)?.data as any;
+		assert.equal(trace.outcome, "stall-timeout");
+		assert.equal(trace.source, "wall-clock-timer");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression/documentation test for the resetStallState/resetFailureState
 // refactor: an "input" event (a new ask) resets the failure-fingerprint
 // fields but, unlike a real source edit, does NOT reset sourcelessRounds --

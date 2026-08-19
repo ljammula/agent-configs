@@ -239,6 +239,29 @@
  * signature and doesn't keep re-resetting the clock. Widening that would
  * mean diffing file *content* every tick instead of just `status`, a
  * meaningfully heavier per-tick cost for a case not yet observed live.
+ *
+ * Bug 5, live-observed 2026-08-19 (`go-flutter/bookmarks-app`, pair 4,
+ * `pi-harness-history.md`'s matching entry): the independent timer above
+ * was started only on the true first `agent_start` (`seenFirstAgentStart`
+ * gating, same guard as item 2's fix) but stopped on *every* `agent_end` --
+ * and `agent_end` fires per internal agent loop (retry, auto-compaction,
+ * queued continuation), not once per invocation, per Pi's own SDK docs
+ * ("Fired when an agent loop ends," distinct from `agent_settled`, "Fired
+ * after an agent run has fully settled and no automatic retry, compaction,
+ * or queued continuation will run"). The first such boundary anywhere in a
+ * run killed the timer permanently: the next `agent_start` saw
+ * `seenFirstAgentStart` already true and skipped `startTimer()`, so the
+ * one mechanism meant to catch a single hung tool call with no
+ * `tool_result` ever produced (the exact case item 3 in the header above
+ * introduced this timer to fix) was silently dead for the rest of the
+ * session. Live consequence: a `go run /tmp/... | head` hang ran the full
+ * remaining ~83 minutes of a 90-minute budget with zero further trace
+ * events -- the hard backstop's "hard ceiling, no manual intervention"
+ * claim didn't hold, again, for its own worst case. Fixed by calling
+ * `startTimer()` unconditionally on every `agent_start` (idempotent --
+ * `startTimer()` already calls `stopTimer()` first) while keeping the
+ * state-reset (`resetStallState()`, `sawTestThisTurn`, `intercepts`) gated
+ * to the true first start only, same as before.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
@@ -607,6 +630,14 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", (_event, ctx) => {
 		liveCtx = ctx;
 		liveCwd = ctx.cwd;
+		// startTimer() always runs, independent of the state-reset gating below --
+		// see "Bug 5" in the file header. agent_end fires per internal agent
+		// loop (retry, auto-compaction, queued continuation), not once per
+		// invocation, so it can stop the timer well before the run is actually
+		// over; the timer must restart on every subsequent agent_start or it
+		// stays dead for the rest of the session. Idempotent by construction --
+		// startTimer() itself calls stopTimer() first.
+		startTimer();
 		// Only the true first start of this invocation resets state -- a retry
 		// restart must not wipe real evidence of repeated inaction. See file
 		// header, "Two bugs found live 2026-08-16," item 2.
@@ -615,7 +646,6 @@ export default function (pi: ExtensionAPI) {
 		resetStallState();
 		sawTestThisTurn = false;
 		intercepts = 0;
-		startTimer();
 	});
 
 	pi.on("agent_end", () => {
