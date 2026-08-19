@@ -5080,3 +5080,50 @@ investigation. Artifacts (local temp, not committed):
 `/private/tmp/pi-screen-05-harness-1nh7k9v3/` (session log, empty working
 tree diff), summary at
 `/private/tmp/claude-501/-Users-kanna-code-agent-configs/9d0b7f60-8788-4f88-9f15-28281898433f/scratchpad/pair5-intercept-validate/summary.json`.
+
+## Update 2026-08-19 (later still): unconditional stall backstop hardened per PR #20 Codex review
+
+`progress-stall-guard.ts`'s unconditional wall-clock backstop (added earlier
+today, see the plan doc `plans/pi-harness-hardening-backlog-2026-08-19.md`'s
+Recommendation 1) shipped with the elapsed-time check evaluated only inside
+the `tool_result` handler. Codex's automated PR review of PR #20 caught two
+real gaps in that design, both confirmed against the actual implementation
+(not just the plan text it commented on) and fixed:
+
+1. **The hard-abort stage could never fire for its own worst case.** A hang
+   with no tool call at all, or a single bash invocation that itself never
+   returns, produces no `tool_result` event -- so the handler checking
+   elapsed time never runs, and the "hard ceiling, no manual intervention"
+   claim didn't hold exactly where it mattered most. Fixed with an
+   independent `setInterval` (15s cadence) started at the true first
+   `agent_start`, stopped at `agent_end`, calling the live
+   `ExtensionContext.abort()` directly -- it doesn't depend on any tool
+   event firing. Only acts while `!ctx.isIdle()`.
+2. **The sourceless clock only reset on `write`/`edit` tool calls**, so a
+   model editing source through `bash` (`sed -i`, `tee`, a codegen or
+   formatter script) never registered as progress and could be falsely
+   flagged as a stall. Fixed by having the same timer poll `git status
+   --porcelain` each tick (same non-test-file filtering and directory
+   exclusions as `lib/verification.ts`'s `snapshotDiff`) and treat a newly
+   dirty non-test path as a real, tool-agnostic edit signal. Known, accepted
+   narrower gap: catches a path going dirty, not further edits to a file
+   already dirty from an earlier tick (would need per-tick content diffing,
+   a meaningfully heavier cost not yet justified by a live-observed case).
+
+Both fixes are covered by new regression tests in
+`pi/tests/progress-stall-guard.test.ts` (independent-timer hard abort with
+zero `tool_result` events, idle-session non-abort, bash-driven edit
+detection, and an already-dirty-tree noise case that confirms the detector
+doesn't over-fire) -- `npm run typecheck && npm test` passes, 220/220.
+`pi/tests/extension-api-harness.ts` gained an `idle` option (default
+`false`) so tests can control `ctx.isIdle()`, which the new timer logic
+depends on and the harness previously left unstubbed.
+
+Also addressed, in the plan doc rather than code: Codex separately flagged
+that the doc's framing risked reading as "correctness is fully closed,"
+when `pi-harness-validation-status.md` lines 535-544 record a run that
+settled cleanly (`valid: true`, `timed_out: false`) while still leaving the
+`go/lru-cache` eviction bug in and failing the hidden test -- a non-stall
+correctness failure the stall backstop can't and shouldn't try to catch
+(that's `quality-gate.ts`/eval-battery scope). Added as an explicit
+open-gap note in the doc rather than a new recommendation.

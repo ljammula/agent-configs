@@ -11,7 +11,19 @@ Repo: `agent-configs` (this repo); extensions live in `pi/extensions/`, tests in
 `pi-harness-validation-status.md` establishes that the harness's *correctness*
 gap to `claude-sonnet-5` is closed on the one task with matched-pair evidence
 (0/4 → 4/4 on `go/lru-cache`, same regression test, once thinking +
-temperature were fixed). What remains is a **reliability and speed** gap:
+temperature were fixed). That is narrower than "correctness is closed,
+full stop," and this doc's framing shouldn't be read as claiming more than
+the matched-pair evidence supports: `pi-harness-validation-status.md` lines
+535-544 separately record a run that completed `go/lru-cache` cleanly
+(`valid: true`, `timed_out: false`) while still leaving the eviction bug in
+and failing the hidden test — a non-stall correctness failure the
+recommendations below don't address, since the stall backstop (Rec. 1) only
+triggers on `stall-timeout`, and a clean-looking settle with a wrong answer
+is exactly the shape `quality-gate.ts`'s settlement check exists for, not
+this file. Flagged during Codex PR review (PR #20); kept as an explicitly
+open gap here rather than folded into a recommendation, since closing it is
+`quality-gate.ts`/eval-battery scope, not `progress-stall-guard.ts` scope.
+What remains in this doc's own scope is a **reliability and speed** gap:
 Sonnet finishes `go/lru-cache` in 32.4s, one shot, 3/3 all-time; the harness
 takes 2-10 minutes per turn with thinking on (100-312% median runtime
 overhead vs. baseline) and has hit **five distinct stall/loop shapes** on

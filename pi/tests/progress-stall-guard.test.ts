@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import progressStallGuard, {
 	detectsCycle,
 	fingerprintFailure,
@@ -161,6 +161,183 @@ test("a successful non-test source edit resets the wall-clock backstop", async (
 		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
 		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
 	}
+});
+
+// Regression test for a Codex PR review finding (2026-08-19, PR #20): the
+// original implementation only checked elapsed time inside the
+// `tool_result` handler, so a hang with no tool call at all -- or a single
+// bash invocation that itself never returns -- produced no event for that
+// handler to run on, and the "hard" backstop stage could never fire. This
+// exercises the independent timer added to close that gap: no tool_result
+// is emitted at all, only wall-clock time passing.
+test("the independent timer enforces the hard deadline even when no tool_result ever fires", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1);
+		const trace = harness.entries.at(-1)?.data as any;
+		assert.equal(trace.outcome, "stall-timeout");
+		assert.equal(trace.stallTimeout, true);
+		assert.equal(trace.source, "wall-clock-timer");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// Regression test for the same review: an idle session (no run in progress)
+// must never be aborted just because wall-clock time passed -- the timer
+// only fires while the agent is actually mid-run.
+test("the independent timer does not abort an idle session", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: true });
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 0);
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// Regression test for a second Codex PR review finding (same PR): the
+// backstop only reset on `write`/`edit` tool calls, so a model editing
+// source through `bash` (`sed -i`, `tee`, a codegen script) never reset the
+// sourceless clock. The independent timer now also polls `git status` each
+// tick and treats a newly-dirty non-test path as evidence of progress.
+test("a bash-driven edit detected via git status resets the wall-clock backstop", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	let dirty = false;
+	try {
+		const harness = new ExtensionHarness({
+			idle: false,
+			exec: (call) => {
+				if (call.command === "git" && call.args[0] === "status") {
+					return { code: 0, stdout: dirty ? "\0 M lib/lru.go\0" : "", stderr: "", killed: false };
+				}
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			},
+		});
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		// First tick establishes the clean baseline.
+		await mock.timers.tick(15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// The model edits lib/lru.go via `sed -i` -- no write/edit tool call,
+		// only git status changing.
+		dirty = true;
+		await mock.timers.tick(15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Advance well past what would have been the original hard deadline;
+		// the bash-detected edit should have reset the clock.
+		await mock.timers.tick(100_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 0, "the bash-detected edit should have reset the wall clock");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// A tracked path that never leaves git status dirty (e.g. a file the model
+// keeps rewriting to the SAME modified state each tick, or noise from an
+// already-dirty tree at session start) must not repeatedly reset the clock
+// -- only a *newly* appearing non-test path counts. This is the accepted,
+// narrower gap documented at the timer's definition: it catches a path
+// newly going dirty, not further edits to a file already dirty.
+test("git status noise present since the baseline tick does not repeatedly reset the backstop", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({
+			idle: false,
+			exec: (call) => {
+				if (call.command === "git" && call.args[0] === "status") {
+					// Already dirty from before this session started, and stays
+					// exactly this dirty for the whole run.
+					return { code: 0, stdout: "\0 M lib/lru.go\0", stderr: "", killed: false };
+				}
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			},
+		});
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1, "an unchanging dirty tree is not fresh evidence of progress");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// Regression/documentation test for the resetStallState/resetFailureState
+// refactor: an "input" event (a new ask) resets the failure-fingerprint
+// fields but, unlike a real source edit, does NOT reset sourcelessRounds --
+// a fresh ask is not itself evidence a source edit happened. This behavior
+// predates the refactor; pinned here so a future shared-reset change can't
+// silently widen it.
+test("an input event resets the failure fingerprint but not sourcelessRounds", async () => {
+	const harness = new ExtensionHarness();
+	progressStallGuard(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+
+	await harness.emit(failingTestResult());
+	await harness.emit(nonEmptyTurnEnd());
+	await harness.emit(failingTestResult());
+	await harness.emit(nonEmptyTurnEnd());
+
+	await harness.emit({ type: "input" } as any);
+
+	await harness.emit(failingTestResult());
+	await harness.emit(nonEmptyTurnEnd());
+
+	// sourcelessRounds carried through the input event (3, not reset to 1);
+	// sameFailure did reset (this is the first failure since the input, so
+	// no repeat yet).
+	const trace = harness.entries.at(-1)?.data as any;
+	assert.equal(trace.sourcelessRounds, 3);
+	assert.equal(trace.sameFailure, 0);
 });
 
 test("an edit to a non-test source file resets the stall counters", async () => {
