@@ -4633,3 +4633,55 @@ Closes Task 8, the last item from the entire 2026-08-18 hardening backlog
 `/private/tmp/pi-task8-goal-compact-1787092125/` and
 `/private/tmp/pi-task8b-goal-compact-1787093289/` (both real, passing Go
 modules, also local temp, not committed).
+
+## 2026-08-19 — post-backlog pair-5 rerun: widened stall-guard fingerprint confirmed live against a real stall for the first time, still can't recover the run by design
+
+With Tasks 1-8 closed, reran the one still-open item from the hardened-config
+battery: `dart/sequential-runner` (pair 5), harness arm only, seed
+`20260802`. Same clean-isolation methodology as Task 4's rerun — `ps aux` on
+the model host confirmed only the two expected `mlx_vlm.server` processes
+(no contention), both `com.aistack.qwen38` and `com.aistack.kvproxy` fully
+restarted via `launchctl kickstart -k` (new PIDs confirmed), `/v1/models`
+fresh and no lingering client connections via `lsof`, then
+`run_single_arm.py --seed 20260802 --pair 5 --arm harness` launched detached.
+
+**Result: `valid: false, passed: false, timed_out: true`, 1800.026s** — hit
+the same 30-minute budget again, functionally identical outcome to Task 4's
+1800.042s. `hidden_test_exit: 0` again too: the on-disk diff would have
+passed. But the trace underneath tells a different, more complete story than
+either prior attempt.
+
+**The widened fingerprint (Task 2/8/18's fix) worked, live, for the first
+time.** `pi-stall-trace` shows `sourcelessRounds` climbing to 200 by the end
+of the run, and — unlike the two post-fix `go/lru-cache` pair-7 reruns
+earlier this week, which never reproduced a real stall to test the fix
+against — `sameFailure` genuinely reached its accumulation ceiling here:
+`stalled: true` fired **33 separate times** in the trace, with `sameFailure`
+peaking at 4 (past the old ≥2 threshold). This is the first live evidence
+that the stable-scratch-loop signature actually recognizes this exact
+failure shape in a real run, not just in the unit test that reproduces it
+synthetically. Closes that specific "honestly unconfirmed" gap left open in
+`pi-harness-validation-status.md`.
+
+**It still didn't change the outcome, and that's the expected tradeoff, not
+a new bug.** `grep -c deliverAs` on the full session log returned 0 — the
+8/19 decoupling holds; the guard is trace-only by design now, so correctly
+detecting the stall in real time gave it nothing to act on. Reading
+`quality-gate`'s trace events shows why the timeout happened at all: only
+**3** verification calls ran, all within the run's first minute
+(23:46:23–23:47:19Z), each against a distinct diff hash, each `outcome:
+"fail"`. For the remaining ~1,750 seconds the model never called the
+verification command again — it kept iterating without ever re-checking or
+committing, which is exactly the "133/200 sourceless rounds" pattern Task 4
+first found, now reproduced a second time on the same task.
+
+**Net**: this sharpens rather than closes the pair-5 gap. Detection-side: now
+confirmed working live, not just unit-tested — a real result, not a
+non-finding. Recovery-side: still structurally open, and openly so — a
+genuinely stalled session with in-band nudging removed has no live path back
+to progress, which is the traded-away capability the 8/19 narrowing decision
+accepted going in, now demonstrated rather than assumed. Artifacts:
+`/private/tmp/pi-pair5-rerun-1787096730/` (manifest, summary, results.jsonl;
+local temp, not committed), underlying task artifact
+`/private/tmp/pi-screen-05-harness-crfd7xt5/` (session log, working tree;
+also local temp, not committed).

@@ -339,7 +339,7 @@
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="num">12</div><div class="label">Dated milestones below, spanning 18 days</div></div>
+    <div class="stat"><div class="num">13</div><div class="label">Dated milestones below, spanning 18 days</div></div>
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, paired battery</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">0→4/4</div><div class="label">Qwen3.8 replicated failure flipped to a replicated pass</div></div>
@@ -351,11 +351,11 @@
   </div>
 
   <div class="filters" role="group" aria-label="Filter by result">
-    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">12</span></button>
+    <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All <span class="n">13</span></button>
     <button class="filter-chip" type="button" data-filter="pass" aria-pressed="false">Passed <span class="n">4</span></button>
     <button class="filter-chip" type="button" data-filter="fixed" aria-pressed="false">Fixed <span class="n">5</span></button>
     <button class="filter-chip" type="button" data-filter="fail" aria-pressed="false">Failure <span class="n">1</span></button>
-    <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">2</span></button>
+    <button class="filter-chip" type="button" data-filter="open" aria-pressed="false">Open <span class="n">3</span></button>
   </div>
 
   <!-- Act I -->
@@ -785,6 +785,39 @@
           <div class="links">
             <a href="pi-harness-history.md">Task 5, 6, 7, 8 entries</a>
             <a href="pi-harness-validation-status.md">Current status</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry result-open" data-result="open">
+        <div class="date">Aug 19</div>
+        <div class="rail"><div class="dot"></div></div>
+        <div class="card">
+          <div class="date-mobile">2026-08-19</div>
+          <div class="badges"><span class="badge fixed">stall detection confirmed live</span><span class="badge open">recovery still unsolved</span></div>
+          <h3>Pair-5 rerun: the widened stall-guard fingerprint finally catches a real stall live — and, by design, still can't do anything about it</h3>
+          <p>
+            With the backlog closed, the one still-open item — <code>dart/sequential-runner</code>
+            (pair 5) — got a second clean-isolation rerun, same methodology
+            as Task 4's. Result: <b>still timed out at 1800s</b>,
+            functionally identical to before, <code>hidden_test_exit: 0</code>
+            again (the diff on disk would have passed). But this time the
+            trace shows something new: <code>sourcelessRounds</code> reached
+            200 and <code>sameFailure</code> genuinely peaked at 4 — past the
+            old ceiling — with <code>stalled: true</code> firing 33 times.
+            The widened fingerprint correctly recognized this exact stall
+            live, for the first time, closing that specific "honestly
+            unconfirmed" gap. It changed nothing about the outcome, and that's
+            the expected tradeoff: trace-only by design since the nudging
+            decoupling, the guard had nowhere to send that diagnosis.
+            <code>quality-gate</code>'s trace shows why — only 3 verification
+            calls ran, all in the first minute, then ~1,750 seconds of
+            looping with no further checks. Detection-side gap closed;
+            recovery-side open on purpose, the accepted cost of removing
+            in-band nudging, now demonstrated rather than assumed.
+          </p>
+          <div class="links">
+            <a href="pi-harness-history.md">Post-backlog pair-5 rerun entry</a>
           </div>
         </div>
       </div>
