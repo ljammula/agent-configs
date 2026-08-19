@@ -5127,3 +5127,69 @@ settled cleanly (`valid: true`, `timed_out: false`) while still leaving the
 correctness failure the stall backstop can't and shouldn't try to catch
 (that's `quality-gate.ts`/eval-battery scope). Added as an explicit
 open-gap note in the doc rather than a new recommendation.
+
+## Update 2026-08-19 (later still): sixth pair-5 rerun — first live confirmation the backstop actually recovers a stall, no manual intervention
+
+Direct live validation of the fixes above (commit `599a4b7`), not just the
+unit-test coverage that shipped with them. Same fixture as every prior
+rerun this investigation has used: `dart/sequential-runner`, pair 5, seed
+`20260802`, harness arm, via `run_single_arm.py --seed 20260802 --pair 5
+--arm harness --host kannasmacstudio.lan`. `AI_STACK_HOST` reachable,
+`/v1/models` responding, Pi `0.83.0` matched. One deliberate deviation from
+the usual methodology: `PI_STALL_GUARD_BACKSTOP_MINUTES=2` (soft=2min,
+hard=4min) instead of the 10/20-minute defaults, purely to get a fast
+confirmation cycle rather than waiting out the full default window or the
+30-minute harness timeout -- this was a smoke test of the mechanism, not a
+battery run, and doesn't change what the trace demonstrates.
+
+The model hit the same core loop shape as reruns two through five: `dart
+test --help 2>&1 | grep -iE '<terms>'`, hunting for an explanation of the
+empty `test/` directory, no source edits, `sameFailure` climbing without
+ever resetting. This time:
+
+1. **Soft backstop fired at `stallElapsedMs: 123311`** (~2:03), right at
+   the configured 2-minute threshold: `stallBackstop: true`, `sourcelessRounds:
+   17`, `sameFailure: 1`. No recovery followed -- the model kept probing
+   variations of the same `dart test --help | grep` command, `sameFailure`
+   climbing to 15 over the next two minutes.
+2. **Hard backstop fired at `stallElapsedMs: 240068`** (~4:00, right at the
+   configured hard threshold): `stallTimeout: true, outcome: "stall-timeout",
+   source: "wall-clock-timer"`. The `source` field is the load-bearing
+   confirmation here -- it proves this fired through the *new* independent
+   `setInterval` mechanism added for the Codex review fixes, not the
+   pre-existing tool_result-gated check (which this exact run's loop shape,
+   being made entirely of `bash` tool calls, would likely also have caught --
+   but the field removes the ambiguity rather than leaving it inferred).
+3. **`ctx.abort()` cleanly stopped the run.** Final record: `valid: true,
+   passed: true, timed_out: false, pi_exit: 0, harness_seconds: 330.888,
+   hidden_test_exit: 0, extension_errors: 0`.
+
+**This is the headline result**: every one of the five prior pair-5 reruns
+in this investigation either ran out the full 30-minute timeout
+(`timed_out: true`) or required a human-armed monitor watching the session
+JSONL to send manual `SIGTERM`s, because nothing in the harness could act
+on a confirmed stall on its own. This is the first rerun to end cleanly,
+correctly, and unattended in under six minutes -- `valid: true, passed:
+true` is not evidence the model "succeeded" at the task in the sense of
+working through to a self-recognized done state (`hidden_test_exit: 0`
+matches every prior rerun exactly: the on-disk diff was already correct
+minutes in, same as always, the model just never stopped re-verifying it).
+It is evidence the *harness* now succeeds where it didn't before: turning
+an unrecoverable stall into a bounded, distinguishable, correctly-recorded
+outcome without a human in the loop. That is exactly what Recommendation 1
+in the 2026-08-19 hardening plan set out to do, and this run is the first
+live proof it does it.
+
+**What this does not establish**: the default 10/20-minute thresholds
+weren't exercised (only the shortened 2/4-minute smoke config was); the
+bash-driven-edit detection (the other Codex-flagged fix) wasn't exercised
+live, since this run's loop shape never touched a file through bash either
+-- that fix has unit coverage only so far, same as before this rerun. A
+future live run that happens to hit a bash-only-edit shape (or a
+deliberately constructed one) would be the natural next confirmation for
+that specific mechanism.
+
+Artifacts (local temp, not committed): session JSONL at
+`/private/tmp/pi-screen-05-harness-r02f6i2d/session/`, working tree at
+`/private/tmp/pi-screen-05-harness-r02f6i2d/work/`, summary at
+`/private/tmp/pi-arm-20260819T181312Z-wn7i89yf/summary.json`.
