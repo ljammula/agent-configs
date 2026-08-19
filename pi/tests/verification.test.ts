@@ -6,6 +6,7 @@ import test from "node:test";
 import {
 	commandSatisfiesCanonical,
 	evidencePassesCurrentDiff,
+	explainVerificationMasking,
 	isBroadVerificationCommand,
 	resolveVerificationCommand,
 	snapshotDiff,
@@ -59,6 +60,34 @@ test("shell control flow cannot disguise a failed verification exit", () => {
 	assert.equal(verificationPipelineCanMaskFailure("npm test 2>&1"), false);
 	assert.equal(verificationPipelineCanMaskFailure("npm test; # trailing separator"), false);
 	assert.equal(verificationPipelineCanMaskFailure("npm test && echo passed"), false);
+});
+
+// explainVerificationMasking is verificationPipelineCanMaskFailure's
+// reason-carrying sibling, added for progress-stall-guard.ts's intercept
+// text -- it needs to name the actual mechanism, not just a yes/no.
+test("explainVerificationMasking names the specific masking mechanism", () => {
+	assert.deepEqual(explainVerificationMasking("go test ./... | tail -20"), { masks: true, reason: "unguarded-pipe" });
+	assert.deepEqual(explainVerificationMasking("set -o pipefail; go test ./... | tail -20"), { masks: false });
+	assert.deepEqual(explainVerificationMasking("npm test; echo EXIT=$?"), { masks: true, reason: "trailing-command" });
+	assert.deepEqual(explainVerificationMasking("npm test || true"), { masks: true, reason: "or-fallback" });
+	assert.deepEqual(explainVerificationMasking("! npm test"), { masks: true, reason: "negated" });
+	assert.deepEqual(explainVerificationMasking("npm test & echo waiting"), { masks: true, reason: "backgrounded" });
+	assert.deepEqual(explainVerificationMasking("npm test && echo passed"), { masks: false });
+});
+
+test("verificationPipelineCanMaskFailure stays consistent with explainVerificationMasking's masks flag", () => {
+	for (const command of [
+		"go test ./... | tail -20",
+		"set -o pipefail; go test ./... | tail -20",
+		"npm test; echo EXIT=$?",
+		"npm test || true",
+		"! npm test",
+		"npm test & echo waiting",
+		"npm test 2>&1",
+		"npm test && echo passed",
+	]) {
+		assert.equal(verificationPipelineCanMaskFailure(command), explainVerificationMasking(command).masks, command);
+	}
 });
 
 test("only evidence for the current non-truncated diff passes", () => {

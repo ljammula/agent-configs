@@ -61,15 +61,30 @@ function unquotedShellSyntax(command: string): string {
 	return syntax.join("");
 }
 
+// Named so a caller that needs to *explain* a masked result to the model
+// (progress-stall-guard.ts's intercept action) can name the actual
+// mechanism quality-gate already detected with certainty, instead of
+// guessing at one. Which reason is reported when a command matches more
+// than one shape is decided by character position in the scan below (the
+// first masking condition encountered left-to-right in the command text),
+// not by this list's declaration order -- the boolean result itself is
+// unaffected either way, since `masks` only needs one hit.
+export type MaskReason = "negated" | "or-fallback" | "unguarded-pipe" | "trailing-command" | "backgrounded";
+
+export interface MaskExplanation {
+	masks: boolean;
+	reason?: MaskReason;
+}
+
 // `patterns` defaults to BROAD_VERIFICATION_PATTERNS (quality-gate.ts's own
 // settlement-evidence use). progress-stall-guard.ts passes its own, deliberately
 // broader TEST_EXECUTION_PATTERNS instead -- same shell-parsing logic, a
 // different notion of "what counts as the command under test," so the patterns
 // are parameterized rather than duplicating unquotedShellSyntax/scan below.
-export function verificationPipelineCanMaskFailure(
+export function explainVerificationMasking(
 	command: string,
 	patterns: RegExp[] = BROAD_VERIFICATION_PATTERNS,
-): boolean {
+): MaskExplanation {
 	const syntax = unquotedShellSyntax(command);
 	const pipefail = PIPEFAIL_PATTERN.test(syntax);
 	const ends = patterns.flatMap((pattern) =>
@@ -77,16 +92,17 @@ export function verificationPipelineCanMaskFailure(
 			(match) => ({ start: match.index, end: match.index + match[0].length }),
 		),
 	);
-	return ends.some(({ start, end }) => {
-		if (/(?:^|[;&|]\s*)!\s*$/.test(syntax.slice(0, start))) return true;
+	for (const { start, end } of ends) {
+		if (/(?:^|[;&|]\s*)!\s*$/.test(syntax.slice(0, start))) return { masks: true, reason: "negated" };
 		for (let i = end; i < syntax.length; i += 1) {
 			const char = syntax[i];
 			const next = syntax[i + 1];
-			if (char === "#") return false;
-			if (char === "|" && next === "|") return true;
-			if (char === "|" && !pipefail) return true;
+			if (char === "#") break;
+			if (char === "|" && next === "|") return { masks: true, reason: "or-fallback" };
+			if (char === "|" && !pipefail) return { masks: true, reason: "unguarded-pipe" };
 			if (char === ";" || char === "\n") {
-				return /\S/.test(syntax.slice(i + 1).replace(/#.*$/gm, ""));
+				if (/\S/.test(syntax.slice(i + 1).replace(/#.*$/gm, ""))) return { masks: true, reason: "trailing-command" };
+				break;
 			}
 			if (
 				char === "&" &&
@@ -94,10 +110,18 @@ export function verificationPipelineCanMaskFailure(
 				syntax[i - 1] !== "&" &&
 				syntax[i - 1] !== ">" &&
 				syntax[i - 1] !== "<"
-			) return true;
+			) return { masks: true, reason: "backgrounded" };
 		}
-		return false;
-	});
+	}
+	return { masks: false };
+}
+
+/** Thin boolean wrapper over `explainVerificationMasking` for callers that only need the yes/no. */
+export function verificationPipelineCanMaskFailure(
+	command: string,
+	patterns: RegExp[] = BROAD_VERIFICATION_PATTERNS,
+): boolean {
+	return explainVerificationMasking(command, patterns).masks;
 }
 
 export function isBroadVerificationCommand(command: string): boolean {

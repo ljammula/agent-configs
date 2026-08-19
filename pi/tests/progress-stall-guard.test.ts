@@ -347,6 +347,28 @@ test("detectsCycle: more distinct values than the threshold reads as varied expl
 	assert.equal(detectsCycle(["a", "b", "c", "d", "e", "f"]), false);
 });
 
+// Regression test for an Opus design review finding (2026-08-19): a bare
+// distinct-count check fired on five identical results plus one novel one,
+// which is weaker evidence than six identical results (sameFailure's own
+// territory, needing 9 consecutive matches to intercept). A single outlier
+// mixed into an otherwise-uniform window must not fire more readily than
+// the uniform window itself.
+test("detectsCycle: a single outlier mixed into an otherwise-uniform window is NOT a cycle", () => {
+	assert.equal(detectsCycle(["a", "a", "a", "a", "a", "b"]), false, "the 'b' appears only once -- not genuine alternation");
+	assert.equal(detectsCycle(["b", "a", "a", "a", "a", "a"]), false, "same shape, outlier at the front");
+});
+
+test("detectsCycle: every distinct value repeating at least twice IS a cycle, even without strict alternation", () => {
+	assert.equal(detectsCycle(["a", "a", "b", "b", "a", "b"]), true, "a x3, b x3, both repeat -- genuine cycling, not just alternation");
+});
+
+// A 3-state rotation is a known, explicitly undetected gap -- see the file
+// header's "CYCLE DETECTION" section. Pinned here so the header's claim
+// can't silently drift out of sync with the code again.
+test("detectsCycle: a 3-state rotation is NOT detected -- a known gap, not a claimed capability", () => {
+	assert.equal(detectsCycle(["a", "b", "c", "a", "b", "c"]), false);
+});
+
 // Regression test for the third live pair-5 (dart/sequential-runner) rerun,
 // 2026-08-19: the model alternated between two `dart test ... | head`
 // commands whose literal filter arguments got echoed into the output text
@@ -406,6 +428,195 @@ test("the cycle intercept fires once, independent of and not preempted by the sa
 
 		assert.deepEqual(fires, [5], "fires once, the call that fills the window (index 5 = the 6th call)");
 		assert.equal(harness.messages.length, 0, "action goes through tool_result content, never sendUserMessage");
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
+});
+
+// Regression/documentation test for an Opus design review finding
+// (2026-08-19): cycleIntercepted resets at the same four points as
+// sameFailure (source edit, trustworthy success, new input, true agent
+// start), so it's a per-STALL-EPISODE budget, not the per-SESSION budget
+// `intercepts` is. Two edit-separated episodes should each get their own
+// single cycle warning -- this is intentional, not a bug, but the file
+// header previously (wrongly) called it "at most once per session."
+test("the cycle intercept fires again in a second stall episode after a source edit resets it", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		const outputs = [
+			"Command exited with code 1\nfilter: 'x'/'y' matched nothing",
+			"Command exited with code 1\nfilter: 'ok'/'zzz' matched nothing",
+		];
+		const fireEpisode = async (prefix: string) => {
+			const fires: number[] = [];
+			for (let i = 0; i < 6; i += 1) {
+				const [outcome] = await harness.emit({
+					type: "tool_result",
+					toolCallId: `${prefix}-${i}`,
+					toolName: "bash",
+					input: { command: "dart test 2>&1 | head -20" },
+					content: [{ type: "text", text: outputs[i % 2] }],
+					isError: true,
+				} as any);
+				if (outcome !== undefined) fires.push(i);
+			}
+			return fires;
+		};
+
+		assert.deepEqual(await fireEpisode("ep1"), [5], "first episode's cycle intercept fires once");
+
+		// A real source edit ends the episode -- genuine progress, not the same stall.
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: "edit-1",
+			toolName: "edit",
+			input: { path: "lib/sequential_runner.dart" },
+			content: [],
+			isError: false,
+		} as any);
+
+		assert.deepEqual(await fireEpisode("ep2"), [5], "a fresh episode after an edit gets its own cycle intercept");
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
+});
+
+// Regression/feature test: the intercept text now names the actual masking
+// mechanism (from lib/verification.ts's explainVerificationMasking) when
+// the trigger was a maskable exit-0 pipeline, instead of only the generic
+// "produced the same result N times" wording. See pi-harness-history.md's
+// "quality-gate reason in stall intercept" entry.
+test("the intercept action names the masking mechanism when the trigger was a maskable pipe", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		const maskedFailure = {
+			type: "tool_result",
+			toolCallId: "1",
+			toolName: "bash",
+			input: { command: "dart test 2>&1 | head -20" },
+			content: [{ type: "text", text: FAILURE_TEXT }],
+			isError: false, // head's exit code, not dart test's
+		} as any;
+
+		let lastOutcome: any;
+		for (let i = 1; i <= 9; i += 1) {
+			const [outcome] = await harness.emit({ ...maskedFailure, toolCallId: `d${i}` });
+			lastOutcome = outcome;
+		}
+
+		assert.match(lastOutcome.content[1].text, /\[pi-harness\]/);
+		assert.match(lastOutcome.content[1].text, /8 times/);
+		assert.match(
+			lastOutcome.content[1].text,
+			/pipe's last command/i,
+			"names the specific mechanism quality-gate already detected, without naming the remedy",
+		);
+		const trace = harness.entries.find((e) => (e.data as any)?.intercepted && (e.data as any)?.sameFailure === 8)?.data as any;
+		assert.equal(trace.maskReason, "unguarded-pipe");
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
+});
+
+test("the intercept action stays generic (no mechanism claimed) for a genuinely unmasked failure", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		let lastOutcome: any;
+		for (let i = 1; i <= 9; i += 1) {
+			const [outcome] = await harness.emit({ ...failingTestResult(), toolCallId: `d${i}` });
+			lastOutcome = outcome;
+		}
+
+		assert.doesNotMatch(lastOutcome.content[1].text, /pipe's last command|negated|fallback|backgrounded/i);
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
+});
+
+// Regression test for the third live pair-5 rerun's actual shape: an
+// alternating maskable pipe (echoed args defeat the fingerprint AND every
+// call is a `| head` pipe), so the cycle intercept's text should also name
+// the mechanism.
+test("the cycle intercept also names the masking mechanism when the alternating commands are maskable pipes", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		const outputs = [
+			"filter: 'x'/'y' matched nothing",
+			"filter: 'ok'/'zzz' matched nothing",
+		];
+		let lastOutcome: any;
+		for (let i = 0; i < 6; i += 1) {
+			const [outcome] = await harness.emit({
+				type: "tool_result",
+				toolCallId: `alt-${i}`,
+				toolName: "bash",
+				input: { command: "dart test 2>&1 | head -20" },
+				content: [{ type: "text", text: outputs[i % 2] }],
+				isError: false,
+			} as any);
+			lastOutcome = outcome;
+		}
+
+		assert.match(lastOutcome.content[1].text, /alternated between only a couple/);
+		assert.match(lastOutcome.content[1].text, /pipe's last command/i);
+	} finally {
+		delete process.env.PI_STALL_GUARD_INTERCEPT;
+	}
+});
+
+// Documents a known, accepted gap (Opus design review, 2026-08-19): the
+// reason note describes only the call that triggered the intercept, not
+// necessarily every call in the window. A window mixing masked and genuine
+// calls still fires correctly (cycling is about the categories, which don't
+// depend on isError), but the note's presence/absence tracks the parity of
+// the specific triggering call.
+test("a cycle mixing masked and genuine calls still fires, but the reason note reflects only the triggering call", async () => {
+	process.env.PI_STALL_GUARD_INTERCEPT = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		const genuine = {
+			toolName: "bash",
+			input: { command: "dart test -f x" },
+			content: [{ type: "text", text: "filter: 'x'/'y' matched nothing" }],
+			isError: true, // a real, unmasked failure
+		};
+		const masked = {
+			toolName: "bash",
+			input: { command: "dart test 2>&1 | head -20" },
+			content: [{ type: "text", text: "filter: 'ok'/'zzz' matched nothing" }],
+			isError: false, // masked pipe -- same category text as the genuine call's counterpart shape
+		};
+
+		let lastOutcome: any;
+		for (let i = 0; i < 6; i += 1) {
+			const call = i % 2 === 0 ? genuine : masked;
+			const [outcome] = await harness.emit({ type: "tool_result", toolCallId: `mix-${i}`, ...call } as any);
+			lastOutcome = outcome;
+		}
+
+		assert.notEqual(lastOutcome, undefined, "the cycle still fires -- categories alternate regardless of isError");
+		assert.match(lastOutcome.content[1].text, /alternated between only a couple/);
+		// Call index 5 (the triggering call) is `masked` -- the note reflects it.
+		assert.match(lastOutcome.content[1].text, /pipe's last command/i);
 	} finally {
 		delete process.env.PI_STALL_GUARD_INTERCEPT;
 	}

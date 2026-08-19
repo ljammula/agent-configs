@@ -123,26 +123,60 @@
  *
  * CYCLE DETECTION (new, trace-only like the base heuristic): a trailing
  * window of the last `CYCLE_WINDOW` diagnostic fingerprints is kept
- * alongside `sameFailure`. If that window is full and contains at most
- * `CYCLE_DISTINCT_THRESHOLD` distinct fingerprints, the model is cycling
- * among a small closed set of attempts even though no single fingerprint
- * repeated consecutively enough to trip `sameFailure`. This catches
- * alternation (A, B, A, B, A, B) and small rotations (A, B, C, A, B, C) that
- * consecutive-match streaks structurally cannot, without reintroducing the
- * "whole command must match" over-strictness item 3 already found and
- * reverted -- the window only ever compares fingerprints already computed by
- * the existing `failureCategory()` logic, nothing new to get wrong. It
- * shares every existing reset point with `sameFailure` (source edit,
- * trustworthy success, new input, true agent restart) since a cycle
- * spanning across one of those events wouldn't be the same stall. When
- * `interceptEnabled`, a detected cycle fires the same synchronous
- * `tool_result`-content-append action `ACTION_SAME_FAILURE_THRESHOLDS`
- * fires for a consecutive streak, but independently and at most once per
- * session -- alternation doesn't get a second and third warning at 8 and 25
- * repeats the way a true streak does, since "distinct count stayed low over
- * the window" doesn't sharpen the same way a growing consecutive count does.
+ * alongside `sameFailure`. It fires only on genuine alternation: the window
+ * must be full, hold at most `CYCLE_DISTINCT_THRESHOLD` (2) distinct
+ * fingerprints, AND every one of those distinct fingerprints must appear at
+ * least twice. That last requirement is deliberate, added after an Opus
+ * design review of the first version caught a real inversion: a bare
+ * low-cardinality check (distinct count alone) fires on `A,A,A,A,A,B` --
+ * five identical results plus one novel one -- at call 6, while six
+ * genuinely identical results (`A` x6, stronger evidence of a stall) don't
+ * intercept at all until `ACTION_SAME_FAILURE_THRESHOLDS`' first entry (9
+ * consecutive). Adding a single novel result to an otherwise-uniform window
+ * should not fire *more* readily than the uniform window itself; requiring
+ * every distinct value to repeat is what actually captures "cycling
+ * between a small closed set," not "mostly the same, plus noise." At
+ * `CYCLE_DISTINCT_THRESHOLD = 2` this catches 2-state alternation (A, B, A,
+ * B, A, B) -- the exact shape of the third live pair-5 rerun -- but NOT
+ * 3-state rotations (A, B, C, A, B, C, which has 3 distinct values and so
+ * never satisfies the threshold): a known, explicit gap, not a claimed
+ * capability. Widening the threshold to cover rotations would also widen
+ * how little repetition each distinct value needs, so it isn't a free
+ * change; left for a future revisit if a live 3+-state rotation is ever
+ * observed. Reusing `failureCategory()`'s own fingerprints (nothing new to
+ * get wrong) and sharing every reset point with `sameFailure` (source edit,
+ * trustworthy success, new input, true agent restart) are both unchanged
+ * from the first version. When `interceptEnabled`, a detected cycle fires
+ * the same synchronous `tool_result`-content-append action
+ * `ACTION_SAME_FAILURE_THRESHOLDS` fires for a consecutive streak, but
+ * independently, and at most once per stall *episode* (reset at the same
+ * four points as `sameFailure` above, not just at session start -- unlike
+ * `intercepts`, which really is a per-session budget). Two back-to-back
+ * episodes with an edit in between can each fire their own cycle intercept;
+ * that's intentional, not the "at most once, period" `intercepts` gets.
  *
-
+ * REASON-CARRYING INTERCEPT TEXT (new): both intercept texts above stated
+ * only "this repeated" -- never *why* a maskable exit-0 result (see item 4)
+ * looked clean in the first place, even though `quality-gate.ts`'s shared
+ * `lib/verification.ts` has known the exact mechanism the whole time (which
+ * pattern -- an unguarded pipe, a `||` fallback, a leading `!`, a trailing
+ * command, a background job -- made the exit code untrustworthy). Scoped
+ * from a design discussion about whether `quality-gate.ts`'s now-decoupled
+ * settlement rejection should ever redirect the model in-band again: the
+ * conclusion was no, not via `followUp` (the exact delivery mode already
+ * proven undeliverable to a model that keeps calling tools, which is why
+ * quality-gate was decoupled from it in the first place), but the
+ * *diagnosis* it already computes can still reach the model through this
+ * file's already-approved synchronous channel. `explainVerificationMasking`
+ * (the reason-carrying sibling of `verificationPipelineCanMaskFailure`, both
+ * in `lib/verification.ts`) is called once per diagnostic `tool_result`
+ * instead of the boolean-only form, and its `reason` -- when the trigger was
+ * a masked pipeline, not a genuine failure -- is folded into whichever
+ * intercept fires. Still states a fact only (the mechanism `explain...`
+ * detected with certainty), never a suggested fix, preserving the file's
+ * "never guess at intent" invariant; a genuinely unmasked failure carries no
+ * reason and the text is unchanged from before this addition.
+ *
  * ACTION (new 2026-08-19, opt-in): trace-only detection means a correctly
  * diagnosed stall still runs out the wall-clock timeout with nothing able to
  * act on it -- exactly what happened in both pair-5 reruns even after this
@@ -171,7 +205,7 @@
  * one so far -- see pi-harness-history.md).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { verificationPipelineCanMaskFailure } from "./lib/verification.ts";
+import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
 
 // Deliberately broader than lib/verification.ts's BROAD_VERIFICATION_PATTERNS
 // requires a whole-suite invocation (`go test ... ./...`) because it exists
@@ -220,11 +254,12 @@ const SAME_FAILURE_THRESHOLD = 2;
 
 // See file header, "CYCLE DETECTION": a trailing window over the same
 // per-attempt fingerprints failureCategory() already computes, checked for
-// low cardinality instead of consecutive repetition. 6 gives room for a
-// 2-state alternation (A,B,A,B,A,B) or a 3-state rotation (A,B,C,A,B,C) to
-// fill the window at least once each before firing; 2 distinct values is
-// deliberately permissive -- 3+ distinct fingerprints in a 6-window reads as
-// varied exploration, not a closed loop, and should not fire.
+// genuine alternation (each distinct value repeats) instead of consecutive
+// repetition. 6 gives a 2-state alternation (A,B,A,B,A,B) two full rounds
+// to fill the window before firing. 2 distinct values is deliberately the
+// only case covered -- 3+-state rotations are a known, undetected gap (see
+// file header); a 3+-distinct window with every value repeating still does
+// not fire, since CYCLE_DISTINCT_THRESHOLD caps it at 2.
 const CYCLE_WINDOW = 6;
 const CYCLE_DISTINCT_THRESHOLD = 2;
 
@@ -239,19 +274,37 @@ const CYCLE_DISTINCT_THRESHOLD = 2;
 const ACTION_SAME_FAILURE_THRESHOLDS = [8, 25];
 
 /**
- * True once `window` is full and holds between 2 and
- * `CYCLE_DISTINCT_THRESHOLD` distinct values -- alternation or a small
- * rotation. Deliberately excludes a single repeated value (distinct === 1):
- * that shape is pure consecutive repetition, already `sameFailure`'s job and
+ * True once `window` is full, holds between 2 and `CYCLE_DISTINCT_THRESHOLD`
+ * distinct values, AND every one of those distinct values repeats at least
+ * twice in the window -- genuine alternation, not "mostly the same value
+ * plus one outlier."
+ *
+ * That last requirement is load-bearing, not decorative: an earlier version
+ * checked only distinct-value count (2 to CYCLE_DISTINCT_THRESHOLD), which
+ * an Opus design review caught firing on `["a","a","a","a","a","b"]` --
+ * five identical results plus one novel one -- while `["a","a","a","a",
+ * "a","a"]` (six identical, strictly stronger evidence of a stall) didn't
+ * fire at all, since that shape is `sameFailure`'s job and needs 9
+ * consecutive matches to intercept. A single novel result mixed into an
+ * otherwise-uniform window must not fire *more* readily than the uniform
+ * window itself. Requiring every distinct value to repeat rejects that
+ * shape while still accepting true alternation (`a,b,a,b,a,b`) and
+ * same-window rotation-like mixes (`a,a,b,b,a,b`).
+ *
+ * Deliberately excludes a single repeated value (distinct === 1): that
+ * shape is pure consecutive repetition, already `sameFailure`'s job and
  * reported with its own escalating thresholds -- this detector would only
  * preempt it with a flatter, less informative signal. A full window with
  * more distinct values than the threshold reads as varied exploration, not
- * a closed loop, and also does not count.
+ * a closed loop, and also does not count -- including a genuine 3-state
+ * rotation (`a,b,c,a,b,c`), a known gap; see the file header.
  */
 export function detectsCycle(window: readonly string[]): boolean {
 	if (window.length < CYCLE_WINDOW) return false;
-	const distinct = new Set(window).size;
-	return distinct >= 2 && distinct <= CYCLE_DISTINCT_THRESHOLD;
+	const counts = new Map<string, number>();
+	for (const value of window) counts.set(value, (counts.get(value) ?? 0) + 1);
+	if (counts.size < 2 || counts.size > CYCLE_DISTINCT_THRESHOLD) return false;
+	return Math.min(...counts.values()) >= 2;
 }
 
 function isTestFile(path: string): boolean {
@@ -304,6 +357,29 @@ export function fingerprintFailure(text: string): string {
 // flags, search terms) a model tries while stuck on one underlying problem;
 // adding shape back on top only reintroduces the false-negative that item 3
 // found.
+// Names the actual mechanism `explainVerificationMasking` detected with
+// certainty, for the intercept text -- not a guess at what the model should
+// do differently (the file header's "never a suggested fix" invariant),
+// just the concrete reason a clean-looking result isn't trustworthy
+// evidence. Undefined reason (a genuine, unmasked failure) contributes no
+// text.
+function maskReasonNote(reason: MaskReason | undefined): string {
+	switch (reason) {
+		case "negated":
+			return " The command's exit code is inverted by a leading `!`, so a real failure reports as success.";
+		case "or-fallback":
+			return " A `||` fallback in the same line is swallowing the real exit code.";
+		case "unguarded-pipe":
+			return " The exit code being reported is the pipe's last command's, not the test command's.";
+		case "trailing-command":
+			return " A later command on the same line overrides the test command's own exit code.";
+		case "backgrounded":
+			return " The command is backgrounded, so its exit code is never observed.";
+		default:
+			return "";
+	}
+}
+
 function failureCategory(text: string): string {
 	const normalized = text.replace(/\r/g, "");
 	const goTest = normalized.match(/--- FAIL:\s*([^\s(]+)/);
@@ -377,7 +453,17 @@ export default function (pi: ExtensionAPI) {
 		// 2026-08-19," item 4: a maskable exit-0 (e.g. `dart test | head`) is
 		// NOT trustworthy and falls through to be fingerprinted like a failure
 		// instead of silently resetting the streak.
-		if (!event.isError && !verificationPipelineCanMaskFailure(command, TEST_EXECUTION_PATTERNS)) {
+		// Computed once per call and reused below for both the reset check and
+		// the intercept text -- only relevant when isError is false (an isError
+		// result already reflects a real nonzero exit, nothing to explain). Note
+		// this describes only the CURRENT call, not the whole window: if a cycle
+		// intercept fires on a window mixing masked-pipe and genuine-failure
+		// calls, the reason note (if any) reflects whichever call tripped the
+		// intercept, not the other half of the window. Never wrong (it's an
+		// honest description of the triggering call), just not exhaustive over
+		// the window -- not worth threading a reason per window entry for.
+		const masking = event.isError ? { masks: false as const } : explainVerificationMasking(command, TEST_EXECUTION_PATTERNS);
+		if (!event.isError && !masking.masks) {
 			sameFailure = 0;
 			lastFailureCategory = undefined;
 			recentCategories = [];
@@ -407,7 +493,13 @@ export default function (pi: ExtensionAPI) {
 			sameFailure === ACTION_SAME_FAILURE_THRESHOLDS[intercepts]
 		) {
 			intercepts += 1;
-			pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled: true, intercepted: true });
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				intercepted: true,
+				...(masking.reason ? { maskReason: masking.reason } : {}),
+			});
 			return {
 				content: [
 					...event.content,
@@ -415,7 +507,9 @@ export default function (pi: ExtensionAPI) {
 						type: "text" as const,
 						text:
 							`\n\n[pi-harness] This command has now produced the same result ${sameFailure} times ` +
-							"in this session with no source edit in between. Earlier repeats may no longer be " +
+							"in this session with no source edit in between." +
+							maskReasonNote(masking.reason) +
+							" Earlier repeats may no longer be " +
 							"visible in your context if it's been compacted. This is not new information -- " +
 							"change what you're doing, or stop and report honestly what you have so far.",
 					},
@@ -424,11 +518,23 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// Independent of the consecutive-streak action above: fires at most once
-		// per session, since a low-cardinality window doesn't sharpen with more
-		// repeats the way a growing consecutive count does.
+		// per stall EPISODE (cycleIntercepted resets at the same four points as
+		// sameFailure -- source edit, trustworthy success, new input, true
+		// agent start), not once per session the way `intercepts` above is --
+		// a low-cardinality window doesn't sharpen with more repeats the way a
+		// growing consecutive count does, so there's no equivalent of the 8/25
+		// two-stage escalation, but two separate stall episodes can each still
+		// warrant their own single warning.
 		if (interceptEnabled && !cycleIntercepted && cycling) {
 			cycleIntercepted = true;
-			pi.appendEntry("pi-stall-trace", { sourcelessRounds, sameFailure, stalled: true, cycleDetected: true, intercepted: true });
+			pi.appendEntry("pi-stall-trace", {
+				sourcelessRounds,
+				sameFailure,
+				stalled: true,
+				cycleDetected: true,
+				intercepted: true,
+				...(masking.reason ? { maskReason: masking.reason } : {}),
+			});
 			return {
 				content: [
 					...event.content,
@@ -437,7 +543,9 @@ export default function (pi: ExtensionAPI) {
 						text:
 							`\n\n[pi-harness] The last ${recentCategories.length} diagnostic commands in this session ` +
 							"have alternated between only a couple of distinct results, with no source edit in " +
-							"between. Earlier repeats may no longer be visible in your context if it's been " +
+							"between." +
+							maskReasonNote(masking.reason) +
+							" Earlier repeats may no longer be visible in your context if it's been " +
 							"compacted. This is not new information -- change what you're doing, or stop and " +
 							"report honestly what you have so far.",
 					},
