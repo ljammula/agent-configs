@@ -64,6 +64,14 @@ flags when deliberately overriding these defaults — e.g. the
 `scratch-phase-validate/` batch-retest scripts do, to pin an exact
 extension set per run.
 
+**For a quick manual harness-vs-no-harness comparison**, use the `pi-baseline`
+shell function (`~/.zshrc`) instead of typing the flag set by hand:
+`pi-baseline -p "<prompt>"`. Same provider/model/thinking config as a normal
+launch, only the extension/skill/prompt-template stack is stripped — mirrors
+`pi/evals/run_screening.py`'s `baseline` arm exactly (its own `--thinking
+off` is that script's determinism pin for the battery, not part of "no
+harness," so `pi-baseline` doesn't force it).
+
 The one thing this depends on: **`AI_STACK_HOST` must already be exported
 in your shell** (it is, via `~/.zshrc`) before `pi` starts, since both the
 `ai-stack-local` and `cross-model-review.ts`'s reviewer call read it once from
