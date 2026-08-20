@@ -6,8 +6,9 @@ same PR — the user explicitly requested running this procedure the same
 day, ahead of the "wait for a forcing reason" default below. Recorded here
 rather than silently rewritten: the "why pinned"/"latest-version check"
 reasoning below is preserved as the state of things *before* this bump,
-not backfilled to match the outcome. See `pi-harness-validation-status.md`
-line 3's "Pi 0.84.2" replay of what actually shipped, and
+not backfilled to match the outcome. See `pi-harness-validation-status.md`'s
+"Current configuration" section ("**Pi 0.84.2**", line 14 as of this
+writing) for what actually shipped, and
 `pi-harness-history.md`'s dated entry for the full trace (including a
 second install location this procedure's step 1 didn't originally call
 out — see the note added to step 1 below).
@@ -27,9 +28,12 @@ and 9/9 harness-only batteries, the `defaultThinkingLevel` fix — is only
 valid evidence *for 0.83.0*. Pi is a controlled variable in every one of
 those comparisons; letting it float would make every future "N/M passing"
 result indistinguishable from a version-caused regression. Extensions also
-typecheck against pinned 0.83.0 public types (`pi-harness-validation-status.md`
-line 88), so an upstream type rename lands as a silent hole, not a loud
-break, if the pin moves without a check.
+typecheck against the pinned version's public types
+(`pi-harness-validation-status.md`'s "typechecks against pinned ... public
+types" sentence, now reading `0.84.2` post-bump — line number not cited
+here since it drifts with unrelated doc edits), so an upstream type rename
+lands as a silent hole, not a loud break, if the pin moves without a
+check.
 
 ## Latest-version check (done 2026-08-20)
 
