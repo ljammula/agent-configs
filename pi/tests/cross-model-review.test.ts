@@ -479,6 +479,57 @@ test("a new top-level prompt (before_agent_start) resets lastReviewedDiff, so a 
 	}
 });
 
+// A caller that knows the real ticket boundary (build_app.py's
+// --review-base-sha, threaded from ticket_runner.py's prior-ticket commit)
+// can pin baseSha instead of the default "HEAD when this process starts".
+// Without this, a process retried against work an earlier, interrupted
+// process already committed sees an empty diff and can never get a decisive
+// review verdict for a diff nobody actually reviewed -- see PR #25.
+test("AI_REVIEW_BASE_SHA anchors the reviewer's diff target instead of HEAD-at-process-start", async () => {
+	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
+	const previousModel = process.env.AI_REVIEW_MODEL;
+	const previousReviewBaseSha = process.env.AI_REVIEW_BASE_SHA;
+	const previousFetch = globalThis.fetch;
+	process.env.AI_REVIEW_BASE_URL = "http://review/v1";
+	process.env.AI_REVIEW_MODEL = "reviewer";
+	process.env.AI_REVIEW_BASE_SHA = "deadbeef";
+	globalThis.fetch = async () =>
+		({ ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' } }] }) }) as Response;
+	try {
+		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+		let revParseCalled = false;
+		let diffTarget: string | undefined;
+		const harness = new ExtensionHarness({
+			branch,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") {
+					revParseCalled = true;
+					return { code: 0, stdout: "head-at-process-start\n", stderr: "", killed: false };
+				}
+				if (command === "git" && args[0] === "diff") {
+					diffTarget = args[args.length - 1];
+					return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n+changed\n", stderr: "", killed: false };
+				}
+				return { code: 1, stdout: "", stderr: "", killed: false };
+			},
+		});
+		reviewer(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(revParseCalled, false, "the env-provided base sha must short-circuit the git rev-parse HEAD lookup");
+		assert.equal(diffTarget, "deadbeef");
+	} finally {
+		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
+		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
+		if (previousModel === undefined) delete process.env.AI_REVIEW_MODEL;
+		else process.env.AI_REVIEW_MODEL = previousModel;
+		if (previousReviewBaseSha === undefined) delete process.env.AI_REVIEW_BASE_SHA;
+		else process.env.AI_REVIEW_BASE_SHA = previousReviewBaseSha;
+		globalThis.fetch = previousFetch;
+	}
+});
+
 // Decoupled 2026-08-19: a flagged verdict is pure telemetry now, never a
 // queued follow-up (see the file-top comment on cross-model-review.ts for
 // why). This replaces the old round-cap test -- there is no cap to test

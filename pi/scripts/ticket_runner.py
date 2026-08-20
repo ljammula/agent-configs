@@ -519,14 +519,24 @@ def invoke_build_app(build_cmd: list[str], timeout: float) -> tuple[int, str, st
 		return -1, text_output(stdout), text_output(stderr), True
 
 
-def builder_command(workspace: Path, ticket: Ticket) -> list[str]:
-	return [
+def builder_command(workspace: Path, ticket: Ticket, base_sha: str | None) -> list[str]:
+	cmd = [
 		sys.executable, str(BUILD_APP),
 		"--workspace", str(workspace),
 		"--spec", str(ticket.path),
 		"--max-rounds", str(MAX_BUILDER_ROUNDS),
 		"--timeout-minutes", "60",
 	]
+	# Anchors the independent reviewer's diff scope to this ticket's real
+	# starting commit rather than build_app.py's own default of "HEAD when
+	# this process happens to start" -- without it, a retried invocation
+	# against work an earlier, interrupted attempt already committed sees an
+	# empty diff and can never get a decisive review verdict for a diff
+	# nobody actually reviewed. base_sha is None only for ticket 1 in a repo
+	# with no root commit yet; build_app.py's own fallback covers that.
+	if base_sha:
+		cmd += ["--review-base-sha", base_sha]
+	return cmd
 
 
 def append_halt_record(workspace: Path, ticket: Ticket, reasons: list[str]) -> None:
@@ -615,7 +625,7 @@ def run_ticket(
 		if report_path.exists():
 			report_path.unlink()
 
-		build_cmd = builder_command(workspace, ticket)
+		build_cmd = builder_command(workspace, ticket, base_sha)
 		print(f"running: {' '.join(build_cmd)}")
 		build_started = report_dir / f"build-attempt-{build_attempt:02d}.started.json"
 		if not build_started.exists():

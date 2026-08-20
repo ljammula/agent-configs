@@ -326,6 +326,18 @@ export default function reviewer(pi: ExtensionAPI): void {
 		reviewInFlight = false;
 		inFlightReview = undefined;
 		if (baseSha) return;
+		// A caller that knows the real task boundary (e.g. build_app.py,
+		// threading through ticket_runner.py's prior-ticket commit) can pin it
+		// here instead of the default "HEAD when this OS process started".
+		// Without this, a fresh process retried against work a prior,
+		// interrupted process already committed sees an empty diff and can
+		// never produce a decisive verdict for a diff nobody actually
+		// reviewed. See build_app.py's --review-base-sha.
+		const envBaseSha = process.env.AI_REVIEW_BASE_SHA?.trim();
+		if (envBaseSha) {
+			baseSha = envBaseSha;
+			return;
+		}
 		const result = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, timeout: EXEC_TIMEOUT_MS }).catch(() => undefined);
 		if (result?.code === 0) baseSha = result.stdout.trim();
 	});

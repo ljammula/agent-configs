@@ -31,8 +31,23 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			self.assertEqual(self.next_mode(root, root / "workspace"), "build")
 
 	def test_builder_command_uses_three_internal_rounds(self):
-		command = ticket_runner.builder_command(Path("workspace"), self.ticket)
+		command = ticket_runner.builder_command(Path("workspace"), self.ticket, "deadbeef")
 		self.assertEqual(command[command.index("--max-rounds") + 1], "3")
+
+	def test_builder_command_threads_review_base_sha_to_anchor_the_reviewer(self):
+		# Without this, a build_app.py invocation retried against a ticket a
+		# prior, interrupted attempt already committed sees an empty diff from
+		# its own default "HEAD when this process starts" and can never get a
+		# decisive review verdict for work nobody actually reviewed.
+		command = ticket_runner.builder_command(Path("workspace"), self.ticket, "deadbeef")
+		self.assertEqual(command[command.index("--review-base-sha") + 1], "deadbeef")
+
+	def test_builder_command_omits_review_base_sha_when_none(self):
+		# Ticket 1 in a fresh repo has no prior commit to anchor to;
+		# build_app.py's own fallback (HEAD-at-process-start, or the
+		# unborn-HEAD empty-tree case) covers this.
+		command = ticket_runner.builder_command(Path("workspace"), self.ticket, None)
+		self.assertNotIn("--review-base-sha", command)
 
 	def test_interrupted_build_retries_instead_of_regating(self):
 		with tempfile.TemporaryDirectory() as directory:
