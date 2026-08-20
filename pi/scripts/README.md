@@ -38,7 +38,7 @@ python3 pi/scripts/build_app.py \
   --max-rounds 3 \
   --timeout-minutes 45 \
   [--thinking off|minimal|low|medium|high|xhigh] \
-  [--review-policy required|degraded] \
+  [--review-policy required|degraded|advisory] \
   [--sonnet-fallback] \
   [--containment]
 ```
@@ -63,11 +63,18 @@ python3 pi/scripts/build_app.py \
   is omitted (currently `medium`). The flag is only an explicit experiment/
   reproduction override; the orchestrator no longer silently forces the
   correctness-regressing `off` setting.
-- Independent review is required by default. A flagged verdict starts a
-  corrective round; an unavailable verdict prevents success. Use
-  `--review-policy degraded` only to opt into a clearly labeled success when
-  review is unavailable. A concrete `flagged` verdict still blocks under
-  either policy.
+- Independent review is required by default for direct `build_app.py` use. A
+  flagged verdict starts a corrective round; an unavailable verdict prevents
+  success. `--review-policy degraded` permits a labeled success when review is
+  unavailable, but a flagged verdict still blocks. `--review-policy advisory`
+  keeps running and recording review while allowing canonical verification to
+  determine success; this is the default policy selected by `ticket_runner.py`.
+- `ticket_runner.py --review-policy required` is the explicit strict mode for
+  release-hardening runs. The normal ticket workflow uses advisory review so a
+  mis-scoped or low-confidence reviewer flag does not consume the bounded
+  builder budget, while the verdict remains available in the archived report.
+  Gate evidence records the policy used; a later strict run rebuilds tickets
+  whose passing evidence was produced under a weaker policy.
 - `--sonnet-fallback` explicitly authorizes one billed
   `claude-sonnet-5` corrective pass after the bounded local rounds are
   exhausted. Without it, the report exits non-zero with `escalation
@@ -83,9 +90,10 @@ python3 pi/scripts/build_app.py \
   `resolve-verification.ts` calls `lib/verification.ts` directly, including
   nested manifests and Flutter-vs-Dart detection. A Python integration test
   proves that either of two nested components failing prevents acceptance.
-- Review coverage still depends on `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`,
-  but missing/broken review now fails closed by default instead of being a
-  report-only warning. The degraded policy is explicit and recorded.
+- Review coverage still depends on `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`.
+  Missing/broken review fails closed for the required policy, is explicitly
+  labeled for degraded policy, and is recorded without blocking for advisory
+  policy.
 - Reviewer flags, canonical verification failures, Pi failures/timeouts, and
   `stall-timeout` traces now all feed the bounded corrective loop. The
   optional Sonnet command path is deterministic-tested but has not yet been

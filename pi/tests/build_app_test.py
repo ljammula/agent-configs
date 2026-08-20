@@ -133,11 +133,74 @@ class BuildAppTests(unittest.TestCase):
 		)
 		self.assertEqual(review.outcome, "unavailable")
 		self.assertEqual(blockers, [])
+
 		required_blockers, _review = build_app.round_blockers(
 			verify_passed=True, pi_failed=False, pi_timed_out=False,
 			traces=[], review_policy="required",
 		)
 		self.assertEqual(required_blockers, ["review unavailable (no-review-verdict)"])
+
+	def test_advisory_policy_records_review_without_blocking_on_flag_or_unavailable(self):
+		flagged = build_app.parse_pi_traces(pi_output("flagged", "api.go: reviewer saw a stale diff"))
+		blockers, review = build_app.round_blockers(
+			verify_passed=True, pi_failed=False, pi_timed_out=False,
+			traces=flagged, review_policy="advisory",
+		)
+		self.assertEqual(review.outcome, "flagged")
+		self.assertEqual(blockers, [])
+
+		blockers, review = build_app.round_blockers(
+			verify_passed=True, pi_failed=False, pi_timed_out=False,
+			traces=[], review_policy="advisory",
+		)
+		self.assertEqual(review.outcome, "unavailable")
+		self.assertEqual(blockers, [])
+
+		prompt = build_app.corrective_prompt(
+			round_index=1, max_rounds=2, verify_command="make verify",
+			verify_tail="test failed", blockers=["canonical verification failed"],
+			reviewer=build_app.ReviewSignal("flagged", "stale diff"),
+			review_policy="advisory",
+		)
+		self.assertNotIn("stale diff", prompt)
+
+	def test_advisory_build_logs_flagged_comments_and_completes_on_verification(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
+				mock.patch.object(
+					build_app,
+					"sh",
+					return_value=subprocess.CompletedProcess([], 0, pi_output("flagged", "stale diff"), ""),
+				),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=1, containment=False, timeout_minutes=1,
+					review_policy="advisory",
+				)
+				report = build_app.write_report(result)
+				report_text = report.read_text()
+
+		self.assertTrue(result.succeeded)
+		self.assertIn("Review policy: `advisory`", report_text)
+		self.assertIn("stale diff", report_text)
+
+	def test_no_verdict_report_explains_advisory_policy_without_required_contradiction(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			result = build_app.BuildResult(
+				workspace=root,
+				spec_path=root / "spec.md",
+				review_policy="advisory",
+			)
+			report_text = build_app.write_report(result).read_text()
+
+		self.assertIn("Advisory policy allows success", report_text)
+		self.assertNotIn("default required policy prevents", report_text)
 
 	def test_empty_diff_always_blocks_required_review_even_with_passing_verify(self):
 		# An empty diff means the reviewer genuinely had nothing to look at --

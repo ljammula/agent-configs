@@ -21,9 +21,11 @@ Usage:
         [--max-rounds 3] [--timeout-minutes 45] [--sonnet-fallback]
 
 The installed Pi thinking policy is inherited by default. Independent review
-is required for unattended success unless `--review-policy degraded` is
-chosen explicitly. `--sonnet-fallback` authorizes one billed Sonnet pass only
-after the local corrective-round budget is exhausted.
+is required for unattended success unless `--review-policy degraded` or
+`--review-policy advisory` is chosen explicitly. Advisory review still runs
+and is recorded, but only canonical verification blocks completion. The
+`--sonnet-fallback` flag authorizes one billed Sonnet pass only after the local
+corrective-round budget is exhausted.
 
 --containment currently refuses to run at all (see check_containment_can_
 reach_model's docstring below): its network-denied Docker profile has no
@@ -214,7 +216,7 @@ def round_blockers(
 	if verify_passed is not True:
 		blockers.append("canonical verification failed")
 	review = review_signal(traces)
-	if review.outcome == "flagged":
+	if review.outcome == "flagged" and review_policy != "advisory":
 		blockers.append("reviewer flagged the current diff")
 	elif review.outcome != "clean" and review_policy == "required":
 		blockers.append(f"review unavailable ({review.detail})")
@@ -253,6 +255,7 @@ class Round:
 class BuildResult:
 	workspace: Path
 	spec_path: Path
+	review_policy: str = "required"
 	rounds: list[Round] = field(default_factory=list)
 	succeeded: bool = False
 	stopped_reason: str = ""
@@ -368,6 +371,7 @@ def corrective_prompt(
 	verify_tail: str,
 	blockers: list[str],
 	reviewer: ReviewSignal,
+	review_policy: str,
 ) -> str:
 	parts = [
 		f"The previous harness round did not earn completion (attempt {round_index}/{max_rounds}).",
@@ -375,7 +379,7 @@ def corrective_prompt(
 	]
 	if verify_command and verify_tail:
 		parts += [f"Canonical command: `{verify_command}`", f"Redacted failure excerpt:\n\n{verify_tail}"]
-	if reviewer.outcome == "flagged" and reviewer.detail:
+	if review_policy != "advisory" and reviewer.outcome == "flagged" and reviewer.detail:
 		parts += [f"Independent reviewer findings:\n\n{reviewer.detail}"]
 	parts.append("Inspect these concrete signals, make the smallest fix needed, and rerun the canonical verification before finishing.")
 	return "\n\n".join(parts)
@@ -409,7 +413,7 @@ def run_build(
 	session_dir = workspace / ".pi-build-session"
 	spec_text = spec_path.read_text()
 
-	result = BuildResult(workspace=workspace, spec_path=spec_path)
+	result = BuildResult(workspace=workspace, spec_path=spec_path, review_policy=review_policy)
 	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
 	# Anchors the independent reviewer's diff scope to the ticket's true
 	# starting commit (the caller's job to know -- ticket_runner.py passes
@@ -489,11 +493,12 @@ def run_build(
 			break
 		if not blockers:
 			result.succeeded = True
-			result.stopped_reason = (
-				"canonical verification passed and independent review was clean"
-				if reviewer.outcome == "clean"
-				else f"canonical verification passed; degraded review ({reviewer.detail})"
-			)
+			if reviewer.outcome == "clean":
+				result.stopped_reason = "canonical verification passed and independent review was clean"
+			elif review_policy == "advisory":
+				result.stopped_reason = f"canonical verification passed; advisory review ({reviewer.outcome}: {reviewer.detail or 'no detail'})"
+			else:
+				result.stopped_reason = f"canonical verification passed; degraded review ({reviewer.detail})"
 			break
 
 		prompt = corrective_prompt(
@@ -503,6 +508,7 @@ def run_build(
 			verify_tail=verify_tail,
 			blockers=blockers,
 			reviewer=reviewer,
+			review_policy=review_policy,
 		)
 		escalation_prompt = "\n\n".join([
 			"The local Pi harness exhausted its bounded corrective budget. Take one bounded corrective pass over the existing workspace.",
@@ -571,6 +577,7 @@ def write_report(result: BuildResult) -> Path:
 		"",
 		f"Generated: {datetime.now(timezone.utc).isoformat()}",
 		f"Spec: `{result.spec_path}`",
+		f"Review policy: `{result.review_policy}`",
 		f"Outcome: {'SUCCEEDED' if result.succeeded else 'DID NOT SUCCEED'} -- {result.stopped_reason}",
 		f"Rounds run: {len(result.rounds)}",
 		"",
@@ -585,6 +592,12 @@ def write_report(result: BuildResult) -> Path:
 		if rnd.pi_usage:
 			lines.append(f"- agent usage: {json.dumps(rnd.pi_usage)}")
 		lines.append(f"- reviewer outcome: {rnd.reviewer.outcome}{f' ({rnd.reviewer.detail})' if rnd.reviewer.detail else ''}")
+		if rnd.reviewer.detail:
+			lines.append("")
+			lines.append("Reviewer comments:")
+			lines.append("```")
+			lines.append(rnd.reviewer.detail)
+			lines.append("```")
 		lines.append(f"- verify command: `{rnd.verify_command or '(none resolved)'}`")
 		verify_status = "timed out" if rnd.verify_timed_out else str(rnd.verify_passed)
 		lines.append(f"- verify passed: {verify_status}")
@@ -603,12 +616,24 @@ def write_report(result: BuildResult) -> Path:
 	lines.append("## Independent review verdicts")
 	lines.append("")
 	if not verdicts:
-		lines.append(
-			"No decisive clean/flagged verdict was recorded. The default required "
-			"policy prevents local success in this state; if degraded policy was "
-			"selected, that choice and the unavailable reason appear in the round "
-			"summary above."
-		)
+		if result.review_policy == "advisory":
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Advisory policy "
+				"allows success based on canonical verification; the unavailable "
+				"reason appears in the round summary above."
+			)
+		elif result.review_policy == "degraded":
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Degraded policy "
+				"allows labeled success when review is unavailable; the reason "
+				"appears in the round summary above."
+			)
+		else:
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Required policy "
+				"prevents local success in this state; the unavailable reason "
+				"appears in the round summary above."
+			)
 	else:
 		for verdict in verdicts:
 			lines.append(f"- round {verdict['round']}: **{verdict['outcome']}** ({verdict.get('metadata', {}).get('trigger', 'unknown trigger')})")
@@ -631,9 +656,9 @@ def main() -> int:
 	)
 	parser.add_argument(
 		"--review-policy",
-		choices=("required", "degraded"),
+		choices=("required", "degraded", "advisory"),
 		default="required",
-		help="Require a clean independent-review verdict for success, or explicitly permit labeled degraded success when review is unavailable.",
+		help="Review policy: required blocks on unavailable/flagged review; degraded permits unavailable review; advisory records review but only canonical verification blocks success.",
 	)
 	parser.add_argument(
 		"--sonnet-fallback",
