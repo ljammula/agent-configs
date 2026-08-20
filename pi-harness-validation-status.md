@@ -1269,6 +1269,10 @@ identical scratch-test function name in the model's leftover file can no
 longer redeclare a hidden-test function name, regardless of what the model
 happens to call things.
 
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 1 | `go-flutter/notes-app` | `medium` | `0.83.0` | ✅ | 1516.4 | Ext.-package fix live in tree; no scratch file left this run (clean pass, not a live collision test — see synthetic repro below for that) |
+
 **Verified two ways, not just asserted:**
 - **Synthetic repro of the exact original failure**: built a scratch
   `notesapi_scratch_test.go` (`package notesapi`, `func TestGetNote`) —
@@ -1299,6 +1303,10 @@ seed `20260802`, `--timeout-minutes 110`): `valid: true, passed: false`,
 mid-run (7 thinking blocks, ~50.7K reasoning chars in the session log),
 consistent with the corrected understanding above that `xhigh` is a real,
 distinct dial for this model.
+
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 4 | `go-flutter/bookmarks-app` | `xhigh` | `0.83.0` | ❌ | 1589.3 | Go clean (no race, no collision); Dart scratch file `devcheck_test.dart` fails to compile, poisons `dart test` exit despite all 18 real assertions passing (see root-cause below) |
 
 **Root-caused, and it is neither of the two failure modes this rerun
 was checking for:**
@@ -1378,6 +1386,11 @@ matching those globs and records what it removed in the run's `record`
 ship zero files matching these globs, so a match at this point is
 unambiguously model-authored regardless of git tracked state — verified
 directly, not assumed.
+
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 4 (replay) | `go-flutter/bookmarks-app` | `xhigh` | `0.83.0` | ✅ | n/a | Same failed working tree from the row above, cleanup applied by hand, hidden tests re-injected fresh and rerun — `All tests passed!` |
+| 4 (live) | `go-flutter/bookmarks-app` | `xhigh` | `0.84.2` | ✅ | 1745.7 | Cleanup fired live, removed a real scratch file (`zz_agent_smoke_test.dart`) before grading — first non-synthetic confirmation |
 
 **Verified two ways:**
 - **Replayed the actual failed pair-4 working tree** (the `xhigh` run's
