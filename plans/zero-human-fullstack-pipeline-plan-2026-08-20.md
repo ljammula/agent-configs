@@ -33,10 +33,15 @@ Everything here follows from what's already measured in
    decode) and the todo-app's silently-forced in-memory DB both passed all
    static checks. → contract file + black-box HTTP tests + a boot-the-app
    verification tier.
-5. **Zero-human ≠ zero-cloud.** Sonnet 3/3 vs local 0/4 pre-tuning on the
-   same task; judgment work (spec, decomposition, review) is a handful of
-   one-shot calls; implementation is thousands of local rounds. Spend
-   cloud tokens on framing, local tokens on grinding.
+5. **Cloud for framing only; the implementation loop is pure local.**
+   Judgment work (spec, decomposition, acceptance-test generation,
+   milestone review) is a handful of cloud one-shot calls; implementation
+   is thousands of local rounds with **no cloud escalation of any kind**
+   (decision 2026-08-20, see Phase 3). The pilot's claim must stay exact:
+   *given a cloud-compiled spec, the local harness implemented the entire
+   app unassisted* — or halted at a precisely identified ticket. A
+   Sonnet-rescued success would be ambiguous evidence for the
+   keep-or-abandon decision this pilot exists to inform.
 
 ## Deliverables (all new; nothing existing is modified)
 
@@ -55,14 +60,21 @@ pilot workspace (new repo):  ~/code/test-bed/<app>/
 
 ## Phases
 
-### Phase 0 — Pilot app choice + human spec (human + cloud, ~30 min)
+### Phase 0 — Pilot app choice + spec (**resolved 2026-08-20**)
 
-- App: small but real — 3-screen Flutter web frontend + Go/SQLite backend,
-  CRUD plus one non-trivial behavior (so acceptance tests have teeth).
-  Candidate: bookmarks/notes/habit tracker; user picks or approves default.
-- User writes `spec/spec.md` from `pi/scripts/spec-template.md` (this is
-  the "I want to write spec & hand it over" contract). Cloud model runs a
-  grill pass (existing `grill` skill shape): every ambiguity becomes either
+- App: **rebuild `~/code/personal-budget-simplifier` from scratch** in
+  `~/code/test-bed/budget-pilot/workspace/`. Chosen because the existing
+  repo — built through this same harness *with* human supervision — serves
+  as a held-out reference implementation for judging, and its known bug
+  history (CSV sign convention, restart persistence, keyword shadowing,
+  wire-format casing) becomes the acceptance-test scenarios. The local
+  model never sees the existing repo.
+- Spec written by cloud at contractor-level detail, user-approved scope:
+  `~/code/test-bed/budget-pilot/spec/spec.md` (frozen 2026-08-20). Core:
+  onboarding, CSV import + auto-categorization, budgets with 3-cap/402
+  upgrade prompt, monthly dashboard, category correction. Trends, export,
+  metrics, non-web targets: non-goals.
+- Grill-pass principle retained for future apps: every ambiguity becomes either
   a spec sentence or an explicit non-goal. Output: frozen spec.
 
 ### Phase 1 — Compile the spec (cloud, one-shot each; ~1 hour)
@@ -103,30 +115,46 @@ Thin outer loop, no new harness machinery:
   its output.
 - Gate between tickets: `make verify` green + ticket's named acceptance
   tests green + `BUILD_REPORT.md` says SUCCEEDED + state files touched.
-  On failure: stop the line (no skipping ahead past a red ticket), record,
-  move to Phase 3 escalation.
+  On failure: stop the line (no skipping ahead past a red ticket), record
+  the halt in `PROGRESS.md`, exit non-zero (Phase 3).
 - Ledger: append per-ticket outcome (rounds used, review verdicts,
   wall-clock) to `PROGRESS.md` — the pilot's evidence trail.
 
-### Phase 3 — Escalation policy (bounded cloud spend, explicit)
+### Phase 3 — Halt policy: no cloud escalation (**decision 2026-08-20**)
 
-- Ticket fails its round budget → one cloud corrective pass on that ticket
-  only (existing `--sonnet-fallback` plumbing / or this session directly),
-  then re-gate. Two consecutive cloud-rescued tickets → halt and report:
-  that's the "local model can't carry this app" verdict, cheaply reached.
-- Milestone review: after the walking-skeleton ticket and again at the
-  end, one cloud review pass over the full diff (existing `self-review`
-  shape, report-only) — findings become one remediation ticket, not churn.
+- **`--sonnet-fallback` is not used and `ticket_runner.py` has no
+  escalation path at all.** A ticket that exhausts its `--max-rounds`
+  budget halts the whole line: the runner records the verdict (ticket id,
+  rounds spent, failing checks, reviewer findings) in `PROGRESS.md` and
+  exits non-zero. That exit *is* the pilot's measurement — recorded before
+  any cloud token touches implementation. Rationale: a Sonnet-rescued
+  success can't distinguish "the pipeline works" from "the cloud model
+  bailed it out," which makes it useless for the keep-or-abandon decision;
+  and the fallback path itself has never been live-spent, so wiring it
+  into the decisive run adds an unexercised failure surface.
+- **Rescue exists only as a separate, explicit, post-verdict step.** Per-
+  ticket structure makes a halt cheap: tickets 1..N-1 stay committed and
+  green. If the finished app is still wanted after the verdict is
+  recorded, a human-invoked resume (fix the halted ticket in a normal
+  cloud session, then rerun the runner from that ticket) continues the
+  build — the measurement and the deliverable never compete.
+- Milestone review stays (it's judgment, not rescue): after the
+  walking-skeleton ticket and again at the end, one cloud review pass over
+  the full diff, **report-only** — findings become at most one remediation
+  ticket appended to the queue, and that ticket is still implemented
+  locally under the same rules.
 
 ### Phase 4 — Run the pilot, judge it (mostly unattended)
 
 - Expected wall-clock: 8–15 tickets × 20–60 min ≈ a day of local grinding.
   Fine per user.
 - **Success:** app boots, `make verify-full` green, every spec scenario has
-  a passing acceptance test, ≤2 cloud-rescued tickets.
-- **Honest failure:** the halt condition above, plus `PROGRESS.md` +
-  per-ticket `BUILD_REPORT.md`s showing exactly which ticket shapes the
-  local model can't do — a real answer, not another maybe.
+  a passing acceptance test, **zero cloud tokens spent on implementation**.
+- **Honest failure:** a Phase 3 halt, plus `PROGRESS.md` + per-ticket
+  `BUILD_REPORT.md`s showing exactly which ticket shape the local model
+  can't do — a real answer, not another maybe. (An optional post-verdict
+  rescue can still finish the app afterward; it doesn't change the
+  recorded verdict.)
 
 ## Explicitly out of scope
 
@@ -134,11 +162,12 @@ Thin outer loop, no new harness machinery:
   re-benchmarking anything already settled (incl. RTK).
 - Multi-app generalization before one pilot succeeds.
 
-## Open decisions for the user
+## Decisions log (all resolved 2026-08-20)
 
-1. Pilot app (default on offer: bookmarks manager — closest to the already-
-   proven `go-flutter/bookmarks-app` fixture shape).
-2. Who writes `spec/spec.md`: user (per stated goal) or cloud drafts +
-   user approves.
-3. Cloud-rescue budget per Phase 3 (default: 1 pass per ticket, halt at 2
-   consecutive).
+1. Pilot app: **rebuild `personal-budget-simplifier` from scratch**;
+   existing repo held out as reference + acceptance-scenario source.
+2. Spec: **cloud-written, user-approved scope**; frozen at
+   `~/code/test-bed/budget-pilot/spec/spec.md`.
+3. Cloud escalation: **none during the run** (`--sonnet-fallback` skipped;
+   runner has no escalation path). Halt-and-report on any exhausted
+   ticket; rescue only as an explicit post-verdict step.
