@@ -48,13 +48,16 @@ Everything here follows from what's already measured in
 ```
 agent-configs/pi/scripts/
   ticket_runner.py          # NEW: outer loop — one build_app.py run per ticket
-pilot workspace (new repo):  ~/code/test-bed/<app>/
-  spec/spec.md              # human-written product spec (the ONE human input)
+control dir (agent never writes here): ~/code/test-bed/budget-pilot/
+  spec/spec.md              # frozen product spec (the ONE human-approved input)
   spec/contract.md          # API contract: endpoints, JSON shapes, status codes
   spec/tickets/NNN-*.md     # ordered tracer-bullet tickets w/ dependency edges
-  acceptance/               # failing-first acceptance tests, wired into make verify
+  spec/acceptance/NNN/      # canonical acceptance tests, sliced per ticket
+  reports/ticket-NNN/       # archived BUILD_REPORT.md + gate log per ticket
+workspace (the app repo the agent builds): ~/code/test-bed/budget-pilot/workspace/
+  acceptance/               # runner-staged copies of activated ticket slices
   ARCHITECTURE.md           # agent-maintained, updated every ticket
-  PROGRESS.md               # agent-maintained ticket ledger
+  PROGRESS.md               # agent-maintained ticket ledger (projection only)
   Makefile                  # verify (fast) + verify-full (boot app, e2e)
 ```
 
@@ -82,18 +85,39 @@ pilot workspace (new repo):  ~/code/test-bed/<app>/
 1. **Contract:** `spec/contract.md` — every endpoint, exact JSON field
    names/casing, status codes, error shape. Single source of truth for
    both sides.
-2. **Acceptance tests, failing-first, committed before any app code:**
+2. **Acceptance tests, failing-first, staged per ticket** (revised
+   2026-08-20 per Codex PR review — two P1s):
    - Go: black-box `httptest` suite hitting the real router; at least one
      raw-bytes JSON assertion per endpoint (gotcha #4); one
      persistence-across-restart test (todo-app in-memory regression).
    - Flutter: widget tests per screen keyed to spec scenarios; rendered-
      text assertions where strings mix literals and interpolation
      (gotcha #5).
-   - `make verify` = fmt + vet/analyze + unit + acceptance (fast, runs
-     every corrective round). `make verify-full` = verify + boot Go server
-     + `flutter test integration_test -d web-server` + curl smoke of every
-     endpoint + restart-persistence check (slow, runs once per ticket at
-     settlement).
+   - **Staging, not bulk commit:** the full suite is generated up front
+     but lives in the control dir, sliced as `spec/acceptance/NNN/` per
+     ticket. `ticket_runner.py` copies ticket NNN's slice into
+     `workspace/acceptance/` immediately before that ticket's build run.
+     Committing the entire failing suite on day one would make ticket
+     001's `make verify` unpassable by construction — `build_app.py`
+     treats that command as its completion gate, so every early ticket
+     would burn its whole round budget against tests for features that
+     don't exist yet. `make verify` at any point runs only the slices
+     activated so far.
+   - **Oracle integrity:** the workspace copies are working copies the
+     agent *can* touch (no harness change guards them — `protected-paths.ts`
+     covers only `write`/`edit`, not bash, and adding config for this is
+     out of scope). Trust comes from the runner instead: after each
+     ticket's run settles, the gate byte-compares every staged acceptance
+     file (all activated slices, not just this ticket's) against its
+     canonical copy in the control dir; any drift — edit, deletion,
+     skip-annotation — fails the gate exactly like a red test. A green
+     suite only counts as evidence because the suite is provably the one
+     the spec compiled to.
+   - `make verify` = fmt + vet/analyze + unit + activated acceptance
+     slices (fast, runs every corrective round). `make verify-full` =
+     verify + boot Go server + `flutter test integration_test -d
+     web-server` + curl smoke of every endpoint + restart-persistence
+     check (slow, run once per ticket at the gate).
 3. **Tickets:** decompose spec into `spec/tickets/NNN-<slug>.md`, ordered,
    tracer-bullet style (walking skeleton first: schema → domain → one
    endpoint → one screen wired end-to-end → then breadth). Each ticket:
@@ -105,18 +129,34 @@ pilot workspace (new repo):  ~/code/test-bed/<app>/
 
 Thin outer loop, no new harness machinery:
 
-- For each ticket in order: fresh `build_app.py` invocation
-  (`--workspace <app> --spec spec/tickets/NNN.md --max-rounds 6
-  --timeout-minutes 60`). Fresh session per ticket — never one long
-  `--continue`; on-disk state, not context, carries memory.
+- For each ticket in order: stage the ticket's acceptance slice (Phase 1),
+  then a fresh `build_app.py` invocation (`--workspace <app> --spec
+  spec/tickets/NNN.md --max-rounds 6 --timeout-minutes 60`). Fresh session
+  per ticket — never one long `--continue`; on-disk state, not context,
+  carries memory.
 - Per-ticket prompt suffix (in the ticket file template): read
   `ARCHITECTURE.md` + `PROGRESS.md` + `spec/contract.md` first; update
-  both state files before finishing; run `make verify-full` once and paste
-  its output.
-- Gate between tickets: `make verify` green + ticket's named acceptance
-  tests green + `BUILD_REPORT.md` says SUCCEEDED + state files touched.
-  On failure: stop the line (no skipping ahead past a red ticket), record
-  the halt in `PROGRESS.md`, exit non-zero (Phase 3).
+  both state files before finishing. (The prompt also asks the model to
+  run `make verify-full` itself so it can react to failures cheaply, but
+  that is advisory — the gate below never relies on it.)
+- **Gate between tickets — all machine-checked by the runner itself**
+  (revised 2026-08-20 per Codex review: the prompt's pasted `verify-full`
+  output is self-report and is trusted for nothing):
+  1. `make verify` green (runner-invoked);
+  2. **`make verify-full` green (runner-invoked)** — boot, curl smoke,
+     restart persistence, web integration; without this a ticket could
+     advance on unit-green while the running app is broken, the exact
+     seam this tier exists to protect;
+  3. oracle integrity: staged acceptance files byte-match canon (Phase 1);
+  4. `BUILD_REPORT.md` says SUCCEEDED;
+  5. the `ticket(NNN):` commit exists; state files touched.
+  On any failure: stop the line (no skipping ahead past a red ticket),
+  record the halt in `PROGRESS.md`, exit non-zero (Phase 3).
+- **Evidence archival** (Codex P2: successive runs overwrite
+  `<workspace>/BUILD_REPORT.md`): immediately after gating — pass or fail
+  — the runner copies `BUILD_REPORT.md` and its own gate log to
+  `reports/ticket-NNN/` in the control dir, so per-ticket round
+  diagnostics survive the next run.
 - Ledger: append per-ticket outcome (rounds used, review verdicts,
   wall-clock) to `PROGRESS.md` — the pilot's evidence trail.
 
