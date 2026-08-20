@@ -1,11 +1,24 @@
 # Pi version upgrade — runbook
 
-**Status as of 2026-08-20: no upgrade scheduled.** Pi is deliberately pinned
-at `0.83.0` across `pi/package.json`'s four `@earendil-works/pi-*`
-dependencies (see "Current configuration" in
-`pi-harness-validation-status.md`). This file is the procedure to follow
-*when* a bump is warranted — a CVE, a fix or feature this harness actually
-needs, or upstream dropping support for `0.83.0` — not a plan to bump now.
+**Status as of 2026-08-20: upgraded to `0.84.2`.** Superseding the
+"no upgrade scheduled" status this file originally shipped with in the
+same PR — the user explicitly requested running this procedure the same
+day, ahead of the "wait for a forcing reason" default below. Recorded here
+rather than silently rewritten: the "why pinned"/"latest-version check"
+reasoning below is preserved as the state of things *before* this bump,
+not backfilled to match the outcome. See `pi-harness-validation-status.md`
+line 3's "Pi 0.84.2" replay of what actually shipped, and
+`pi-harness-history.md`'s dated entry for the full trace (including a
+second install location this procedure's step 1 didn't originally call
+out — see the note added to step 1 below).
+
+Absent a new forcing reason, the default guidance below still holds for
+the *next* bump: Pi is deliberately pinned (now at `0.84.2`) across
+`pi/package.json`'s four `@earendil-works/pi-*` dependencies (see "Current
+configuration" in `pi-harness-validation-status.md`). This file is the
+procedure to follow *when* a bump is warranted — a CVE, a fix or feature
+this harness actually needs, or upstream dropping support for the pinned
+version — not a standing plan to bump on a schedule.
 
 ## Why pinned (recap)
 
@@ -56,6 +69,26 @@ procedure below, since the gap between 0.83.0 and `latest` will have grown.
      @earendil-works/pi-coding-agent@<version> \
      @earendil-works/pi-tui@<version> --save-exact
    ```
+
+   **Also bump the separate global CLI install** — discovered live during
+   the `0.84.2` bump, not called out here originally. `pi/package.json`'s
+   four packages are project-local devDependencies (used for typecheck/test
+   against the pinned public types); the `pi` binary the eval scripts
+   actually invoke (bare `"pi"` on `PATH`, see `run_screening.py`'s
+   `arm_command()`/preflight) resolves to a *separate* global npm install
+   (`npm list -g @earendil-works/pi-coding-agent`). Confirmed directly: `pi
+   --version` still reported the old version after the project-local bump
+   alone. Bump both:
+
+   ```bash
+   npm install -g @earendil-works/pi-coding-agent@<version>
+   pi --version   # must match <version> before continuing
+   ```
+
+   Then update the four independent `pi_version != "<old>"` preflight
+   guards — one per eval script (`run_screening.py`, `run_single_arm.py`,
+   `run_single_pair.py`, `run_js_lru_pair.py`; not centralized, each has
+   its own copy) — or every run aborts immediately with `RuntimeError`.
 
 2. **Static checks** — cheap, catches breakage before spending model time:
 

@@ -5450,3 +5450,54 @@ battery claim: TypeScript typecheck passed; 229 TypeScript tests and 6 Python
 orchestrator tests passed. The fallback command path is tested with a stubbed
 process and has not incurred a billed live call. Suite-level Sonnet parity
 remains the P1 acceptance gate.
+
+## Pi version bump, 0.83.0 → 0.84.2 (2026-08-20)
+
+Ran `pi-version-upgrade-plan.md`'s procedure end-to-end at the user's
+explicit request, same day that plan was drafted (its own recorded
+conclusion had been "no forcing reason, stay pinned" — the user chose to
+bump anyway, not because a forcing reason had newly appeared).
+
+- **Bumped both install locations, not just one.** `pi/package.json`'s four
+  `@earendil-works/pi-*` devDependencies bumped in lockstep via `npm
+  install ... --save-exact`. Then discovered live that this alone doesn't
+  change what the eval harness actually runs: the eval scripts invoke the
+  bare `pi` on `PATH`, which resolves to a *separate* global npm install
+  (`/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent`), not
+  the project-local `pi/node_modules` copy. Confirmed directly — `pi
+  --version` still printed `0.83.0` after the project-local bump alone.
+  Bumped the global install too (`npm install -g
+  @earendil-works/pi-coding-agent@0.84.2`); `pi --version` then correctly
+  reported `0.84.2`. Runbook's step 1 updated with this finding so it isn't
+  rediscovered next time.
+- **Four independent hardcoded version guards, not one.** `run_screening.py`,
+  `run_single_arm.py`, `run_single_pair.py`, and `run_js_lru_pair.py` each
+  carry their own `if pi_version != "0.83.0": raise RuntimeError(...)`
+  preflight check — not centralized through a shared import despite three
+  of the four already importing other helpers from `run_screening.py`. All
+  four updated to `"0.84.2"` in the same pass; missing even one would have
+  made that script hard-abort on every future run.
+- **Static checks clean**: `npm run typecheck` (0 errors), `npm run test`
+  (229/229 TypeScript + 8/8 Python, unchanged pass count from pre-bump).
+- **Live preflight clean**: `pi --version` → `0.84.2`; `:8080` (Qwen3.8) and
+  `:8081` (Gemma reviewer) routes both reachable post-bump.
+- **Corrected a stale claim surfaced along the way, not introduced by the
+  bump itself**: `run_screening.py`'s header comment above
+  `TASK_THINKING_LEVELS` repeated the same now-corrected "`medium`/`xhigh`
+  collapse to an identical request" claim already fixed in
+  `pi-harness-validation-status.md` earlier the same day (see that file's
+  "Per-task `--thinking` level table" section for the full trace against
+  `openai-completions.js`/`models.js` source). Fixed in the code comment
+  too, so the false claim doesn't keep propagating from the one place it
+  hadn't been touched yet.
+- **Validation subset**: the user asked specifically for pair 4
+  (`go-flutter/bookmarks-app`, the task with this investigation's live
+  race-condition and scratch-file-collision history) rather than the
+  runbook's suggested 2-3-pair `run_screening.py --max-pairs 3` subset —
+  narrower than the runbook's own suggestion, noted here rather than
+  silently treated as equivalent coverage. Result recorded separately
+  where the pair-4 rerun itself is documented.
+- **Not done**: the full 9-pair battery (runbook step 5) — not triggered,
+  since the narrower pair-4 subset wasn't ambiguous enough on its own to
+  warrant it; revisit if a future finding makes the `0.84.2` pin's
+  battery-level evidence gap matter.
