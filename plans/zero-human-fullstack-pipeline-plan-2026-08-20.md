@@ -232,6 +232,37 @@ artifacts with independent lifecycles, never model context):**
   rescue can still finish the app afterward; it doesn't change the
   recorded verdict.)
 
+### Phase 5 — Local decomposition experiment (**post-pilot only**)
+
+Goal: move step "compile the spec" from cloud to the local model, making
+the day-to-day loop fully local. Deliberately sequenced *after* the pilot
+verdict — running it during the pilot would make a failure unreadable
+(bad ticket graph vs. bad implementation), and the cloud-compiled graph
+is the controlled input the pilot's claim depends on.
+
+- **Mechanism:** a pi prompt template (`/tickets <spec-path>`), not a
+  skill (relevance-matching is unreliable on this model per `pi/README.md`)
+  and not an extension (nothing per-turn to intercept). One deterministic
+  invocation: spec in, `spec/tickets/NNN-*.md` out, same ticket-file
+  template the cloud compiler uses. Decomposition only — contract and
+  acceptance-test generation stay cloud-side initially; test generation is
+  the highest-stakes output (a wrong oracle silently corrupts every
+  downstream verdict), so it moves last, if ever.
+- **Evaluation — diff against the cloud graph, same frozen spec:** run
+  `/tickets` on the pilot's own spec and compare against the
+  cloud-generated graph the pilot ran with, on: (1) requirement coverage
+  — every spec §2/§3 behavior mapped to some ticket; (2) sizing — each
+  ticket inside the ≤1-feature envelope; (3) ordering — walking skeleton
+  first, dependencies respected; (4) acceptance mapping — each ticket
+  names the right test slices. Cheap to judge because the cloud graph and
+  the pilot's per-ticket outcomes already exist as ground truth (e.g. a
+  ticket the local graph merges into an oversized unit is exactly the
+  failure the pilot's ledger can price).
+- **Adoption bar** (matching this repo's ~3-occurrence convention): 2
+  further specs decomposed locally and run through the pipeline with no
+  halt attributable to graph quality before local decomposition becomes
+  the default. Until then the compile step stays cloud.
+
 ## Explicitly out of scope
 
 - New pi extensions, pi-subagents, containment work, overhead optimization,
