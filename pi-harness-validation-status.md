@@ -11,7 +11,19 @@ is understandable-only-with-history, but that file is where the "why" and
 
 ## Current configuration
 
-Pi 0.83.0 has two resident inference routes: `Qwen3.8-27B-8bit`
+**Pi 0.84.2** (upgraded 2026-08-20 from `0.83.0`, per
+`pi-version-upgrade-plan.md`'s procedure — all four
+`@earendil-works/pi-*` packages bumped in lockstep, both the project-local
+`pi/package.json` devDependencies and the separate global CLI install
+`pi --version` actually resolves to at runtime; the two are distinct
+installs and both had to move together, confirmed by `pi --version` still
+reporting `0.83.0` after the project-local bump alone. Static checks
+(`npm run typecheck`, `npm run test`: 229/229 + 8/8) and live preflight
+(`:8080`/`:8081` routes) both clean post-bump. The hardcoded `pi_version
+!= "0.83.0"` preflight guard existed independently in all four eval
+scripts (`run_screening.py`, `run_single_arm.py`, `run_single_pair.py`,
+`run_js_lru_pair.py`, not centralized) — all four updated to `0.84.2`.)
+has two resident inference routes: `Qwen3.8-27B-8bit`
 on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
 `:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`/
 `AI_STACK_HOST` live in `~/.zshenv` (sourced by every zsh invocation,
@@ -85,7 +97,7 @@ route. Verification-command resolution (both `quality-gate.ts`'s settlement
 check and `cross-model-review.ts`'s trigger) recognizes a Makefile `verify`,
 `test`, or `check` target, in that priority order.
 
-The maintained Pi project typechecks against pinned 0.83.0 public types and
+The maintained Pi project typechecks against pinned 0.84.2 public types and
 has 156+ deterministic tests covering loading, event ordering, retry caps,
 current-diff verification, shell-masked exits, reviewer truthfulness,
 symlink escapes, external-effect policy, installer scope, stack routing,
@@ -777,13 +789,17 @@ ranking, which didn't yet know about F1/F2):**
   (~1.3-1.6x wall time, 29-37MB traces vs. ~3MB) is itself an unbudgeted
   cost this recommendation should account for — trace size alone slows
   every future stall investigation's post-hoc analysis. And the
-  reasoning-token-cap lever needs a stated caveat: since Pi has no
-  `thinkingLevelMap` entry for Qwen3.8 (upstream pi#6951), `medium`/`high`/
-  `xhigh` already collapse to an identical `enable_thinking: true` — a
-  token *ceiling* may be the only lever that does anything differentiable
-  on this model, which strengthens the case for trying it, but its effect
-  must be validated by counting thinking-block chars (as the pair-7 trial
-  did), not assumed.
+  reasoning-token-cap lever needs a stated caveat, corrected 2026-08-20
+  from this section's original claim (see the "Per-task `--thinking` level
+  table" section below for the code trace): `medium`/`xhigh` are genuine,
+  distinct dials for this model via `ai-stack-local.ts`'s own
+  `thinkingLevelMap` (`enable_thinking` collapses to `true` for any
+  non-`off` level, but `reasoning_effort` carries the literal level
+  through unclamped) — `high`/`max` are the ones that don't exist here
+  (mapped to `null`, clamped down to `xhigh`). A token *ceiling* is still
+  worth trying as an additional lever, just not because `medium`/`xhigh`
+  are otherwise indistinguishable — its effect must still be validated by
+  counting thinking-block chars (as the pair-7 trial did), not assumed.
 
 **F3-F8 and G1/G3 addressed same day (2026-08-20), following up on the
 initial F1/F2 pass above.** After F1/F2 landed, the rest of the same Opus
@@ -920,14 +936,48 @@ instead of implicit in doc prose, via a `TASK_THINKING_LEVELS` table in
 
 Every entry currently resolves to "reasoning on" — there is no task with
 evidence that reasoning should stay off, so this is not yet a genuine
-per-task *dial*, just the decision this repo was already implicitly making
-per rerun, made explicit and default instead of ad hoc. It's also not a
-genuine `medium` vs. `xhigh` dial either: Pi has no `thinkingLevelMap` entry
-for Qwen3.8 ([pi#6951](https://github.com/earendil-works/pi/issues/6951)),
-so every non-`off` value produces the identical `enable_thinking: true`
-request — the `xhigh`/`medium` distinction in the table above documents
-which literal value each finding's evidence was recorded under, not a
-behavioral difference.
+per-task *dial* in the "should we reason at all" sense, just the decision
+this repo was already implicitly making per rerun, made explicit and
+default instead of ad hoc.
+
+**Correction (2026-08-20): the earlier claim here that `medium` vs. `xhigh`
+collapse to an identical request was wrong** — traced directly against the
+installed package source
+(`@earendil-works/pi-ai/dist/api/openai-completions.js:571-576` and
+`dist/models.js:391-419`, both under
+`/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/`),
+not re-asserted from the prior draft of this section. What actually
+happens for this model (`ai-stack-local.ts`'s Qwen3.8 registration, which
+declares its own explicit `thinkingLevelMap: {low: "low", medium:
+"medium", xhigh: "xhigh", minimal/high/max: null}`, added in `a42985a`
+2026-08-17 — i.e. already present when the now-corrected claim below was
+first written):
+
+- `getSupportedThinkingLevels`/`clampThinkingLevel` (`models.js`) resolve
+  `"medium"` and `"xhigh"` as both directly supported (present in the
+  model's own `thinkingLevelMap`, not clamped to some other level).
+- The `qwen` `thinkingFormat` branch (`openai-completions.js:571-576`) sets
+  `params.enable_thinking = !!options.reasoningEffort` — this part *does*
+  collapse to `true` for any non-`off` level, which is presumably what the
+  original claim was half-remembering.
+- But that same branch separately sets `params.reasoning_effort =
+  model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort`
+  — for this model that's the literal string `"medium"` or `"xhigh"`,
+  **not collapsed**, passed straight through to the request body. The
+  local proxy is a real OpenAI-compatible endpoint that accepts and acts
+  on `reasoning_effort` (confirmed directly with the user, not assumed).
+
+So `medium`/`xhigh` *is* a genuine, currently-live dial on this model —
+the `xhigh`/`medium` distinction in the table above is a real behavioral
+difference, not just a label on identical requests. `pi#6951` may still be
+a real upstream gap (unverified here, not re-checked as part of this
+correction) but if so it does not apply to this repo's setup, since this
+provider is fully custom-registered with its own `thinkingLevelMap` rather
+than depending on any bundled per-model catalog upstream. Anywhere else in
+this repo's docs that repeats the old "collapses to identical request"
+claim (e.g. the P3 sharpening above) should be read as superseded by this
+entry, not cross-edited retroactively for now — flagged here rather than
+silently propagated further.
 
 Precedence in `schedule()`, highest to lowest: `--thinking-override
 PAIR=LEVEL` (per-pair position in the randomized schedule) → `--thinking`
@@ -1204,3 +1254,180 @@ reliably fixed by either arm, just usually.
 Full raw evidence: `pi/evals/battery-results/
 2026-08-20-seed20260802-baseline-only/` (same non-commit convention as
 above).
+
+## `local-model-bench` external-test-package fix + pair-1 verification (2026-08-20)
+
+Follow-up on the scratch-test/hidden-test collision documented above
+(2/2 on independent `go-flutter` tasks). Fixed at the fixture level in
+`local-model-bench` (`aebbe6f`, pushed to `main`): both `go-flutter` hidden
+Go tests (`notesapi_test.go`, `bookmarksapi_test.go`) moved from an
+in-package test (`package notesapi` / `package bookmarksapi`, sharing the
+model's own package-level symbol table) to an external, black-box test
+package (`package notesapi_test` / `package bookmarksapi_test`, importing
+the module by name). Go gives each package its own symbol table, so an
+identical scratch-test function name in the model's leftover file can no
+longer redeclare a hidden-test function name, regardless of what the model
+happens to call things.
+
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 1 | `go-flutter/notes-app` | `medium` | `0.83.0` | ✅ | 1516.4 | Ext.-package fix live in tree; no scratch file left this run (clean pass, not a live collision test — see synthetic repro below for that) |
+
+**Verified two ways, not just asserted:**
+- **Synthetic repro of the exact original failure**: built a scratch
+  `notesapi_scratch_test.go` (`package notesapi`, `func TestGetNote`) —
+  the identical function name from the original collision — and ran it
+  against both the old and new hidden test. Old (in-package):
+  `./notesapi_test.go:157:6: TestGetNote redeclared in this block`, a
+  build failure. New (external package): compiles clean, both `TestGetNote`
+  implementations run side by side with no conflict. Confirms the fix
+  actually closes the specific mechanism that broke pair 1, not just that
+  it's plausible in theory.
+- **Live rerun, pair 1** (`go-flutter/notes-app`, harness arm, seed
+  `20260802`, `medium` thinking, post-fix `local-model-bench` checked
+  out): `valid: true, passed: true`, 1516.4s, `hidden_test_exit: 0`,
+  `ok notesapi 1.370s` on the Go side. The working tree's hidden test file
+  carries the new `package notesapi_test` header, confirming the fixture
+  fix is actually in effect for this run, not stale. **Caveat, stated
+  honestly**: the model didn't leave any scratch test file behind this
+  particular run (neither Go nor Dart) — consistent with this
+  investigation's earlier finding that the scratch-file habit is
+  run-to-run variance, not a reliable per-run behavior — so this live run
+  is a clean pass, not a live re-trigger-and-survive of the collision
+  itself. The synthetic repro above is the direct evidence the fix works;
+  this run is evidence the fix doesn't regress a normal clean pass.
+
+**Pair 4 live check, at `xhigh`** (`go-flutter/bookmarks-app`, harness arm,
+seed `20260802`, `--timeout-minutes 110`): `valid: true, passed: false`,
+1589.3s, `hidden_test_exit: 1`. Confirmed thinking was genuinely engaged
+mid-run (7 thinking blocks, ~50.7K reasoning chars in the session log),
+consistent with the corrected understanding above that `xhigh` is a real,
+distinct dial for this model.
+
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 4 | `go-flutter/bookmarks-app` | `xhigh` | `0.83.0` | ❌ | 1589.3 | Go clean (no race, no collision); Dart scratch file `devcheck_test.dart` fails to compile, poisons `dart test` exit despite all 18 real assertions passing (see root-cause below) |
+
+**Root-caused, and it is neither of the two failure modes this rerun
+was checking for:**
+- **The Go side is clean.** `ok bookmarksapi 1.568s`, no `WARNING: DATA
+  RACE` — the concurrency fix (`handleList` copying `Bookmark` structs by
+  value via `append(list, *bm)`, not pointers) is correct this run. The
+  model again left its own scratch Go test (`server/devcheck_test.go`,
+  `package bookmarksapi`, 11 functions all prefixed `TestDevCheck*`) — no
+  name collision with the hidden test's functions occurred, so this run
+  didn't end up exercising the external-package fix's collision-avoidance
+  either (same caveat as pair 1: a clean pass, not a live collision
+  survival). The packaging fix itself is confirmed present and not
+  interfering with a real pass.
+- **The actual failure is Dart-side, and it's a third, previously
+  undocumented fixture hazard.** The model also left `client/test/
+  devcheck_test.dart` (17.4KB, its own scratch test) — which does not
+  compile: `test/devcheck_test.dart:90:29: Error: The getter 'body' isn't
+  defined for the type 'BaseRequest'` (a real bug in the model's own
+  scratch code — `body` exists on `http.Request`, not the abstract
+  `BaseRequest` supertype — 6 occurrences of the same mistake). `dart test`
+  fails to *load* that file, and reports the whole run as failed even
+  though every real hidden-test assertion in `bookmarks_client_test.dart`
+  passed (`+17` with no per-test failures, only the one file-load error).
+  So the harness's `passed: false` verdict here is accurate as a grading
+  outcome, but it's driven entirely by a compile error in code the model
+  wasn't supposed to write in the first place — both `go-flutter` specs
+  explicitly forbid creating files under `client/test/**` (quoted
+  verbatim in the collision entry above), same clause the Go-side scratch
+  file already violates.
+- **Refines, doesn't contradict, the `pair4-postfix21-rerun2` entry's
+  "Dart-side is structurally immune" framing.** That claim was correctly
+  scoped to the *symbol-collision* mechanism specifically (Dart gives each
+  test file its own isolated `main()`, so two files can't redeclare the
+  same identifier the way Go's shared package namespace allows) — that
+  part still holds, and did hold this run (no collision, by name or
+  otherwise). It was never a claim that Dart is immune to *any* scratch-file
+  hazard. A scratch file that fails to compile poisons `dart test`'s exit
+  code for the whole directory regardless of naming, which is a different,
+  general property of the test runner, not something the external-package
+  fix (a Go-specific mechanism) has any bearing on or was ever meant to
+  address.
+
+**Net for this run**: `xhigh` correctly fixed the actual tested
+concurrency bug (the thing the per-task thinking table exists to defend
+against), and the external-package fix held for the Go side. The failure
+is a genuine new finding about fixture hygiene — a self-authored,
+spec-prohibited scratch file (Dart this time, Go last time) can still tank
+a grading run through an unrelated mechanism (load failure, not
+collision) — not a regression in either of the two things this rerun set
+out to check. Same open item as flagged for the Go side earlier: a
+grading-time cleanup pass for untracked files matching the spec's own
+forbidden-test-path patterns (`server/*_test.go`, `client/test/**`) would
+close this class too, this time for a genuinely different underlying
+reason (load-failure poisoning vs. symbol redeclaration) — worth doing
+once, generalized across both languages, rather than patched twice.
+
+Full raw evidence for both reruns: `pi/evals/battery-results/
+2026-08-20-seed20260802-harness-only-pair1-rerun-extpkg/` and
+`.../harness-only-pair4-xhigh/` (same non-commit convention as elsewhere
+in this doc).
+
+## `forbidden_test_globs` cleanup + Pi 0.84.2 pair-4 rerun (2026-08-20)
+
+Closed the open item from the pair-4 `xhigh` rerun above (the Dart-side
+`devcheck_test.dart` load-failure hazard) with a second fixture-level fix,
+then re-verified pair 4 on the freshly-bumped Pi `0.84.2` (see
+`pi-harness-history.md`'s dated bump entry for that part).
+
+**Fix**: `local-model-bench`'s two `go-flutter` tasks' `meta.json` now
+declare `forbidden_test_globs: ["server/*_test.go", "client/test/**/*"]`
+— structured metadata exposing the prohibition both specs already state in
+prose. `run_screening.py` gained `remove_prohibited_scratch_files()`,
+called after the model's session ends (diff already captured) and before
+`setup_cmd`/hidden-test injection: deletes anything under the working tree
+matching those globs and records what it removed in the run's `record`
+(`removed_prohibited_scratch_files`, never a silent drop). Both starters
+ship zero files matching these globs, so a match at this point is
+unambiguously model-authored regardless of git tracked state — verified
+directly, not assumed.
+
+| Pair | Task | Thinking | Pi | Result | Seconds | Note |
+|---:|---|:---:|:---:|:---:|---:|---|
+| 4 (replay) | `go-flutter/bookmarks-app` | `xhigh` | `0.83.0` | ✅ | n/a | Same failed working tree from the row above, cleanup applied by hand, hidden tests re-injected fresh and rerun — `All tests passed!` |
+| 4 (live) | `go-flutter/bookmarks-app` | `xhigh` | `0.84.2` | ✅ | 1745.7 | Cleanup fired live, removed a real scratch file (`zz_agent_smoke_test.dart`) before grading — first non-synthetic confirmation |
+
+**Verified two ways:**
+- **Replayed the actual failed pair-4 working tree** (the `xhigh` run's
+  `devcheck_test.go`/`devcheck_test.dart` scratch files) through the new
+  cleanup function directly: both removed, hidden tests re-injected fresh,
+  `(cd server && go test -race ./...) && (cd client && dart test)` rerun
+  by hand — `ok bookmarksapi 1.392s`, `All tests passed!`. Confirms the fix
+  closes the exact failure that shipped, not just a similar-looking one.
+- **Live rerun, pair 4** (`go-flutter/bookmarks-app`, harness arm, seed
+  `20260802`, `xhigh`, now on Pi `0.84.2`): `valid: true, passed: true`,
+  1745.7s, `hidden_test_exit: 0`. The model again left a scratch file
+  behind — `client/test/zz_agent_smoke_test.dart` this time, a different
+  name again — and the cleanup step actually fired and removed it live
+  (`removed_prohibited_scratch_files: ["client/test/zz_agent_smoke_test.dart"]`
+  in the run record), not just in the replay. `ok bookmarksapi 1.413s`, all
+  18 hidden Dart assertions passed. **This is the first live (not
+  synthetic, not replayed) confirmation that the cleanup step does its
+  job** — unlike the pair-1/pair-4 reruns above, which happened not to
+  leave a colliding/broken scratch file that run.
+- **Incidental finding, not a grading failure**: the reviewer route
+  (`cross-model-review.ts`, Gemma on `:8081`) flagged a real edge case
+  mid-session — `handleCreate` treats a JSON `tags: null` as an empty
+  array instead of the spec's required `400`. Hidden tests don't cover
+  this exact input, so it didn't affect `passed: true`; noted here as a
+  genuine, still-open correctness gap in this run's implementation, not
+  investigated further as part of this fixture-hygiene work.
+
+**Both `local-model-bench`-side fixture hazards for `go-flutter` tasks are
+now closed at the same mechanism level** (grading-time removal of
+spec-prohibited scratch files, generalized across both languages rather
+than patched per-incident): the Go package-symbol collision (external
+test package) and the Dart load-failure poisoning (cleanup pass). Net for
+this run: `xhigh` again correctly handled the tested concurrency bug, the
+`0.84.2` bump introduced no regression on this task, and the fixture
+hygiene fix worked exactly as designed on its first live opportunity.
+
+Full raw evidence: `pi/evals/battery-results/
+2026-08-20-seed20260802-harness-only-pair4-xhigh-pi0842/` (same
+non-commit convention as elsewhere in this doc). `local-model-bench`
+fixture fix: PR `ljammula/local-model-bench#1`.
