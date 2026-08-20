@@ -31,10 +31,11 @@
  *
  * Heuristic: on a turn that ends with stopReason "stop" and no tool call,
  * inject a follow-up nudge when the model announces unfinished work, stops
- * silently, or the most recent verification command failed. A passing check
- * suppresses abandonment nudges; merely running a failing check does not.
- * Verification piped without `pipefail` is inconclusive because the final
- * consumer can hide the test runner's non-zero exit status.
+ * silently, or the most recent verification command failed or was
+ * inconclusive. A passing check suppresses abandonment nudges; merely running
+ * a failing check does not. Verification piped without `pipefail` is
+ * inconclusive because the final consumer can hide the test runner's non-zero
+ * exit status, and must not be described to the model as a confirmed failure.
  * Retries are bounded to avoid an infinite loop when a model cannot recover.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -56,6 +57,8 @@ const NUDGE_MESSAGES = {
 	silent: "You stopped without making a tool call or finishing your response. Continue the task.",
 	"failed-verification":
 		"The latest verification command failed. Inspect its output, make the smallest corrective edit, and rerun the relevant check. Do not stop until it passes.",
+	"inconclusive-verification":
+		"The latest verification result was inconclusive because its shell command can mask the real exit status. Do not edit code based on this result. Rerun the project's canonical verification command with all exit-status masking removed: use a standalone command, or enable pipefail if output must be piped. Continue only from that trustworthy result.",
 } as const;
 
 const MAX_NUDGES_PER_RUN = 3;
@@ -77,6 +80,7 @@ function classifyAbandonedTurn(content: { type: string; text?: string }[]): Aban
 export default function (pi: ExtensionAPI) {
 	let nudgeCount = 0;
 	let latestVerificationFailed = false;
+	let latestVerificationInconclusive = false;
 	// Entry id at the start of *this* pi invocation, so verificationRan only looks
 	// at what this run itself has done -- not at verification from an earlier
 	// `--continue`d pass in the same persisted session. Without this, once any
@@ -89,6 +93,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", (_event, ctx) => {
 		nudgeCount = 0;
 		latestVerificationFailed = false;
+		latestVerificationInconclusive = false;
 		const leaf = ctx.sessionManager.getLeafEntry();
 		runStartEntryId = leaf?.id;
 	});
@@ -97,6 +102,7 @@ export default function (pi: ExtensionAPI) {
 	// verification scope. A failed check from the prior ask must not leak into it.
 	pi.on("input", () => {
 		latestVerificationFailed = false;
+		latestVerificationInconclusive = false;
 	});
 
 	pi.on("tool_result", (event) => {
@@ -105,7 +111,8 @@ export default function (pi: ExtensionAPI) {
 		if (typeof command !== "string") return;
 		if (!BROAD_VERIFICATION_PATTERNS.some((re) => re.test(command))) return;
 		const pipelineCanMaskFailure = verificationPipelineCanMaskFailure(command);
-		latestVerificationFailed = event.isError || pipelineCanMaskFailure;
+		latestVerificationFailed = event.isError;
+		latestVerificationInconclusive = !event.isError && pipelineCanMaskFailure;
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
@@ -116,6 +123,8 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolResults.length > 0) return;
 		const kind = latestVerificationFailed
 			? "failed-verification"
+			: latestVerificationInconclusive
+				? "inconclusive-verification"
 			: classifyAbandonedTurn(message.content);
 		if (!kind) return;
 
@@ -145,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 					BROAD_VERIFICATION_PATTERNS.some((re) => re.test(c.arguments.command)),
 			);
 		});
-		if (verificationRan && !latestVerificationFailed) return;
+		if (verificationRan && !latestVerificationFailed && !latestVerificationInconclusive) return;
 
 		nudgeCount += 1;
 		pi.sendUserMessage(NUDGE_MESSAGES[kind], { deliverAs: "followUp" });
