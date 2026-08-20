@@ -232,6 +232,18 @@ artifacts with independent lifecycles, never model context):**
   rescue can still finish the app afterward; it doesn't change the
   recorded verdict.)
 
+### Live pilot observation — 2026-08-20
+
+The first ticket-001 attempt exposed an infrastructure failure before the
+pilot could produce a verdict. The Qwen primary route returned repeated
+`Connection error`s, followed by the harness's `stall-timeout`; the local
+verification command itself passed. The builder was interrupted before it
+could write `BUILD_REPORT.md`, so the runner correctly rejected the already
+committed ticket during re-gating because the report evidence was missing.
+This is a validation-infrastructure observation, not an application or
+acceptance-test failure; the recovery procedure is to restore model-route
+health, rerun the ticket builder, and then re-run the deterministic gate.
+
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
 Goal: move step "compile the spec" from cloud to the local model, making
