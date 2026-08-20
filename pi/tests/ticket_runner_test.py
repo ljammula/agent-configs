@@ -33,6 +33,11 @@ class TicketRunnerRetryTests(unittest.TestCase):
 	def test_builder_command_uses_three_internal_rounds(self):
 		command = ticket_runner.builder_command(Path("workspace"), self.ticket, "deadbeef")
 		self.assertEqual(command[command.index("--max-rounds") + 1], "3")
+		self.assertEqual(command[command.index("--review-policy") + 1], "advisory")
+
+	def test_builder_command_accepts_strict_review_for_release_runs(self):
+		command = ticket_runner.builder_command(Path("workspace"), self.ticket, "deadbeef", "required")
+		self.assertEqual(command[command.index("--review-policy") + 1], "required")
 
 	def test_builder_command_threads_review_base_sha_to_anchor_the_reviewer(self):
 		# Without this, a build_app.py invocation retried against a ticket a
@@ -227,6 +232,7 @@ class TicketRunnerRetryTests(unittest.TestCase):
 				skip_build=True,
 				gate_attempt=3,
 				build_attempt=None,
+				review_policy="advisory",
 			)
 
 	def test_per_attempt_evidence_is_append_only_and_regates_are_separate(self):

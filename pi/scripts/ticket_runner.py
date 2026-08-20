@@ -50,6 +50,12 @@ its own (Phase 3 of the plan).
 
 Usage:
     python3 ticket_runner.py --pilot-dir /path/to/pilot [--status]
+        [--review-policy advisory|required|degraded]
+
+The ticket runner defaults to advisory review: the independent reviewer still
+runs and its verdict is archived, but only canonical verification and the
+runner's deterministic gates stop the ticket. Use `--review-policy required`
+for a release-hardening run that requires clean independent review.
 """
 
 from __future__ import annotations
@@ -82,6 +88,7 @@ BUILD_APP_TIMEOUT_S = 90 * 60
 MAX_BUILD_ATTEMPTS = 3
 MAX_BUILDER_ROUNDS = 3
 BUILD_RETRY_BACKOFF_S = 30
+DEFAULT_REVIEW_POLICY = "advisory"
 TRANSIENT_BUILD_MARKERS = (
 	"pi invocation timed out",
 	"pi invocation failed",
@@ -519,13 +526,19 @@ def invoke_build_app(build_cmd: list[str], timeout: float) -> tuple[int, str, st
 		return -1, text_output(stdout), text_output(stderr), True
 
 
-def builder_command(workspace: Path, ticket: Ticket, base_sha: str | None) -> list[str]:
+def builder_command(
+	workspace: Path,
+	ticket: Ticket,
+	base_sha: str | None,
+	review_policy: str = DEFAULT_REVIEW_POLICY,
+) -> list[str]:
 	cmd = [
 		sys.executable, str(BUILD_APP),
 		"--workspace", str(workspace),
 		"--spec", str(ticket.path),
 		"--max-rounds", str(MAX_BUILDER_ROUNDS),
 		"--timeout-minutes", "60",
+		"--review-policy", review_policy,
 	]
 	# Anchors the independent reviewer's diff scope to this ticket's real
 	# starting commit rather than build_app.py's own default of "HEAD when
@@ -596,6 +609,7 @@ def run_ticket(
 	skip_build: bool,
 	gate_attempt: int,
 	build_attempt: int | None,
+	review_policy: str,
 ) -> bool:
 	mode_label = "regate only" if skip_build else ("build retry" if build_attempt and build_attempt > 1 else "build")
 	print(f"\n=== ticket {ticket.nnn}: {ticket.slug} ({mode_label}, gate {gate_attempt}) ===")
@@ -625,7 +639,7 @@ def run_ticket(
 		if report_path.exists():
 			report_path.unlink()
 
-		build_cmd = builder_command(workspace, ticket, base_sha)
+		build_cmd = builder_command(workspace, ticket, base_sha, review_policy)
 		print(f"running: {' '.join(build_cmd)}")
 		build_started = report_dir / f"build-attempt-{build_attempt:02d}.started.json"
 		if not build_started.exists():
@@ -737,6 +751,12 @@ def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--pilot-dir", required=True, type=Path)
 	parser.add_argument("--status", action="store_true", help="Read-only position report; runs nothing.")
+	parser.add_argument(
+		"--review-policy",
+		choices=("advisory", "required", "degraded"),
+		default=DEFAULT_REVIEW_POLICY,
+		help="Pass the review policy to build_app.py; advisory is the default, required is intended for release-hardening runs.",
+	)
 	args = parser.parse_args()
 
 	pilot_dir = args.pilot_dir.resolve()
@@ -786,6 +806,7 @@ def main() -> int:
 			skip_build=(mode == "regate"),
 			gate_attempt=gate_attempt,
 			build_attempt=build_attempt,
+			review_policy=args.review_policy,
 		)
 		if not ok:
 			if mode in ("build", "retry") and retryable_build_state(pilot_dir, workspace, t):

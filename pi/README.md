@@ -285,9 +285,12 @@ Written here:
   batch build that must survive process restarts, use
   `pi/scripts/build_app.py`'s outer round loop instead. That loop inherits
   installed thinking settings, shares `quality-gate.ts`'s canonical verifier,
-  requires clean independent review by default, and consumes verification,
-  reviewer, Pi-failure, and stall signals. One billed Sonnet fallback is
-  available only with explicit `--sonnet-fallback` authorization.
+  and consumes verification, reviewer, Pi-failure, and stall signals. Direct
+  `build_app.py` use requires clean independent review by default; the
+  `ticket_runner.py` workflow selects advisory review and records its verdict
+  without making it a blocker. Use `--review-policy required` for a strict
+  release-hardening run. One billed Sonnet fallback is available only with
+  explicit `--sonnet-fallback` authorization.
 
 All four are unit-tested (`pi/tests/*.test.ts`). The first live trial (a
 `pi -p` run building a small Go+SQLite backend from an empty directory)
