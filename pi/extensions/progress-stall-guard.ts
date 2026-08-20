@@ -260,8 +260,38 @@
  * claim didn't hold, again, for its own worst case. Fixed by calling
  * `startTimer()` unconditionally on every `agent_start` (idempotent --
  * `startTimer()` already calls `stopTimer()` first) while keeping the
- * state-reset (`resetStallState()`, `sawTestThisTurn`, `intercepts`) gated
- * to the true first start only, same as before.
+ * state-reset (`resetStallState()`, `sawTestThisTurn`, `intercepts`,
+ * `lastBashEditSignature`) gated to the true first start only, same as
+ * before. Confirmed directly against the live incident's own evidence, not
+ * just plausible from the mechanism: `pair4-medium-rerun/evidence/
+ * pi-output.jsonl` contains exactly `agent_start` (event 3), `agent_end`
+ * (7262), `agent_start` (7264), and no further `agent_end` in an 8421-event
+ * run -- the pre-fix timer died at 7262 and never restarted, the last
+ * `pi-stall-trace` is at 7953, and the fatal `go run` hang begins around
+ * 8135.
+ *
+ * Two follow-ups from an Opus review of the fix above, same day:
+ *
+ * 5a. The first pass moved `lastBashEditSignature = undefined` into
+ *     `startTimer()` itself, so it silently started resetting on every
+ *     retry once `startTimer()` became unconditional -- the exact class of
+ *     bug the `seenFirstAgentStart` gate exists to prevent, just for a
+ *     different field than the ones already gated. A bash-driven edit
+ *     landing in the blind window right after a retry would get absorbed
+ *     into the new baseline instead of counting as progress. Moved back
+ *     into the gated block alongside the rest of the state reset.
+ * 5b. `stopTimer()` moved from `agent_end` to `agent_settled` (the
+ *     genuinely-once-per-invocation event, per the SDK doc quoted above).
+ *     Stopping on `agent_end` left a narrower version of the same
+ *     coverage gap: a hang between one `agent_end` and the next
+ *     `agent_start` (mid-retry-backoff, or the auto-compaction call
+ *     itself hanging) had no timer running, and if that call never
+ *     returns, no further `agent_start` ever fires to restart it. The
+ *     tick's own `liveCtx.isIdle()` guard already prevents timing out a
+ *     truly idle session (confirmed: `isIdle` stays `false` for the run's
+ *     entire duration until the same `_emitAgentSettled` call, per pi's
+ *     `agent-session.js`), so there was no safety benefit to stopping any
+ *     earlier -- only lost coverage.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
@@ -590,7 +620,6 @@ export default function (pi: ExtensionAPI) {
 
 	function startTimer() {
 		stopTimer();
-		lastBashEditSignature = undefined;
 		timer = setInterval(() => {
 			void (async () => {
 				if (!liveCtx || !liveCwd) return;
@@ -640,15 +669,34 @@ export default function (pi: ExtensionAPI) {
 		startTimer();
 		// Only the true first start of this invocation resets state -- a retry
 		// restart must not wipe real evidence of repeated inaction. See file
-		// header, "Two bugs found live 2026-08-16," item 2.
+		// header, "Two bugs found live 2026-08-16," item 2. lastBashEditSignature
+		// belongs to this same gated reset, not to startTimer() (Opus review of
+		// the Bug 5 fix, 2026-08-19): it's stall-tracking state exactly like the
+		// rest of this block, so resetting it on every retry would open a blind
+		// window each time -- a bash-driven edit landing between a retry and the
+		// timer's next tick gets silently absorbed into the new baseline instead
+		// of counting as progress.
 		if (seenFirstAgentStart) return;
 		seenFirstAgentStart = true;
 		resetStallState();
+		lastBashEditSignature = undefined;
 		sawTestThisTurn = false;
 		intercepts = 0;
 	});
 
-	pi.on("agent_end", () => {
+	// agent_settled, not agent_end (Opus review of the Bug 5 fix, 2026-08-19):
+	// agent_end fires per internal agent loop, so stopping here left a second,
+	// narrower version of the same coverage gap -- a hang between agent_end and
+	// the next agent_start (an auto-compaction call, a retry backoff) had no
+	// timer running, and if that call itself never returns, no further
+	// agent_start ever fires to restart it. agent_settled fires exactly once,
+	// only after the whole run has genuinely finished with no queued
+	// continuation -- confirmed against pi's own agent-session.js, where
+	// isIdle() stays false for the run's entire duration until the same
+	// _emitAgentSettled call. The tick's own `liveCtx.isIdle()` guard already
+	// prevents timing out a truly idle session, so stopping any earlier than
+	// this trades real coverage for no safety benefit.
+	pi.on("agent_settled", () => {
 		stopTimer();
 	});
 

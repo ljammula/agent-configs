@@ -357,6 +357,118 @@ test("the independent timer restarts after an agent_end mid-run, not just on the
 	}
 });
 
+// Regression test for an Opus review finding on the Bug 5 fix above
+// (2026-08-19): the first pass moved `lastBashEditSignature = undefined`
+// into startTimer() itself, which made it silently reset on every retry
+// once startTimer() became unconditional -- the same class of bug
+// seenFirstAgentStart exists to prevent, just for a field that wasn't
+// gated yet. Consequence: a bash-driven edit landing right after a retry
+// gets folded into the "fresh" baseline instead of triggering
+// resetStallState(), so lastSourceEditAt never advances to reflect it --
+// the run ends up CLOSER to a spurious hard abort, not further from one.
+test("a bash-driven edit that lands right after a retry still resets the wall-clock backstop", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	let dirty = false;
+	try {
+		const harness = new ExtensionHarness({
+			idle: false,
+			exec: (call) => {
+				if (call.command === "git" && call.args[0] === "status") {
+					return { code: 0, stdout: dirty ? "\0 M lib/lru.go\0" : "", stderr: "", killed: false };
+				}
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			},
+		});
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		// First tick establishes the clean baseline before any retry.
+		await mock.timers.tick(15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Internal retry boundary: agent_end, then agent_start again -- NOT
+		// the true first start, so state-reset gating must leave
+		// lastBashEditSignature alone here.
+		await harness.emit({ type: "agent_end" } as any);
+		await harness.emit({ type: "agent_start" } as any);
+
+		// The model edits lib/lru.go via `sed -i` in the resumed run -- no
+		// write/edit tool call, only git status going dirty.
+		dirty = true;
+		await mock.timers.tick(15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Advance past the original hard deadline; a preserved baseline
+		// means this edit was detected and reset the clock.
+		await mock.timers.tick(100_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(
+			harness.abortCalls,
+			0,
+			"the post-retry bash-detected edit should have reset the wall clock, not been absorbed into a fresh baseline",
+		);
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// Regression test for the same Opus review: stopTimer() moved from
+// agent_end to agent_settled, since agent_end fires per internal agent
+// loop and left a narrower version of the same coverage gap. Exercises
+// two full retry cycles (agent_start/agent_end pairs) with no
+// agent_settled in between, confirming the timer keeps restarting each
+// time rather than leaking duplicate intervals or double-firing.
+test("the timer survives multiple agent_end/agent_start retry cycles without double-firing", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+
+		await harness.emit({ type: "agent_start" } as any);
+		await mock.timers.tick(1_000);
+		await harness.emit({ type: "agent_end" } as any);
+
+		await harness.emit({ type: "agent_start" } as any);
+		await mock.timers.tick(1_000);
+		await harness.emit({ type: "agent_end" } as any);
+
+		await harness.emit({ type: "agent_start" } as any);
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1, "exactly one abort, no leaked duplicate timers from the earlier cycles");
+
+		// agent_settled -- the true end -- must stop the timer for good;
+		// further wall-clock time must not somehow fire it again.
+		await harness.emit({ type: "agent_settled" } as any);
+		await mock.timers.tick(10 * 60_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1, "agent_settled must stop the timer for good");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression/documentation test for the resetStallState/resetFailureState
 // refactor: an "input" event (a new ask) resets the failure-fingerprint
 // fields but, unlike a real source edit, does NOT reset sourcelessRounds --
