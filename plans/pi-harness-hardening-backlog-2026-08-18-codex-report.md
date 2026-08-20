@@ -2,6 +2,12 @@
 
 Date: 2026-08-18
 
+Historical report. Current implementation/status is in
+`plans/pi-harness-hardening-backlog-2026-08-19.md` and
+`pi-harness-validation-status.md`; the legacy `PI_STALL_GUARD_NUDGE` path
+described below was later replaced by the synchronous intercept plus the
+default-on wall-clock backstop.
+
 Task 1 was skipped as instructed because the plan marks it superseded.
 
 ## Task 2 — progress-stall fingerprint gap

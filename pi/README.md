@@ -283,7 +283,11 @@ Written here:
   the extension's own memory -- a fresh `pi -p --continue` process (a new OS
   process against the same session file) starts with no active goal; for a
   batch build that must survive process restarts, use
-  `pi/scripts/build_app.py`'s outer round loop instead.
+  `pi/scripts/build_app.py`'s outer round loop instead. That loop inherits
+  installed thinking settings, shares `quality-gate.ts`'s canonical verifier,
+  requires clean independent review by default, and consumes verification,
+  reviewer, Pi-failure, and stall signals. One billed Sonnet fallback is
+  available only with explicit `--sonnet-fallback` authorization.
 
 All four are unit-tested (`pi/tests/*.test.ts`). The first live trial (a
 `pi -p` run building a small Go+SQLite backend from an empty directory)
@@ -317,22 +321,17 @@ Vendored from pi's `examples/extensions/`, with changes noted in each file:
 - **`notify.ts`** — terminal notification when the agent finishes. Vendored
   change: gated on `hasUI`, since in `-p` mode the raw OSC escape would
   otherwise corrupt captured stdout.
-- **`progress-stall-guard.ts`** — **new; ships trace-only, no live catch
-  yet.** Detects a failure mode `continuation-nudge.ts` can't see: the model
-  keeps making tool calls (writing and re-running its own scratch tests)
-  while never editing the source file it already diagnosed the bug in.
-  Live-observed 2026-08-16 (`local-model-bench`, `go/lru-cache`, Qwen3.8 via
-  `pi-local`): the model correctly self-diagnosed a real eviction bug within
-  7 minutes, then spent ~24 more minutes re-running near-identical debug
-  tests against the same unedited file until an external harness timeout
-  killed it. Fires when a threshold of consecutive test-running turns pass
-  with no non-test-file edit *and* the failure's fingerprint hasn't changed
-  — see the file's own header for the full heuristic and its accepted
-  false-positive case. Every fire is logged via `appendEntry` regardless of
-  whether the nudge itself runs; set `PI_STALL_GUARD_NUDGE=1` to have it
-  actually intervene. Full account and design rationale:
-  `pi-harness-validation-status.md`'s 2026-08-16 entry,
-  `local-model-bench/SPEC.md`'s 2026-08-16 report.
+- **`progress-stall-guard.ts`** — **adopted, with a default-on wall-clock
+  backstop.** Retains shape-specific repeated-failure/cycle telemetry and an
+  opt-in synchronous intercept (`PI_STALL_GUARD_INTERCEPT=1`), plus a
+  shape-agnostic no-source-edit timer: soft warning after 10 minutes, hard
+  `stall-timeout` abort after 20 by default. The independent timer catches a
+  single tool call that never returns and was live-validated on
+  `dart/sequential-runner`. Its lifecycle now resets on
+  `before_agent_start`, so each top-level interactive prompt gets a fresh
+  deadline while retry/compaction `agent_start` events preserve evidence.
+  See the extension header and `pi-harness-validation-status.md` for the live
+  incident/fix trail and accepted heuristic limits.
 - **`wall-clock-budget-nudge.ts`** — **new, low-risk, on by default.**
   Closes the specific gap that let the `progress-stall-guard.ts` run above
   end in a silent kill: Pi has no notion of an external caller's timeout, so
@@ -370,11 +369,11 @@ log of that test, not assumed:
 
 | Hook | Fires | Notes |
 |---|---|---|
-| `before_agent_start` | Once, before the first tool call | The only hook that can amend the system prompt (`{systemPrompt}`). Anything it checks reflects the *initial* state of the working directory — a brand-new project has no manifest, no Makefile, nothing yet. |
-| `agent_start` | Once, right after | Cannot amend the prompt. Used to capture a session baseline once (e.g. `baseSha` via `git rev-parse HEAD`, as `quality-gate.ts`, `artifact-guard.ts`, and `error-leak-guard.ts` all now do). |
+| `before_agent_start` | Once per genuine top-level prompt, before its first tool call | The only hook that can amend the system prompt (`{systemPrompt}`). It does not fire for internal retries, compaction, or queued continuations, so it is also the correct boundary for resetting per-prompt state. |
+| `agent_start` | Once per internal agent-loop segment | Cannot amend the prompt. It fires again on retry/compaction/queued-continuation segments, so one-time baselines need their own guard; timers that must survive those boundaries need to start idempotently on every firing. |
 | `tool_call` / `tool_result` | Once per tool invocation, throughout the session | The only hooks with per-action granularity. `tool_result` can append/replace the tool's own result content in-band (`{content: [...]}`) — no new turn, no `sendUserMessage`, no nudge budget consumed. This is the cheapest and most immediate way to catch something the instant it's written, independent of git state entirely. |
 | `turn_end` | Once per assistant turn | The actual "periodic sweep" hook. Cannot amend anything directly — a nudge from here needs `pi.sendUserMessage(..., {deliverAs: "followUp"})`, which queues a new turn. Fire nudges from here at a turn *boundary*, not mid-turn from `tool_result`, so a nudge reads as normal feedback rather than a non-sequitur interrupting an in-progress edit. |
-| `agent_settled` | **Once per process in `-p` (non-interactive) mode**, and — confirmed by event ordering in the test log — *after* `agent_end`, i.e. after the model has already finished everything, including its own `git commit`. Do not assume this behaves like a per-turn check; in `-p` mode it is a terminal, single, late checkpoint. (Interactive mode has more agent loops per process, so a check here fires more often there — but the semantics per firing are identical; nothing about `agent_settled` itself changes between modes.) | Anything gated here that inspects git state (a diff, `git status`) will not see something the model already committed. Use it as a last-resort backstop for whatever a `tool_result`/`turn_end` hook didn't catch, never as the primary detection point for something you expect to happen mid-session. |
+| `agent_settled` | Once after a top-level run fully settles with no pending retry, compaction, or queued continuation | Later than `agent_end` and safe for stopping per-run timers. In `-p` it is normally the terminal checkpoint; an interactive process can emit it again for later prompts. Anything gated here that inspects only working-tree state can still miss content the model already committed, so use it as a backstop rather than the primary per-action detector. |
 
 Concretely: `error-leak-guard.ts` and `artifact-guard.ts` now do their real
 work in `tool_result` (scan a file the instant it's written; scan for a

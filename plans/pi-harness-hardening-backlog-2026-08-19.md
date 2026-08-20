@@ -131,9 +131,75 @@ biggest known cost, so it shouldn't sit behind three other tasks in
 practice even though it's still sequenced last below for the
 reliability-first reasoning already laid out.
 
+## Codex implementation-review comments (2026-08-19, post-PR #21)
+
+These are the only findings from this pass that materially affect the stated
+solo-Sonnet-level goal. They supersede the sequencing below where they
+conflict with it; the existing stall work remains useful, but Recommendation
+1 is now implemented rather than the largest open risk.
+
+### P0. Reset the wall-clock stall episode at each real top-level prompt — resolved
+
+The review reproduced a second prompt inheriting the first prompt's wall
+clock and aborting on its first tool result. `progress-stall-guard.ts` now
+resets the complete stall episode on `before_agent_start`, Pi's true
+top-level-prompt boundary, while retry/compaction `agent_start` events still
+preserve evidence. A two-fully-settled-prompts regression covers the exact
+failure.
+
+### P0. Make the unattended production path run the harness that was actually validated — resolved
+
+`build_app.py` now inherits installed thinking settings by default instead
+of forcing `--thinking off`; `--thinking` remains an explicit experiment
+override. Its new `resolve-verification.ts` bridge calls the same
+`lib/verification.ts` resolver as `quality-gate.ts`, including nested
+manifests and Flutter-vs-Dart detection. A two-component integration fixture
+proves that breaking either component prevents acceptance.
+
+### P0. Escalation must consume correctness signals, not only stall signals — resolved
+
+The outer loop now consumes canonical verification failures, reviewer
+flags/unavailability, Pi failures/timeouts, and `stall-timeout` as blocking
+signals and carries concrete evidence into the next bounded corrective round.
+Clean independent review is required by default; an explicit
+`--review-policy degraded` allows labeled success only when review is
+unavailable, never when it is flagged. After local rounds, the result says
+`escalation required`; `--sonnet-fallback` explicitly authorizes one billed,
+bounded `claude-sonnet-5` corrective pass. No cloud spend occurs by default.
+
+### P1. Define and run the parity gate before claiming Sonnet level
+
+The latest nine-task battery is harness-only (7/9 at reasoning off, with
+reasoning-on follow-ups for the two failures); the only current matched
+Sonnet evidence called out here is `go/lru-cache`. That is useful causal
+evidence, but it cannot establish suite-level Sonnet parity or the requested
+"without significant overhead" condition. Run the current production path
+and solo Sonnet on the same task versions, hidden tests, timeout policy, and
+recorded schedule, with repeated trials for stochastic tasks. Predeclare the
+acceptance metrics: valid-and-correct completion rate is primary; wall time,
+model calls/tokens, stall/escalation rate, and degraded-review outcomes are
+secondary. Do not promote the harness as Sonnet-level from a single matched
+task or from follow-up reruns selected after failures.
+
+### Revised order from this review
+
+1. ~~Fix the cross-prompt backstop reset and add the two-prompt regression.~~ Done.
+2. ~~Align `build_app.py` with the validated thinking and canonical-verification
+   policies.~~ Done.
+3. ~~Wire verification/reviewer/stall outcomes into the bounded corrective and
+   escalation loop.~~ Done; live validation remains.
+4. Run the predeclared matched Sonnet parity battery.
+5. Tune latency/reasoning cost only after the parity gate identifies the
+   remaining dominant gap.
+
 ## Prioritized recommendations
 
-### 1. Add a generic, shape-agnostic stall backstop with a two-stage response (new — highest priority)
+### 1. Add a generic, shape-agnostic stall backstop with a two-stage response — implemented and live-validated
+
+**Current status.** Implemented, PR-reviewed, and live-validated as recorded in
+`pi-harness-validation-status.md`. The cross-prompt lifecycle regression found
+in the Codex review above is also fixed and deterministically covered. The
+original rationale and acceptance evidence are retained below as history.
 
 **What.** In `progress-stall-guard.ts`, add a check that does not depend on
 recognizing *any* command pattern: track wall-clock time since the last
@@ -218,7 +284,15 @@ recover) than one that reaches a real edit and the diff settling.
 parallel or even first, since it's cheaper to trigger via threshold-lowering
 than by waiting on new infrastructure.
 
-### 3. Escalate-on-confirmed-stall to Sonnet as a bounded fallback
+### 3. Escalate failed local outcomes to Sonnet as a bounded fallback — implemented, live validation pending
+
+**Current status.** Implemented in `build_app.py`, opt-in via
+`--sonnet-fallback` so billing is never implicit. The trigger was broadened
+beyond `stall-timeout`: exhausted canonical-verification failures, reviewer
+flags/unavailability, Pi failures/timeouts, and confirmed stalls all reach the
+same escalation boundary. Deterministic tests prove signal parsing, corrective
+rounding, and exactly one fallback pass; no billed live fallback was run in
+this change.
 
 **What.** When Recommendation 1's `stall-timeout` outcome fires (a
 confirmed, backstop-triggered, intercept-attempted-and-failed stall), hand
@@ -227,18 +301,10 @@ single bounded corrective pass, rather than reporting a bare failure. This
 is the "escalate on a cheap structural signal, not self-assessed
 difficulty" pattern from the community research — the structural signal
 here is exactly Recommendation 1's `stall-timeout` outcome.
-**Where this lives is an open design question, not a detail to skip**: a
-Pi extension's `ExtensionAPI` (per `progress-stall-guard.ts`'s actual
-surface — `pi.on`, `pi.appendEntry`, `pi.sendUserMessage`) has no evident
-outbound path to invoke a different top-level model; building one inside
-the extension means new capability (raw API calls, key management) that
-doesn't exist today. The more architecturally consistent seam is
-`build_app.py`, the existing out-of-band orchestrator that already drives
-bounded corrective `pi -p` rounds outside the chat session — escalation
-plausibly belongs there (detect `stall-timeout` in the harness output,
-invoke Sonnet as a further corrective round) rather than as new extension
-code. Whoever picks this up must resolve this placement question first,
-not assume "inside the extension."
+Placement is resolved in favor of `build_app.py`, the existing out-of-band
+orchestrator. The extension remains responsible for producing truthful
+signals; the orchestrator owns corrective rounds, policy, and the optional
+cloud-model invocation.
 
 **Why highest-leverage for the user's actual ask.** The user's goal is the
 *harness* matching Sonnet-level outcomes, not the local model doing so
@@ -255,11 +321,9 @@ via the Sonnet fallback pass, with the fallback's own cost/latency recorded
 so the tradeoff (bounded Sonnet cost on the minority of runs that stall) is
 visible, not hidden.
 
-**Sequencing.** Depends on Recommendation 1's `stall-timeout` outcome for a
-clean trigger; independent of Recommendation 2. This is a larger
-design/cost question than 1-2 (touches billing, requires explicit user
-sign-off on when local-vs-cloud spend happens, and the placement question
-above) — flag for discussion before implementing, don't build silently.
+**Sequencing.** Implementation is complete. Live validation remains gated on
+an explicit invocation with `--sonnet-fallback`, which is the cost sign-off;
+without the flag the builder stops nonzero at `escalation required`.
 
 ### 4. Attribute and reduce the 100-312% runtime overhead (carried over from 2026-08-18 Task 3, still unstarted)
 
@@ -312,17 +376,13 @@ These remain open exactly as documented in
 ## Suggested sequencing summary
 
 1. Generic stall backstop with its two-stage response (Recommendation 1) —
-   start now, no dependencies. Must be wired unconditionally, not gated
-   behind diagnostic-command matching, or it inherits the existing
-   read-only-inspection blind spot.
+   implemented, live-validated, and cross-prompt reset fixed.
 2. Intercept recovery-rate validation (Recommendation 2) — no hard
    dependency on 1; can start in parallel or first via temporarily lowered
    thresholds.
-3. Sonnet escalation fallback (Recommendation 3) — depends on
-   Recommendation 1's `stall-timeout` outcome for a trigger; needs both an
-   explicit user sign-off on scope/cost and a resolved placement decision
-   (inside the extension vs. `build_app.py`'s orchestrator layer) before
-   implementation starts, not just a green light on the idea.
+3. Sonnet escalation fallback (Recommendation 3) — implemented in
+   `build_app.py`; one billed pass is opt-in via `--sonnet-fallback`. Live
+   validation remains.
 4. Overhead attribution + reasoning-token-budget cap (Recommendation 4) —
    independent, lower priority; parallel-safe with any of the above.
 5. Background-kill large-n confirmation and `session_compact` live
@@ -342,10 +402,8 @@ specify that the check must run unconditionally, not gated behind the same
 diagnostic-command matching every other detector in the file uses — without
 that, it would silently inherit the file's own documented blind spot rather
 than closing it. The Sonnet-escalation recommendation didn't originally
-address where it would live architecturally; `progress-stall-guard.ts`'s
-`ExtensionAPI` surface has no outbound path to another model, so this needs
-either new extension capability or (more consistent with existing
-architecture) a home in `build_app.py`'s orchestrator layer — left as an
-open placement question for the implementer, not assumed. The "independent
+address where it would live architecturally; the later implementation
+resolved that question in favor of `build_app.py`'s orchestrator layer,
+keeping outbound model calls out of `progress-stall-guard.ts`. The "independent
 convergence" claim about OpenHands' `Stuck Detector` was softened to
 "consistent with," since the relative timing isn't established.

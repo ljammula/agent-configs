@@ -22,6 +22,13 @@ Repo: `agent-configs` (this repo); extensions live in `pi/extensions/`, tests in
 > below, now decoupled from Task 1's original framing. Tasks 3–8 are
 > unaffected and still reflect real, open backlog items.
 
+> **Current-state update, 2026-08-19:** this handoff is historical and is
+> superseded by `pi-harness-hardening-backlog-2026-08-19.md`. The scratch/
+> cycle gaps gained deterministic detectors plus a default-on wall-clock
+> backstop; `PI_STALL_GUARD_NUDGE` no longer exists (the optional synchronous
+> action is `PI_STALL_GUARD_INTERCEPT`). The three later Codex P0 findings are
+> implemented; the matched repeated Sonnet parity battery remains open.
+
 ## Ground rules (apply to every task below)
 
 - Run `npm run typecheck` and `npm test` inside `pi/` before considering any
@@ -109,10 +116,10 @@ remaining ~130 turns of a 30-minute run). This is an *already-documented*
 open item (`progress-stall-guard.ts`'s row in `pi-harness-validation-status.md`),
 not new — the 2026-08-18 rerun is simply the third live confirmation.
 
-**No longer bundled with Task 1** (Task 1 is superseded — see above). This
-extension's own nudge (`PI_STALL_GUARD_NUDGE=1`, currently off by default)
-still sends via `{ deliverAs: "followUp" }` (line ~196) and has the
-identical delivery exposure Task 1 used to describe, but fixing that isn't
+**Historical state when this task was written.** The extension's then-current
+nudge (`PI_STALL_GUARD_NUDGE=1`, off by default) still sent via
+`{ deliverAs: "followUp" }` and had the identical delivery exposure Task 1
+used to describe, but fixing that wasn't
 automatically required to fix the fingerprint gap itself, since the nudge
 is already disabled by default and the trace-only telemetry (which does
 work today) is independently useful. Whoever picks this up should make an

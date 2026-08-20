@@ -513,6 +513,41 @@ test("the timer survives multiple agent_end/agent_start retry cycles without dou
 	}
 });
 
+test("a second top-level prompt starts a fresh wall-clock stall episode", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+
+		await harness.emit({ type: "before_agent_start", prompt: "first", systemPrompt: "", systemPromptOptions: {} } as any);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "agent_settled" } as any);
+
+		// The session sits idle beyond the first run's hard deadline. A new
+		// top-level prompt must start a new episode rather than inherit it.
+		await mock.timers.tick(2 * 60_000);
+		await harness.emit({ type: "before_agent_start", prompt: "second", systemPrompt: "", systemPromptOptions: {} } as any);
+		await harness.emit({ type: "agent_start" } as any);
+		const [result] = await harness.emit({
+			type: "tool_result",
+			toolCallId: "second-run",
+			toolName: "ls",
+			input: {},
+			content: [],
+			isError: false,
+		} as any);
+
+		assert.equal(result, undefined);
+		assert.equal(harness.abortCalls, 0, "the second prompt must receive its own hard-deadline window");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression test for "G3" (Opus review of the Bug-5 fix, 2026-08-20): the
 // hard-abort stage is reachable from two independent paths -- the timer
 // tick (`source: "wall-clock-timer"`) and the `tool_result` handler -- both
