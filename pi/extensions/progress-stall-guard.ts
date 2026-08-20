@@ -292,6 +292,50 @@
  *     entire duration until the same `_emitAgentSettled` call, per pi's
  *     `agent-session.js`), so there was no safety benefit to stopping any
  *     earlier -- only lost coverage.
+ *
+ * Two more bugs found via an Opus code review of the Bug-5 fix itself,
+ * 2026-08-20, both reproduced live against a scratch harness (not just
+ * argued from the diff) and both of the same shape as Bug 5: the fix that
+ * closed one hole in the backstop's "hard ceiling, no manual intervention"
+ * claim opened a different one.
+ *
+ * F1. `startTimer()`'s claim of being "idempotent by construction" (it
+ *     called `stopTimer()` then recreated the interval) was true of the
+ *     *outcome* -- a timer ends up running either way -- but not of its
+ *     *cadence*: every call restarted the 15s phase from zero. If
+ *     `agent_start` fires more often than `TIMER_INTERVAL_MS` -- exactly
+ *     the 16-retries-under-proxy-contention shape this file's own header
+ *     already documents (item 2, "Two bugs found live 2026-08-16") -- the
+ *     tick callback never gets to execute once, and the hard backstop is
+ *     as dead as it was pre-Bug-5, just via starvation instead of a
+ *     stopped timer. Reproduced: `agent_start` fired every 10s for 5
+ *     simulated minutes against a 2-minute hard deadline produced zero
+ *     aborts. Fixed by making `startTimer()` a genuine no-op when a timer
+ *     is already running, rather than stop-then-recreate -- the interval's
+ *     cadence is now owned by the session's actual lifetime, not by how
+ *     often `agent_start` fires.
+ * F2. The `input` handler (`pi.on("input")`) called the same
+ *     `resetFailureState()` that Recommendation 1 had folded the
+ *     wall-clock fields (`lastSourceEditAt`, `backstopSoftFired`,
+ *     `backstopHardFired`) into -- silently extending an "ask" reset that
+ *     was only ever meant to clear a stale failure fingerprint (its own
+ *     comment says so) into resetting the hard-abort clock too. `input` is
+ *     not just a human's new message: `pi.sendUserMessage()` fires it for
+ *     every extension-injected nudge, including `continuation-nudge.ts` on
+ *     any zero-tool-call turn and `goal-gate.ts` on every corrective round.
+ *     A stalled run that gets nudged by either more often than the
+ *     backstop window can never reach a hard abort. Reproduced: an `input`
+ *     fired every 60s against a 2-minute hard deadline, over 10 simulated
+ *     minutes, produced zero aborts. Fixed by splitting the reset:
+ *     `resetFailureState()` now clears only the failure-fingerprint fields;
+ *     `lastSourceEditAt`/`backstopSoftFired`/`backstopHardFired` moved
+ *     exclusively into `resetStallState()`, which `input` never calls.
+ *
+ * Both were the same lesson as Bug 5, generalized: this file's shared
+ * reset/restart helpers get called from more places than the change that
+ * touches them tends to audit, and "fires once" or "only resets what I
+ * meant it to" needs re-checking against every call site, not just the one
+ * motivating the change.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
@@ -528,28 +572,39 @@ export default function (pi: ExtensionAPI) {
 	const interceptEnabled = resolveInterceptEnabled();
 	const backstopThresholds = resolveBackstopThresholds();
 
-	// Reset the failure/backstop fields common to every reset point --
-	// factored out so the (agent_start | write/edit | bash-detected-edit |
-	// input) call sites can't drift out of sync on what "progress" clears.
-	// Deliberately does NOT touch `sourcelessRounds`: a new ask (`input`)
-	// isn't itself evidence a source edit happened, so it keeps its own
-	// narrower reset below, same as before this refactor.
+	// Reset only the failure-fingerprint fields -- factored out so the
+	// (agent_start | write/edit | bash-detected-edit | input) call sites
+	// can't drift out of sync on what "a stale fingerprint" clears.
+	// Deliberately does NOT touch `sourcelessRounds`, `lastSourceEditAt`, or
+	// either `backstop*Fired` flag: those are wall-clock progress evidence,
+	// not failure-fingerprint state, and belong exclusively to
+	// resetStallState() below. They used to live here too, which is exactly
+	// what let a routine extension-injected `input` (see the `pi.on("input")`
+	// handler) silently defer the hard abort forever -- "F2" from an Opus
+	// review, 2026-08-20 (`resolveInterceptEnabled`-adjacent review of the
+	// Bug-5 fix): `input` fires on every zero-tool-call turn via
+	// `continuation-nudge.ts`, every corrective round via `goal-gate.ts`, and
+	// several other extensions' own `sendUserMessage` calls, none of which
+	// are evidence of a source edit. Keeping the wall-clock fields out of
+	// this function is what makes that true regardless of which extension
+	// fires next.
 	function resetFailureState() {
 		sameFailure = 0;
 		lastFailureCategory = undefined;
 		recentCategories = [];
 		cycleIntercepted = false;
-		lastSourceEditAt = Date.now();
-		backstopSoftFired = false;
-		backstopHardFired = false;
 	}
 
-	// Full reset, including sourcelessRounds -- for the reset points that
-	// really are evidence of progress (a trustworthy write/edit, a
-	// bash-detected edit, agent_start).
+	// Full reset -- for the reset points that really are evidence of
+	// progress (a trustworthy write/edit, a bash-detected edit, the true
+	// first agent_start): the failure fingerprint, sourcelessRounds, AND the
+	// wall-clock backstop clock together.
 	function resetStallState() {
 		sourcelessRounds = 0;
 		resetFailureState();
+		lastSourceEditAt = Date.now();
+		backstopSoftFired = false;
+		backstopHardFired = false;
 	}
 
 	// Live context captured from whichever event handler last ran, reused by
@@ -619,7 +674,20 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function startTimer() {
-		stopTimer();
+		// A genuine no-op if a timer is already running -- NOT stop-then-
+		// recreate. "F1" from an Opus review, 2026-08-20: the file header's
+		// claim that stop-then-recreate is "idempotent by construction" was
+		// wrong -- it's idempotent in *outcome* (a timer ends up running
+		// either way) but not in *cadence*: each call restarts the 15s phase
+		// from zero. `agent_start` firing more often than TIMER_INTERVAL_MS
+		// (documented elsewhere in this file as happening with 16 retries
+		// under real proxy contention) can starve the tick from ever
+		// executing at all, silently defeating the hard backstop exactly the
+		// way Bug 5 did, via a different mechanism. Guarding on `timer`
+		// already being set makes every subsequent agent_start's startTimer()
+		// call a true no-op, so the interval's own cadence is owned by the
+		// session's actual lifetime, not by how often agent_start fires.
+		if (timer) return;
 		timer = setInterval(() => {
 			void (async () => {
 				if (!liveCtx || !liveCwd) return;
@@ -664,8 +732,10 @@ export default function (pi: ExtensionAPI) {
 		// loop (retry, auto-compaction, queued continuation), not once per
 		// invocation, so it can stop the timer well before the run is actually
 		// over; the timer must restart on every subsequent agent_start or it
-		// stays dead for the rest of the session. Idempotent by construction --
-		// startTimer() itself calls stopTimer() first.
+		// stays dead for the rest of the session. A true no-op when a timer is
+		// already running (see "F1" in the file header) -- it does NOT
+		// stop-then-recreate, which would restart the 15s cadence from zero on
+		// every call and could starve the tick entirely under frequent retries.
 		startTimer();
 		// Only the true first start of this invocation resets state -- a retry
 		// restart must not wipe real evidence of repeated inaction. See file

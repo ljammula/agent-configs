@@ -469,6 +469,78 @@ test("the timer survives multiple agent_end/agent_start retry cycles without dou
 	}
 });
 
+// Regression test for "F1" (Opus review of the Bug-5 fix, 2026-08-20):
+// startTimer()'s old stop-then-recreate implementation restarted the 15s
+// tick cadence from zero on every call, so agent_start firing more often
+// than TIMER_INTERVAL_MS could starve the tick from ever executing. Fires
+// agent_start every 10 simulated seconds -- well under the 15s tick
+// interval -- for 5 simulated minutes against a 2-minute hard deadline; the
+// old code produced zero aborts here.
+test("frequent agent_start churn (faster than the tick interval) does not starve the wall-clock timer", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+
+		for (let elapsed = 0; elapsed < 5 * 60_000; elapsed += 10_000) {
+			await harness.emit({ type: "agent_start" } as any);
+			await mock.timers.tick(10_000);
+		}
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(
+			harness.abortCalls,
+			1,
+			"the hard deadline (2min) must still fire even though agent_start churns every 10s",
+		);
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
+// Regression test for "F2" (Opus review of the Bug-5 fix, 2026-08-20): the
+// `input` handler used to call the same resetFailureState() that
+// Recommendation 1 had folded the wall-clock backstop fields into, so any
+// extension-injected nudge (continuation-nudge.ts on a zero-tool-call turn,
+// goal-gate.ts on a corrective round, etc.) silently deferred the hard
+// abort. Fires an input event every 60 simulated seconds -- more often than
+// the 2-minute hard deadline -- for 10 simulated minutes; the old code
+// produced zero aborts here.
+test("a repeating input event (simulating a nudge from another extension) does not reset the wall-clock backstop", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		for (let elapsed = 0; elapsed < 10 * 60_000; elapsed += 60_000) {
+			await harness.emit({ type: "input" } as any);
+			await mock.timers.tick(60_000);
+		}
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(
+			harness.abortCalls,
+			1,
+			"a nudge-shaped input every minute must not indefinitely defer the 2-minute hard deadline",
+		);
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression/documentation test for the resetStallState/resetFailureState
 // refactor: an "input" event (a new ask) resets the failure-fingerprint
 // fields but, unlike a real source edit, does NOT reset sourcelessRounds --
