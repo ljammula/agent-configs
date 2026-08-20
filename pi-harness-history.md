@@ -5330,9 +5330,14 @@ in the middle of a task" and continued -- reasonably, since it *was*
 mid-task at that point (the fix landed shortly after). It then hit the
 actual unrecoverable hang a few rounds later.
 
-`PI_STALL_GUARD_INTERCEPT` (`interceptEnabled`) only gates the *cycle-detection*
-intercept -- repeated identical test failures without a source edit
-(`progress-stall-guard.ts:721,758`). The **wall-clock hard backstop** --
+`PI_STALL_GUARD_INTERCEPT` (`interceptEnabled`) gates the synchronous
+intercept action. **Correction (Opus review, 2026-08-20): the text above
+originally said this only gates the cycle-detection intercept -- wrong.
+`interceptEnabled` gates both the streak intercept
+(`ACTION_SAME_FAILURE_THRESHOLDS`, `progress-stall-guard.ts:869`) and the
+cycle intercept (`:906`)**; left uncorrected below where it doesn't change
+the conclusion, since neither intercept is what this entry is actually
+about. The **wall-clock hard backstop** --
 the mechanism that should have caught this single-hung-tool-call case --
 calls `ctx.abort()`/`liveCtx?.abort()` unconditionally
 (`progress-stall-guard.ts:599,655`), independent of that env var. It's

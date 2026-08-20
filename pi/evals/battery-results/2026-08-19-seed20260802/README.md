@@ -108,9 +108,12 @@ an unrelated reason.**
   of a task" (reasonably, since it was) and continued, before hitting the
   actual unrecoverable hang a few rounds later.
   **Correction to this section's first pass**: this is *not* the
-  `PI_STALL_GUARD_INTERCEPT` gap. That env var only gates the
-  cycle-detection intercept (repeated identical test failures without a
-  source edit); the **wall-clock hard backstop** — the mechanism meant to
+  `PI_STALL_GUARD_INTERCEPT` gap. **Second correction (Opus review,
+  2026-08-20)**: that env var gates *both* the streak intercept
+  (`ACTION_SAME_FAILURE_THRESHOLDS`) and the cycle-detection intercept, not
+  cycle-detection alone as the first correction said — doesn't change this
+  section's conclusion, since neither intercept is what's at issue here;
+  the **wall-clock hard backstop** — the mechanism meant to
   catch exactly this single-hung-tool-call case — calls `ctx.abort()`
   unconditionally, independent of that env var, default-on 20 minutes past
   the last source edit. The last real edit landed ~22:29:43 UTC; the
@@ -154,6 +157,47 @@ hard backstop dying after the first internal `agent_end`, now fixed. Full
 working tree and evidence (including the 33MB `pi-output.jsonl` and full
 session trace) in `pair4-medium-rerun/`. Full narrative:
 `pi-harness-history.md`'s matching 2026-08-19 entry.
+
+## Follow-up: pair 4 rerun again post-fix, same day
+
+After the `progress-stall-guard.ts` timer fix (and its two Opus-review
+follow-ups) landed, pair 4's harness arm was rerun a third time at
+`--thinking medium` — same task, same seed, against the fixed extension
+(confirmed live: the installed `~/.pi/agent/extensions/progress-stall-guard.ts`
+symlink resolves to the patched file, matching `md5` with the repo copy)
+and the task fixture's stock budget, now raised 45 → 75 minutes
+(`local-model-bench` commit `44877d2`, done as part of the same hardening
+pass).
+
+**Result: clean pass.** `valid: true, passed: true, timed_out: false,
+pi_exit: 0`, 1779.4s (29.7 min) — well inside the 75-minute budget, no
+stall, no `pi-stall-trace` entry with `stalled: true`, hidden tests
+(`go test -race` + `dart test`) both passed. Second independent
+confirmation that `medium` thinking reliably produces the correct
+`handleList`/`handleVisit` fix for this task.
+
+**Honest caveat, not glossed over**: this run's session trace had **no**
+`agent_start`/`agent_end`/`agent_settled` lifecycle events at all past the
+initial start — it never hit an internal retry, auto-compaction, or
+queued-continuation boundary, and never hung on anything. So it's a real
+clean pass and a real "no regression" data point, but it did **not**
+exercise the exact failure condition the fix addresses (an `agent_end`
+mid-run, followed by a hang). That mechanism is still proven only by: (a)
+the regression tests (mocked timers, verified to fail against the old
+code and pass against the fix), and (b) reading the *original* incident's
+own trace, which independently confirmed the exact
+`agent_start`/`agent_end`/`agent_start`-with-no-further-`agent_end` shape
+the fix's theory predicted. A live run that reproduces a real post-fix
+hang and watches the guard successfully abort it would be stronger
+evidence still, but wasn't obtained here — this was the honest result of
+the attempt, not a manufactured one.
+
+No working tree, logs, or session trace from this rerun are committed —
+unlike the earlier `pair4-medium-rerun/` and `pair7-xhigh-trial1/2/`
+evidence bundles in this directory (a pre-existing convention this repo
+had before this finding), evidence-bundle commits going forward are
+paused; this run's raw artifacts stayed local and were discarded once
+this summary was written.
 
 ## Layout
 

@@ -633,3 +633,157 @@ after. **Still open**: whether the synchronous intercept actually gets a
 stalled model unstuck has never been observed live. Full account in
 `pi-harness-history.md`'s 2026-08-19 "Recommendation-2 intercept-recovery
 trial" entry.
+
+**2026-08-19/20 review pass: two new live-reproduced bugs found in the
+Bug-5 fix itself (F1, F2), fixed same day with regression tests.** A first
+Sonnet pass traced the timer lifecycle directly (the Opus subagent spawned
+for this went unresponsive after multiple pings — its inbox replies never
+arrived; recovered afterward from its on-disk transcript, which *did*
+contain a complete report) and concluded Bug 5 and its two follow-ups held
+as written. That first pass was real but incomplete — the recovered Opus
+report went further and, crucially, **reproduced two new bugs live**
+rather than reasoning from the diff alone (scratch harness runs against
+`mock.timers`, not just argument):
+
+- **F1**: `startTimer()`'s "idempotent by construction" claim
+  (`stopTimer()` then recreate the interval) was true of outcome but not
+  cadence — every call restarted the 15s tick phase from zero, so
+  `agent_start` firing more often than `TIMER_INTERVAL_MS` (this file's own
+  header already documents a live 16-retry run under proxy contention)
+  starves the tick from ever executing, defeating the hard backstop via a
+  different mechanism than Bug 5 used. Reproduced: `agent_start` every 10s
+  for 5 simulated minutes against a 2-minute hard deadline → 0 aborts on
+  the pre-fix code.
+- **F2**: the `input` handler called the same `resetFailureState()` that
+  Recommendation 1 had folded the wall-clock fields into, so any
+  extension-injected nudge (`continuation-nudge.ts` on a zero-tool-call
+  turn, `goal-gate.ts` on a corrective round, several others) silently
+  deferred the hard abort indefinitely. Reproduced: `input` every 60s
+  against a 2-minute hard deadline over 10 simulated minutes → 0 aborts on
+  the pre-fix code.
+
+**Both fixed same day**, `progress-stall-guard.ts`: F1 by making
+`startTimer()` a genuine no-op when a timer is already running instead of
+stop-then-recreate; F2 by splitting `resetFailureState()` (fingerprint
+fields only) from `resetStallState()` (fingerprint + the wall-clock
+fields), so `input` — the only caller of the fingerprint-only reset — never
+touches the backstop clock. Two new regression tests added
+(`tests/progress-stall-guard.test.ts`: "frequent agent_start churn…does not
+starve the wall-clock timer", "a repeating input event…does not reset the
+wall-clock backstop"), confirmed to fail against the pre-fix code (`git
+stash` + rerun) and pass against the fix. `npm run typecheck && npm test`:
+225/225. Full finding text and five lower-priority findings (F3-F8, mostly
+low-severity or informational — a stale-context/floating-promise edge case
+on session teardown, a write/edit early-return that skips the soft-stage
+check on test-file-only loops, dirty-signature edge cases, a rename-parsing
+bug, no re-entrancy guard on the git poll, an off-by-one in the intercept
+text) are in `progress-stall-guard.ts`'s file header and the recovered
+Opus transcript; not all applied yet — F1/F2 were the two that actually
+defeat the backstop live, the rest are lower-severity and deferred.
+
+Also corrected two factual errors this same review surfaced: `PI_STALL_GUARD_INTERCEPT`
+gates *both* the streak intercept (`ACTION_SAME_FAILURE_THRESHOLDS`) and
+the cycle intercept, not cycle-detection alone as an earlier correction in
+this file and in `2026-08-19-seed20260802/README.md` claimed — fixed in
+both places with an appended correction, per this repo's own convention of
+not silently rewriting prior narrative.
+
+**`pair4-medium-rerun2-postfix` update: it finished while the above was
+being written — real, complete, clean pass, not the inconclusive stub this
+entry first described.** First pass at this artifact (untracked at the
+time, only `manifest.json`/`run.log` on disk, matched to a still-running
+`/tmp` scratch dir `pi-screen-04-harness-9o0m4v5j`) diagnosed it as
+interrupted/inconclusive and preserved what existed then. The run actually
+completed and was organized into `pair4-medium-rerun2-postfix/code/` +
+`evidence/` (matching every other pair's layout) concurrently with this
+file being edited — **`valid: true, passed: true, timed_out: false,
+pi_exit: 0`, 1779.4s (29.7 min) inside the 75-minute budget, no stall
+trace, both hidden test suites (`go test -race`, `dart test`) passed**,
+confirmed directly (`hidden-test-output.log`: `ok bookmarksapi 1.353s`;
+code shows the correct lock-held `append(list, *bm)` pattern). Full
+writeup, including the honest caveat that this particular run's session
+never hit an `agent_end` mid-run and so didn't exercise the exact Bug-5
+failure condition (the mechanism is still proven separately, by the
+regression tests plus the original incident's own trace) — in
+`2026-08-19-seed20260802/README.md`'s "Follow-up: pair 4 rerun again
+post-fix, same day" section. My own preserved-`/tmp` copy and README stub
+from the inconclusive first pass were superseded and removed once the real
+result existed — no need to keep a diagnosis of an interrupted state once
+the actual outcome is known and documented.
+
+**Updated priority for the remaining backlog, ranked P0-P3 (revises the
+2026-08-19 sequencing; supersedes this file's own prior pass at this same
+ranking, which didn't yet know about F1/F2):**
+
+- **P0 (new, done same day): F1/F2 fixes with regression tests** — landed
+  above. Recommendation 3 explicitly depends on `stall-timeout` firing
+  reliably; with F1/F2 open that trigger wasn't reliable, so Rec 3 was
+  built on sand until this landed.
+- **P1 — Recommendation 2 (intercept recovery rate): re-framed, not just
+  re-prioritized.** The prior framing ("never observed live") is true only
+  of the cycle/streak intercept specifically. But the **soft backstop uses
+  the identical synchronous-append delivery channel** as the intercept
+  action, and it *was* observed firing live in the documented pair-4
+  medium rerun — and did *not* recover: the model's own `thinking` block
+  read it, reasoned about it, and dismissed it as "a false positive," then
+  hit the hang anyway a few rounds later. That's a live negative for a
+  *content* reason, not a delivery-mechanism reason. Refinements for the
+  next trial: stop using `dart/sequential-runner` (pair 5's documented
+  run-to-run variance is exactly what produced the earlier null result;
+  `go-flutter/bookmarks-app` pair 4's hang is structural, not stochastic,
+  and already has a recorded model reaction to build on); track the
+  model's *stated reaction* to an intercept firing, not just its next tool
+  call — the verdict is three-way (edits source / changes shape without
+  editing / explicitly dismisses the warning), not the two-way framing the
+  2026-08-19 backlog used; and the highest-value next variant may be a
+  **wording change** to the intercept text (closing the "I can rationalize
+  this away" escape hatch the current phrasing leaves open) rather than a
+  threshold change — a cheaper experiment than Recommendation 3.
+- **P2 — Recommendation 3 (Sonnet escalation): placement question now
+  resolved in favor of `build_app.py`**, not left open. Two reasons: Rec
+  1's live validation proves the extension's job ends cleanly at
+  `ctx.abort()` with a distinguishable `stall-timeout` outcome and
+  `pi_exit: 0` — an unambiguous out-of-band signal, no need for an
+  in-process escalation path; and F1/F2 are direct evidence this extension
+  already carries more long-lived state/lifecycle surface (a captured
+  `ctx`, an interval, a git subprocess poll, an unguarded floating promise
+  — see F3 in the file header) than it should safely take on more of.
+  Adding outbound API calls and a second model's response handling into
+  the same closure compounds exactly that risk. Remaining blocker is
+  scope/cost sign-off only, not a design question — and if/when built, key
+  the trigger on the `stall-timeout` trace *outcome*, not `pi_exit` (the
+  Rec-1 validation ended `pi_exit: 0`; the pre-fix hang ended `pi_exit:
+  124`; an exit-code trigger would misclassify both).
+- **P3 — Recommendation 4 (overhead + reasoning-token cap): framing holds,
+  two sharpenings.** The battery README's measured reasoning-on cost
+  (~1.3-1.6x wall time, 29-37MB traces vs. ~3MB) is itself an unbudgeted
+  cost this recommendation should account for — trace size alone slows
+  every future stall investigation's post-hoc analysis. And the
+  reasoning-token-cap lever needs a stated caveat: since Pi has no
+  `thinkingLevelMap` entry for Qwen3.8 (upstream pi#6951), `medium`/`high`/
+  `xhigh` already collapse to an identical `enable_thinking: true` — a
+  token *ceiling* may be the only lever that does anything differentiable
+  on this model, which strengthens the case for trying it, but its effect
+  must be validated by counting thinking-block chars (as the pair-7 trial
+  did), not assumed.
+
+**Two new process gaps found, not yet acted on:**
+- **G1**: `run_single_arm.py`'s manifest captures `pi_version`,
+  `agent_configs_revision`, and per-extension sha256, but not the `PI_*`
+  env overrides (`PI_STALL_GUARD_BACKSTOP_MINUTES`,
+  `PI_STALL_GUARD_INTERCEPT`, `PI_EVAL_THINKING_LEVEL`) that actually
+  defined the two most consequential recent runs (Rec 1's live validation,
+  the Rec-2 threshold-lowering attempt) — and the Rec-2 attempt's manifest
+  doesn't disclose that an uncommitted source edit (lowered thresholds,
+  reverted after) was also part of what ran. As Rec 2's next trial leans
+  even harder on env-gated experiments, this becomes a correctness gap in
+  the evidence base, not a nicety — worth capturing a `PI_*` allowlist plus
+  `git diff` (when dirty) into the manifest before the next such trial.
+- **G2/G3 (lower-priority, informational)**: env is read once at
+  extension-construction time, so identical extension sha256s across two
+  runs with different env produce materially different behavior — compounds
+  G1's false confidence from hash-pinning alone. And there's no test
+  asserting exactly one abort when both hard-abort paths (`tool_result`
+  and the timer tick) could land in the same window — low risk today
+  (single-threaded, guard re-read after the await) but an unguarded seam
+  for a future change to either path.
