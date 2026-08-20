@@ -1359,3 +1359,62 @@ Full raw evidence for both reruns: `pi/evals/battery-results/
 2026-08-20-seed20260802-harness-only-pair1-rerun-extpkg/` and
 `.../harness-only-pair4-xhigh/` (same non-commit convention as elsewhere
 in this doc).
+
+## `forbidden_test_globs` cleanup + Pi 0.84.2 pair-4 rerun (2026-08-20)
+
+Closed the open item from the pair-4 `xhigh` rerun above (the Dart-side
+`devcheck_test.dart` load-failure hazard) with a second fixture-level fix,
+then re-verified pair 4 on the freshly-bumped Pi `0.84.2` (see
+`pi-harness-history.md`'s dated bump entry for that part).
+
+**Fix**: `local-model-bench`'s two `go-flutter` tasks' `meta.json` now
+declare `forbidden_test_globs: ["server/*_test.go", "client/test/**/*"]`
+— structured metadata exposing the prohibition both specs already state in
+prose. `run_screening.py` gained `remove_prohibited_scratch_files()`,
+called after the model's session ends (diff already captured) and before
+`setup_cmd`/hidden-test injection: deletes anything under the working tree
+matching those globs and records what it removed in the run's `record`
+(`removed_prohibited_scratch_files`, never a silent drop). Both starters
+ship zero files matching these globs, so a match at this point is
+unambiguously model-authored regardless of git tracked state — verified
+directly, not assumed.
+
+**Verified two ways:**
+- **Replayed the actual failed pair-4 working tree** (the `xhigh` run's
+  `devcheck_test.go`/`devcheck_test.dart` scratch files) through the new
+  cleanup function directly: both removed, hidden tests re-injected fresh,
+  `(cd server && go test -race ./...) && (cd client && dart test)` rerun
+  by hand — `ok bookmarksapi 1.392s`, `All tests passed!`. Confirms the fix
+  closes the exact failure that shipped, not just a similar-looking one.
+- **Live rerun, pair 4** (`go-flutter/bookmarks-app`, harness arm, seed
+  `20260802`, `xhigh`, now on Pi `0.84.2`): `valid: true, passed: true`,
+  1745.7s, `hidden_test_exit: 0`. The model again left a scratch file
+  behind — `client/test/zz_agent_smoke_test.dart` this time, a different
+  name again — and the cleanup step actually fired and removed it live
+  (`removed_prohibited_scratch_files: ["client/test/zz_agent_smoke_test.dart"]`
+  in the run record), not just in the replay. `ok bookmarksapi 1.413s`, all
+  18 hidden Dart assertions passed. **This is the first live (not
+  synthetic, not replayed) confirmation that the cleanup step does its
+  job** — unlike the pair-1/pair-4 reruns above, which happened not to
+  leave a colliding/broken scratch file that run.
+- **Incidental finding, not a grading failure**: the reviewer route
+  (`cross-model-review.ts`, Gemma on `:8081`) flagged a real edge case
+  mid-session — `handleCreate` treats a JSON `tags: null` as an empty
+  array instead of the spec's required `400`. Hidden tests don't cover
+  this exact input, so it didn't affect `passed: true`; noted here as a
+  genuine, still-open correctness gap in this run's implementation, not
+  investigated further as part of this fixture-hygiene work.
+
+**Both `local-model-bench`-side fixture hazards for `go-flutter` tasks are
+now closed at the same mechanism level** (grading-time removal of
+spec-prohibited scratch files, generalized across both languages rather
+than patched per-incident): the Go package-symbol collision (external
+test package) and the Dart load-failure poisoning (cleanup pass). Net for
+this run: `xhigh` again correctly handled the tested concurrency bug, the
+`0.84.2` bump introduced no regression on this task, and the fixture
+hygiene fix worked exactly as designed on its first live opportunity.
+
+Full raw evidence: `pi/evals/battery-results/
+2026-08-20-seed20260802-harness-only-pair4-xhigh-pi0842/` (same
+non-commit convention as elsewhere in this doc). `local-model-bench`
+fixture fix: PR `ljammula/local-model-bench#1`.
