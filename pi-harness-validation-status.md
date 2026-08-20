@@ -1147,3 +1147,60 @@ code. Full raw evidence: `pi/evals/battery-results/
 2026-08-20-seed20260802-harness-only/` (not committed, per this repo's
 evidence-bundle-commits-paused convention; manifest/summary/results.jsonl
 only).
+
+## Matching baseline-only battery, same seed/day, and a suggestive (not
+proven) observation
+
+Ran the corresponding baseline arms for all 9 pairs (stock Pi, no harness
+extensions) via the same driver pattern
+(`run_baseline_only_battery.sh`). **9/9 valid, 9/9 passed** — including
+both tasks the harness arm failed on (`go-flutter/notes-app`, 1783.8s;
+`go-flutter/bookmarks-app`, 830.5s; both slower than typical baseline
+times for these dual-stack tasks, still well within budget).
+
+| Pair | Task | Result | Seconds |
+|---:|---|:---:|---:|
+| 1 | `go-flutter/notes-app` | ✅ | 1783.8 |
+| 2 | `go/notes-api` | ✅ | 130.7 |
+| 3 | `dart/task-manager` | ✅ | 134.3 |
+| 4 | `go-flutter/bookmarks-app` | ✅ | 830.5 |
+| 5 | `dart/sequential-runner` | ✅ | 55.1 |
+| 6 | `dart/notes-app` | ✅ | 124.1 |
+| 7 | `go/lru-cache` | ✅ | 124.7 |
+| 8 | `go/lru-cache` | ✅ | 172.0 |
+| 9 | `go/notes-api` | ✅ | 79.4 |
+
+**A concrete, checked difference on the two go-flutter pairs, not just
+"baseline got lucky twice": neither baseline run left its own scratch Go
+test file behind at all.** Confirmed by md5: in both `pair1` and `pair4`
+baseline artifact dirs, the only `server/*_test.go` present is
+byte-identical to the fixture's injected hidden test, and `client/test/`
+contains only the single injected hidden Dart test file too — no
+separate `*_impl_test.go`/`*_smoke_test.go` companion the way both
+harness-arm runs had. So baseline didn't merely get a favorable git-status
+snapshot by chance on the naming question; it structurally never created
+a file that could have collided, on either pair.
+
+**Stated as a suggestive correlation, not a proven cause — n=2 pairs is
+far too small to conclude the harness *causes* the model to leave scratch
+test files behind more often.** Plausible confounds not ruled out here:
+reasoning-mode itself (baseline in this repo's `run_single_arm.py` may
+resolve to a different effective thinking config than the harness arm --
+not checked this run), general run-to-run variance in whether the model
+decides self-authored verification is warranted, or simply small-sample
+noise on exactly the two pairs where it happened to matter. Worth
+tracking if the pattern repeats on a future battery, not worth asserting
+as a harness-side behavioral effect yet.
+
+**Also matters for the pair-4 race-condition finding above**: baseline's
+`handleList` on this same task got the race fix right this run (correct
+value-copy pattern, not the harness arm's copy of pointers), so this
+specific battery's data point is "harness attempt got it wrong once more
+than baseline did," not "harness attempts get it wrong more often than
+baseline in general" -- consistent with, not new evidence beyond, this
+investigation's repeated finding that this bug class isn't 100%
+reliably fixed by either arm, just usually.
+
+Full raw evidence: `pi/evals/battery-results/
+2026-08-20-seed20260802-baseline-only/` (same non-commit convention as
+above).
