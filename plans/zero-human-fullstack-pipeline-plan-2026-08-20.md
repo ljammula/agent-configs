@@ -54,6 +54,7 @@ control dir (agent never writes here): ~/code/test-bed/budget-pilot/
   spec/tickets/NNN-*.md     # ordered tracer-bullet tickets w/ dependency edges
   spec/acceptance/NNN/      # canonical acceptance tests, sliced per ticket
   reports/ticket-NNN/       # archived BUILD_REPORT.md + gate log per ticket
+  Makefile                  # human entry point: run / status / reports
 workspace (the app repo the agent builds): ~/code/test-bed/budget-pilot/workspace/
   acceptance/               # runner-staged copies of activated ticket slices
   ARCHITECTURE.md           # agent-maintained, updated every ticket
@@ -159,6 +160,20 @@ Thin outer loop, no new harness machinery:
   diagnostics survive the next run.
 - Ledger: append per-ticket outcome (rounds used, review verdicts,
   wall-clock) to `PROGRESS.md` — the pilot's evidence trail.
+- **Human entry point is a control-dir Makefile** (added 2026-08-20),
+  distinct from the workspace Makefile (which belongs to the agent and
+  holds `verify`/`verify-full`):
+  - `make run` — start **or** resume the build (same command by design:
+    the runner derives its position from `ticket(NNN):` commits, so there
+    is no separate resume mode to remember). Wraps
+    `python3 ~/code/agent-configs/pi/scripts/ticket_runner.py
+    --pilot-dir $(CURDIR)`.
+  - `make status` — read-only: current position from `git log` ticket
+    commits, tickets remaining, last gate outcome.
+  - `make reports` — list `reports/ticket-NNN/` archives (latest first).
+  Day-to-day, the spec-compilation step generates this Makefile into each
+  new app's control dir, so operating any pipeline app is: write spec →
+  compile → `make run`.
 
 **Work-tracking conventions (added 2026-08-20, borrowed from how Claude
 Code and Copilot's coding agent track work — both externalize state into
