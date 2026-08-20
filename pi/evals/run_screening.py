@@ -180,6 +180,42 @@ def path_digest(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+# PI_* env vars known to actually change extension behavior for a given run
+# without showing up anywhere else in the manifest ("G1", Opus review
+# 2026-08-20: the two most consequential recent runs -- Recommendation 1's
+# live validation and the Recommendation-2 threshold-lowering attempt -- were
+# each defined by exactly one of these, and neither showed up in that run's
+# own manifest). An allowlist, not "every PI_* var in the environment", so
+# unrelated PI_* noise (an operator's own shell config, say) doesn't get
+# captured as if it were part of the experiment; extend this list when a new
+# override earns the same "this changes what ran" status.
+ENV_OVERRIDE_ALLOWLIST = (
+    "PI_STALL_GUARD_BACKSTOP_MINUTES",
+    "PI_STALL_GUARD_INTERCEPT",
+    "PI_EVAL_THINKING_LEVEL",
+)
+
+
+def env_override_snapshot() -> dict[str, str]:
+    return {name: os.environ[name] for name in ENV_OVERRIDE_ALLOWLIST if name in os.environ}
+
+
+def extensions_dir_diff() -> str | None:
+    # Env vars captured above change *behavior*; an uncommitted edit changes
+    # the *code* -- same "this run's manifest doesn't describe what actually
+    # ran" gap G1 flagged, for the other way a run can silently diverge from
+    # its recorded agent_configs_revision (the 2026-08-19 Recommendation-2
+    # trial's temporarily-lowered thresholds being the concrete precedent).
+    # Scoped to extensions/ specifically, not the whole repo -- a dirty
+    # working tree elsewhere (docs, this very script) doesn't change what the
+    # harness run itself executed.
+    result = run(["git", "diff", "--", "extensions"], cwd=PI_ROOT)
+    if result.returncode != 0:
+        return None
+    diff = result.stdout
+    return diff if diff.strip() else None
+
+
 def installed_runtime_identity() -> dict[str, Any]:
     extensions_dir = INSTALLED_AGENT_DIR / "extensions"
     extensions = {}
@@ -194,6 +230,8 @@ def installed_runtime_identity() -> dict[str, Any]:
         "settings_sha256": path_digest(INSTALLED_AGENT_DIR / "settings.json"),
         "skills_sha256": path_digest(INSTALLED_AGENT_DIR / "skills"),
         "extensions": extensions,
+        "env_overrides": env_override_snapshot(),
+        "extensions_dir_dirty_diff": extensions_dir_diff(),
     }
 
 

@@ -261,7 +261,8 @@
  * `startTimer()` unconditionally on every `agent_start` (idempotent --
  * `startTimer()` already calls `stopTimer()` first) while keeping the
  * state-reset (`resetStallState()`, `sawTestThisTurn`, `intercepts`,
- * `lastBashEditSignature`) gated to the true first start only, same as
+ * `lastBashEditSignature`, later renamed `lastBashEditPaths` -- see "F5"
+ * below) gated to the true first start only, same as
  * before. Confirmed directly against the live incident's own evidence, not
  * just plausible from the mechanism: `pair4-medium-rerun/evidence/
  * pi-output.jsonl` contains exactly `agent_start` (event 3), `agent_end`
@@ -336,8 +337,44 @@
  * touches them tends to audit, and "fires once" or "only resets what I
  * meant it to" needs re-checking against every call site, not just the one
  * motivating the change.
+ *
+ * The same review surfaced four smaller fixes, applied same day:
+ *
+ * F3. The timer tick runs inside a bare `void (async () => ...)()`, not a pi
+ *     handler emit, so an uncaught throw is a raw unhandled promise
+ *     rejection -- Node's default for that is process termination, not a
+ *     logged error. The captured `ctx` (see the note above where it's
+ *     declared) is safe to read for staleness of *values*, but calling
+ *     `ctx.isIdle()`/`ctx.abort()` after the session has been replaced
+ *     (fork, new session, switch, resume, quit) throws -- the same class
+ *     `git-checkpoint.ts` already guards against, observed live in the
+ *     2026-08-17 hardened-battery run. Fixed with a try/catch using the same
+ *     `isStaleContextError` helper, stopping the timer on a stale hit
+ *     instead of re-throwing every tick; a `session_shutdown` handler was
+ *     also added alongside the existing `agent_settled` one as a second,
+ *     broader stop path.
+ * F4. The `tool_result` handler's write/edit branch returned unconditionally,
+ *     before the backstop elapsed check below it ever ran -- a model looping
+ *     on test-file-only edits (not evidence of progress, so never resets)
+ *     never saw the soft-stage warning text either, since the branch bailed
+ *     out first. Fixed: a trustworthy edit still returns immediately (there
+ *     is nothing to warn about on the exact call that just reset the clock),
+ *     but a test-file-only or failed write/edit now falls through to the
+ *     shared backstop check like any other tool call.
+ * F5. `resolveBashEditPaths` (then `resolveBashEditSignature`) compared the
+ *     whole dirty-path set for *any* difference, which also reset on a path
+ *     going clean -- a revert or `git checkout` is not progress. Fixed to
+ *     require a genuinely *added* non-test path.
+ * F6. The `-z` git-status parse split on `\n` as well as `\0` (defeating the
+ *     point of `-z` for a path containing a newline) and sliced every
+ *     NUL-delimited field by a fixed offset -- but a rename/copy entry's
+ *     second field (the original path) carries no `XY ` status prefix of
+ *     its own, so it was mis-sliced into a 1-character garbage path. Fixed
+ *     to walk entries with an index cursor and discard the paired orig-path
+ *     field for rename/copy status codes instead of parsing it as a path.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isStaleContextError } from "./lib/stale-context.ts";
 import { explainVerificationMasking, type MaskReason } from "./lib/verification.ts";
 
 // Deliberately broader than lib/verification.ts's BROAD_VERIFICATION_PATTERNS
@@ -564,10 +601,11 @@ export default function (pi: ExtensionAPI) {
 	let lastSourceEditAt = Date.now();
 	let backstopSoftFired = false;
 	let backstopHardFired = false;
-	// git-status snapshot of non-test-file paths as of the last timer tick --
-	// see resolveBashEditSignature below. `undefined` until the first tick
-	// establishes a baseline, so that baseline itself never counts as an edit.
-	let lastBashEditSignature: string | undefined;
+	// git-status snapshot of non-test-file dirty paths as of the last timer
+	// tick -- see resolveBashEditPaths below. `undefined` until the first
+	// tick establishes a baseline, so that baseline itself never counts as
+	// an edit.
+	let lastBashEditPaths: Set<string> | undefined;
 
 	const interceptEnabled = resolveInterceptEnabled();
 	const backstopThresholds = resolveBackstopThresholds();
@@ -633,12 +671,22 @@ export default function (pi: ExtensionAPI) {
 	// never resets the sourceless clock there. Rather than pattern-match bash
 	// commands (fragile -- redirects into scratch paths, `2>&1` decoys, a
 	// dozen editor CLIs), each tick asks git directly what actually changed:
-	// the set of non-test-file paths `git status` reports. A change to that
-	// set is real, tool-agnostic evidence of progress. This only catches a
-	// path *newly* appearing dirty, not further edits to a file already
-	// dirty from a prior tick -- an accepted, narrower gap than the one
-	// closed, not a claim of catching every subsequent bash edit.
-	async function resolveBashEditSignature(cwd: string): Promise<string | undefined> {
+	// the set of non-test-file paths `git status` reports. A path *newly*
+	// appearing in that set is real, tool-agnostic evidence of progress.
+	// Only a newly-*added* path counts ("F5", Opus review 2026-08-20; the
+	// original version compared the whole set for any difference at all,
+	// which also reset on a path going clean -- a revert or `git checkout`
+	// is not progress and shouldn't read as some). Two accepted, narrower
+	// gaps remain, both cheaper to accept than to close: this catches a path
+	// going dirty, not further edits to a path already dirty from a prior
+	// tick; and `--untracked-files=all` means a genuinely new scratch file
+	// created inside the repo (not just under `/tmp`) still counts as
+	// progress -- closing that would mean either losing detection of a
+	// model's own newly-created *source* file, or pattern-matching filenames
+	// to guess scratch-vs-source, the exact fragility this git-based
+	// approach exists to avoid. Neither gap is a claim of catching every
+	// subsequent bash edit.
+	async function resolveBashEditPaths(cwd: string): Promise<Set<string> | undefined> {
 		const result = await pi
 			.exec(
 				"git",
@@ -658,12 +706,25 @@ export default function (pi: ExtensionAPI) {
 			)
 			.catch(() => undefined);
 		if (!result || result.code !== 0) return undefined;
-		const paths = result.stdout
-			.split(/[\0\n]/)
-			.filter(Boolean)
-			.map((entry) => entry.slice(3))
-			.filter((path) => path.length > 0 && !isTestFile(path));
-		return paths.sort().join("\0");
+		// `-z` NUL-terminates every field, including the *second* field a
+		// rename/copy entry carries (the original path, with no "XY " status
+		// prefix of its own) -- splitting on `\n` too (the pre-fix code did)
+		// defeats the whole point of `-z` for a path containing a newline, and
+		// naively slicing every NUL-delimited field by 3 mis-parses that
+		// second field as a 1-character garbage path ("F6", Opus review
+		// 2026-08-20). Walk the NUL-split entries with an index cursor instead:
+		// consume the extra field when the status code says rename/copy,
+		// rather than treating it as its own path.
+		const fields = result.stdout.split("\0").filter(Boolean);
+		const paths = new Set<string>();
+		for (let i = 0; i < fields.length; i++) {
+			const entry = fields[i];
+			const status = entry.slice(0, 2);
+			const path = entry.slice(3);
+			if (path.length > 0 && !isTestFile(path)) paths.add(path);
+			if (status.includes("R") || status.includes("C")) i++; // discard the paired orig-path field
+		}
+		return paths;
 	}
 
 	function stopTimer() {
@@ -688,35 +749,85 @@ export default function (pi: ExtensionAPI) {
 		// call a true no-op, so the interval's own cadence is owned by the
 		// session's actual lifetime, not by how often agent_start fires.
 		if (timer) return;
+		// Re-entrancy guard ("F7", Opus review 2026-08-20): setInterval does not
+		// await its callback, and resolveBashEditPaths awaits a bounded but
+		// non-instant `git exec` (up to its own 5s timeout). Without this guard,
+		// a slow tick (a large repo, or `.git/index.lock` contention from
+		// git-checkpoint.ts's own per-turn_start git calls) could still be
+		// mid-flight when the next 15s tick fires, letting two ticks race on
+		// `lastBashEditPaths`'s undefined-baseline check. Low-impact even
+		// unguarded (the exec timeout bounds the overlap, and losing a race
+		// only delays the elapsed check slightly), but a one-line fix removes
+		// the question entirely.
+		let ticking = false;
 		timer = setInterval(() => {
+			if (ticking) return;
+			ticking = true;
 			void (async () => {
-				if (!liveCtx || !liveCwd) return;
-				if (liveCtx.isIdle()) return; // no run in progress -- nothing to time out
+				try {
+					if (!liveCtx || !liveCwd) return;
+					if (liveCtx.isIdle()) return; // no run in progress -- nothing to time out
 
-				const signature = await resolveBashEditSignature(liveCwd);
-				if (signature !== undefined) {
-					if (lastBashEditSignature === undefined) {
-						lastBashEditSignature = signature;
-					} else if (signature !== lastBashEditSignature) {
-						lastBashEditSignature = signature;
-						resetStallState();
+					const paths = await resolveBashEditPaths(liveCwd);
+					if (paths !== undefined) {
+						if (lastBashEditPaths === undefined) {
+							lastBashEditPaths = paths;
+						} else {
+							// Only a newly-added path counts as progress ("F5" -- see
+							// resolveBashEditPaths's own comment); a path going clean
+							// (present in lastBashEditPaths but not in paths) does not.
+							let added = false;
+							for (const path of paths) {
+								if (!lastBashEditPaths.has(path)) {
+									added = true;
+									break;
+								}
+							}
+							lastBashEditPaths = paths;
+							if (added) {
+								resetStallState();
+								return;
+							}
+						}
+					}
+
+					const elapsedMs = Date.now() - lastSourceEditAt;
+					if (!backstopHardFired && elapsedMs >= backstopThresholds.hardMs) {
+						backstopHardFired = true;
+						pi.appendEntry("pi-stall-trace", {
+							sourcelessRounds,
+							sameFailure,
+							stalled: true,
+							stallTimeout: true,
+							outcome: "stall-timeout",
+							stallElapsedMs: elapsedMs,
+							source: "wall-clock-timer",
+						});
+						liveCtx?.abort();
+					}
+				} catch (error) {
+					// "F3", Opus review 2026-08-20: this callback runs inside a bare
+					// `void (async () => ...)()`, not inside a pi handler emit, so an
+					// uncaught throw here is a raw unhandled promise rejection, not
+					// something runner.emitError sees -- Node's default for that is
+					// process termination. The captured `ctx`/`cwd` above are safe to
+					// read for staleness of *values*, per the file-level note where
+					// they're declared, but calling `ctx.isIdle()`/`ctx.abort()` on a
+					// `ctx` whose session has since been replaced (fork, new session,
+					// switch, resume, quit) throws -- see isStaleContextError's own
+					// doc comment, and git-checkpoint.ts's identical handling of the
+					// same class of error, observed live in the 2026-08-17
+					// hardened-battery run. Nothing productive is left to do once
+					// that's happened: a fresh extension instance is already
+					// registered for the replacement session, so just stop this
+					// timer rather than let it keep re-throwing every tick.
+					if (isStaleContextError(error)) {
+						stopTimer();
 						return;
 					}
-				}
-
-				const elapsedMs = Date.now() - lastSourceEditAt;
-				if (!backstopHardFired && elapsedMs >= backstopThresholds.hardMs) {
-					backstopHardFired = true;
-					pi.appendEntry("pi-stall-trace", {
-						sourcelessRounds,
-						sameFailure,
-						stalled: true,
-						stallTimeout: true,
-						outcome: "stall-timeout",
-						stallElapsedMs: elapsedMs,
-						source: "wall-clock-timer",
-					});
-					liveCtx?.abort();
+					throw error;
+				} finally {
+					ticking = false;
 				}
 			})();
 		}, TIMER_INTERVAL_MS);
@@ -739,7 +850,7 @@ export default function (pi: ExtensionAPI) {
 		startTimer();
 		// Only the true first start of this invocation resets state -- a retry
 		// restart must not wipe real evidence of repeated inaction. See file
-		// header, "Two bugs found live 2026-08-16," item 2. lastBashEditSignature
+		// header, "Two bugs found live 2026-08-16," item 2. lastBashEditPaths
 		// belongs to this same gated reset, not to startTimer() (Opus review of
 		// the Bug 5 fix, 2026-08-19): it's stall-tracking state exactly like the
 		// rest of this block, so resetting it on every retry would open a blind
@@ -749,7 +860,7 @@ export default function (pi: ExtensionAPI) {
 		if (seenFirstAgentStart) return;
 		seenFirstAgentStart = true;
 		resetStallState();
-		lastBashEditSignature = undefined;
+		lastBashEditPaths = undefined;
 		sawTestThisTurn = false;
 		intercepts = 0;
 	});
@@ -770,6 +881,17 @@ export default function (pi: ExtensionAPI) {
 		stopTimer();
 	});
 
+	// Belt-and-suspenders alongside agent_settled above ("F3", Opus review
+	// 2026-08-20): session_shutdown fires "before an extension runtime is
+	// torn down due to quit, reload, or session replacement" -- broader than
+	// agent_settled (which only covers a run finishing normally) and the
+	// specific hook this repo's own convention treats as authoritative for
+	// this class of cleanup. Idempotent -- stopTimer() is always safe to call
+	// when nothing is running.
+	pi.on("session_shutdown", () => {
+		stopTimer();
+	});
+
 	// A new ask (steering message, injected message from another extension)
 	// resets the failure
 	// scope, mirroring continuation-nudge.ts -- a stale fingerprint from a
@@ -784,9 +906,21 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const path = (event.input as { path?: string }).path;
 			if (path && !event.isError && !isTestFile(path)) {
+				// Trustworthy progress -- return here, before the backstop check
+				// below, is correct: resetStallState() just moved lastSourceEditAt
+				// to now, so there is nothing to warn about on this exact call.
 				resetStallState();
+				return undefined;
 			}
-			return undefined;
+			// Falls through to the shared backstop check below rather than
+			// returning here ("F4", Opus review 2026-08-20): a test-file-only or
+			// failed write/edit is not evidence of progress, and used to return
+			// unconditionally at this point, silently skipping the soft-stage
+			// check the same way the file's own header describes for
+			// SCRATCH_EXECUTION_PATTERNS-gated checks -- a model looping on
+			// edits to test files only would never see the soft warning text
+			// (the hard ceiling still fired via the independent timer, so this
+			// was a lost recovery attempt, not a lost ceiling).
 		}
 
 		const elapsedMs = Date.now() - lastSourceEditAt;
@@ -884,7 +1018,12 @@ export default function (pi: ExtensionAPI) {
 					{
 						type: "text" as const,
 						text:
-							`\n\n[pi-harness] This command has now produced the same result ${sameFailure} times ` +
+							// sameFailure starts at 0 on the first occurrence of a category
+							// (line above: `category === lastFailureCategory ? sameFailure + 1
+							// : 0`), so a streak of sameFailure===N is actually N+1
+							// occurrences -- "F8", Opus review 2026-08-20. Report the true
+							// count to the model, not the zero-based counter.
+							`\n\n[pi-harness] This command has now produced the same result ${sameFailure + 1} times ` +
 							"in this session with no source edit in between." +
 							maskReasonNote(masking.reason) +
 							" Earlier repeats may no longer be " +
