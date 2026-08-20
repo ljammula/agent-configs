@@ -71,21 +71,64 @@ def sh(args: list[str], *, cwd: Path | None = None, timeout: float | None = None
 	return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout, check=False)
 
 
+# Root-only fallback used when the TS resolver can't run at all -- e.g. a
+# fresh checkout where `npm install` was never run (pi/node_modules is
+# gitignored, tsx is a devDependency, and install.sh doesn't install it).
+# Not nested-manifest aware like resolve-verification.ts; good enough to gate
+# a corrective round, not a substitute for the real resolver. Found via a
+# Codex PR #22 review, 2026-08-20: without this fallback, resolve_verify_command
+# silently returned None on every fresh installation, so build_app.py stopped
+# after its first round with "no canonical verification command resolvable"
+# even against a workspace with a valid Makefile or manifest.
+_FALLBACK_VERIFY_CANDIDATES = [
+	("Makefile", "verify", "make verify"),
+	("Makefile", "test", "make test"),
+	("Makefile", "check", "make check"),
+	("go.mod", None, "go vet ./... && go test ./..."),
+	("package.json", None, "npm test"),
+	("pyproject.toml", None, "pytest"),
+	("pubspec.yaml", None, "dart test"),
+]
+
+
+def _resolve_verify_command_fallback(workspace: Path) -> str | None:
+	makefile = workspace / "Makefile"
+	if makefile.exists():
+		lines = makefile.read_text(errors="ignore").splitlines()
+		targets = {line.split(":", 1)[0].strip() for line in lines if ":" in line and not line.startswith(("\t", " ", "#"))}
+		for filename, target, command in _FALLBACK_VERIFY_CANDIDATES:
+			if filename != "Makefile":
+				continue
+			if target in targets:
+				return command
+	for filename, _target, command in _FALLBACK_VERIFY_CANDIDATES:
+		if filename == "Makefile":
+			continue
+		if (workspace / filename).exists():
+			return command
+	return None
+
+
 def resolve_verify_command(workspace: Path) -> str | None:
-	"""Resolve through the exact TypeScript implementation used by quality-gate."""
-	if not TSX.exists():
-		return None
-	try:
-		result = sh([str(TSX), str(VERIFY_RESOLVER), str(workspace)], cwd=PI_ROOT, timeout=30)
-	except (OSError, subprocess.TimeoutExpired):
-		return None
-	if result.returncode != 0:
-		return None
-	try:
-		command = json.loads(result.stdout).get("command")
-	except (json.JSONDecodeError, AttributeError):
-		return None
-	return command if isinstance(command, str) and command else None
+	"""Resolve through the exact TypeScript implementation used by
+	quality-gate when it's available; falls back to a root-only heuristic
+	scan when the TS resolver can't even run (tsx missing/erroring), rather
+	than silently reporting no command exists. A clean run of the real
+	resolver that itself finds nothing is trusted as-is -- that's a more
+	accurate answer than the fallback's shallower scan, not a failure to
+	paper over."""
+	if TSX.exists():
+		try:
+			result = sh([str(TSX), str(VERIFY_RESOLVER), str(workspace)], cwd=PI_ROOT, timeout=30)
+		except (OSError, subprocess.TimeoutExpired):
+			result = None
+		if result is not None and result.returncode == 0:
+			try:
+				command = json.loads(result.stdout).get("command")
+			except (json.JSONDecodeError, AttributeError):
+				command = None
+			return command if isinstance(command, str) and command else None
+	return _resolve_verify_command_fallback(workspace)
 
 
 def redact(output: str, limit: int = 3000) -> str:

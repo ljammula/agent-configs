@@ -42,6 +42,29 @@ class BuildAppTests(unittest.TestCase):
 		self.assertNotIn("--thinking", inherited)
 		self.assertEqual(overridden[overridden.index("--thinking") + 1], "xhigh")
 
+	def test_resolve_verify_command_falls_back_when_tsx_is_missing(self):
+		# Regression for a Codex PR #22 review finding: a fresh checkout where
+		# `npm install` was never run (pi/node_modules is gitignored, tsx is a
+		# devDependency, install.sh doesn't install it) must still resolve a
+		# real verify command instead of silently reporting none exists.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			(root / "Makefile").write_text("verify:\n\t@true\ntest:\n\t@true\n")
+			with mock.patch.object(build_app, "TSX", Path("/nonexistent/tsx")):
+				self.assertEqual(build_app.resolve_verify_command(root), "make verify")
+
+	def test_resolve_verify_command_trusts_a_clean_tsx_resolver_with_no_command(self):
+		# The fallback must not override a real resolver run that cleanly
+		# determined there's nothing to verify -- that's a more accurate
+		# answer than the fallback's shallow root-only scan, not a failure.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			(root / "Makefile").write_text("verify:\n\t@true\n")
+			clean_no_command = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps({"command": None}), stderr="")
+			with mock.patch.object(build_app, "TSX", Path(__file__)):
+				with mock.patch.object(build_app, "sh", return_value=clean_no_command):
+					self.assertIsNone(build_app.resolve_verify_command(root))
+
 	def test_shared_verifier_rejects_a_failure_in_either_nested_component(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
