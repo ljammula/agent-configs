@@ -918,3 +918,92 @@ deliberately reproduce the legacy pre-hardening baseline for comparison) →
 `TASK_THINKING_LEVELS` (the new per-task default, used whenever neither flag
 is passed). `run_single_arm.py`/`run_single_pair.py` call `schedule()` with
 no thinking arguments, so they inherit the table automatically.
+
+## Pair-4 postfix21 rerun (2026-08-20): new failure mode, unrelated to F1-F8/G1/table
+
+First live run of pair 4 (`go-flutter/bookmarks-app`, harness arm) against
+the just-merged PR #21 (F1-F8, refined G1, `TASK_THINKING_LEVELS`) and the
+new per-task table. **`valid: true, passed: false, timed_out: false`,
+1830.2s (~30.5 min, well inside the 75-min budget)**. `thinking_level:
+"medium"` applied automatically (no flag passed), `agent_configs_revision`
+matched the merge commit, zero extension errors, zero stall-guard trace
+activity — F1-F8/G1/the table all validated as working correctly. The
+failure is orthogonal to everything just landed:
+
+- **`hidden_test_exit: 1` — a Go build failure, not a logic bug**:
+  `./bookmarksapi_test.go:289:6: TestConcurrentVisits redeclared in this
+  block, other declaration of ./bookmarksapi_smoke_test.go:167:6`. The
+  underlying race fix itself is correct, confirmed directly from the diff
+  (`handleList` copies each `*Bookmark` into the response slice under
+  `s.mu.Lock()`/`Unlock()`, the same pattern the two prior successful
+  pair-4 reruns landed) — the package simply never compiled for grading.
+- **Not a weakened/gamed test, and not the model's own file that collided**:
+  confirmed directly (md5 + no `git log`/tool-call history for that exact
+  path) that `bookmarksapi_test.go` was **never touched by the model at
+  all** — it's byte-identical to `local-model-bench/tasks/go-flutter/
+  bookmarks-app/tests/server/bookmarksapi_test.go`, the harness's own
+  canonical hidden test, dropped into the working directory by the grading
+  step *after* the session ended. The model only ever created
+  `bookmarksapi_smoke_test.go` (its own scratch verification test,
+  independently exercising the identical scenario — concurrent visits
+  checked for lost updates, then mixed concurrent reads/visits/patches,
+  arguably more thorough than the hidden version), left behind untracked
+  and uncleaned. Both files picked the same obvious name for the same
+  obvious scenario; a naming collision between the model's own leftover
+  scratch test and a *later-injected* hidden test, not a shortcut and not
+  a check the model dodged.
+- **Correction to this entry's own first pass**: an earlier draft of this
+  section attributed the miss to the model's final sanity check (a fresh
+  `git clone` to `/tmp/verify-clone`, which excludes untracked files) being
+  structurally blind to its own scratch file. That's not what happened —
+  the file the model's clone would have needed to see doesn't exist until
+  grading. **No check the model could have run, however careful, could have
+  caught this**: the hidden test file the collision is against isn't
+  present during the session at all, by design (that's what "hidden" means
+  here). This also means the separately-noted `quality-gate.ts` `agent_end`
+  gap below (real, and worth investigating on its own) is *not* connected
+  to this failure the way the first draft speculated — even a fully working
+  settlement check only sees the working tree as it exists during the
+  session, never the post-hoc-injected hidden test.
+- **A separate, real gap surfaced along the way, unconnected to this
+  failure's root cause**: `quality-gate.ts`'s `agent_end` settlement handler
+  (the one that runs a fresh, real verification command in the real working
+  directory, and the one that used to queue a corrective `followUp`
+  pre-2026-08-19) produced **zero trace entries across this entire
+  30-minute, materially-changing run**. All 5 recorded `quality-gate`
+  failures came from the passive `tool_result` observer path instead
+  (3-key metadata shape, vs. the `agent_end` handler's 4-5-key shape with
+  `exitCode`/`hadOutput`/`failureExcerpt`) — a channel that was never a
+  nudging channel, before or after the decoupling; it only ever wrote to
+  trace. Not root-caused in the time spent here; plausibly related to the
+  already-documented `pi -p` single-shot lifecycle gap (`goal-gate.ts`'s
+  `session_compact`-never-fires open item speculates the extension runner
+  may already be torn down before some trailing lifecycle events land in
+  `pi -p` mode) but not confirmed against this specific handler.
+
+**Reasoning on re-enabling in-band nudging, prompted by this run**: does
+not support it, on firmer footing than the first pass at this reasoning
+found. This specific failure is structurally unreachable by any in-session
+mechanism — model-side or extension-side, nudged or not — because it
+depends on a file (the real hidden test) that only exists after the
+session is over. However well `agent_end` fired, and however aggressively
+nudged, nothing running *during* the session could have seen the
+collision. The separately-real `agent_end`-never-firing gap is worth
+root-causing on its own merits (a bigger, structural question — does
+settlement verification reach `agent_end` reliably in `pi -p` mode at all?)
+but it is not evidence for or against nudging *for this failure class*,
+since even a working `agent_end` couldn't have helped here. Not yet
+investigated further; flagged as a separate, higher-priority open thread
+from the nudging question.
+
+**Open items from this run**: (1) root-cause why `quality-gate.ts`'s
+`agent_end` handler never fired in this run — check `lastAssistantMessageFailed`,
+whether `pi -p` single-shot mode reliably emits `agent_end` at true session
+end, and whether this is a one-off or systemic; (2) fixture-side (out of
+scope for this repo): `local-model-bench`'s `go-flutter/bookmarks-app` hidden
+test uses a predictable name (`TestConcurrentVisits`) for the exact scenario
+the task requires solving, making a model-authored-test collision structurally
+likely, not a fluke — worth a distinctive prefix or isolated package/build-tag
+convention; (3) reproducibility: is this collision a one-off (this model
+happened to pick the same name and habit this run) or does it recur —
+untested, a same-config rerun is the next step.
