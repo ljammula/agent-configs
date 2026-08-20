@@ -36,6 +36,43 @@ test("a current passing verification suppresses abandonment nudges", async () =>
 	assert.equal(harness.messages.length, 0);
 });
 
+test("a masked successful verification is described as inconclusive, not failed", async () => {
+	const branch: any[] = [];
+	const harness = new ExtensionHarness({ branch });
+	continuationNudge(harness.api);
+	await harness.emit({ type: "agent_start" } as any);
+	branch.push(
+		{ id: "u", type: "message", message: { role: "user", content: [{ type: "text", text: "task" }] } },
+		{ id: "a1", type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "make verify 2>&1 | tail -3" } }] } },
+	);
+	await harness.emit({
+		type: "tool_result",
+		toolCallId: "1",
+		toolName: "bash",
+		input: { command: "make verify 2>&1 | tail -3" },
+		content: [],
+		details: {},
+		isError: false,
+	} as any);
+	await harness.emit(silentTurn);
+	assert.equal(harness.messages.length, 1);
+	assert.match(String(harness.messages[0].content), /inconclusive/);
+	assert.doesNotMatch(String(harness.messages[0].content), /command failed/);
+
+	branch.push({ id: "a2", type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "make verify" } }] } });
+	await harness.emit({
+		type: "tool_result",
+		toolCallId: "2",
+		toolName: "bash",
+		input: { command: "make verify" },
+		content: [],
+		details: {},
+		isError: false,
+	} as any);
+	await harness.emit(silentTurn);
+	assert.equal(harness.messages.length, 1);
+});
+
 test("forward-looking prose with no tool call is nudged", async () => {
 	const harness = new ExtensionHarness();
 	continuationNudge(harness.api);
