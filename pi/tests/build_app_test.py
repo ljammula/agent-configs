@@ -139,6 +139,75 @@ class BuildAppTests(unittest.TestCase):
 		)
 		self.assertEqual(required_blockers, ["review unavailable (no-review-verdict)"])
 
+	def test_empty_diff_always_blocks_required_review_even_with_passing_verify(self):
+		# An empty diff means the reviewer genuinely had nothing to look at --
+		# with --review-base-sha anchoring the reviewer to the ticket's real
+		# start (not just this process's start), that can only mean nothing
+		# has changed since the ticket began. A passing `make verify` is not
+		# a substitute for the independent review this policy exists to
+		# require (Codex review on PR #25: silently accepting verify-passed
+		# as a proxy for "reviewed" defeats required review exactly where it
+		# matters most -- already-committed, never-reviewed work).
+		empty_diff = build_app.parse_pi_traces(json.dumps({"type": "entry_appended", "entry": {
+			"customType": "pi-harness-trace", "data": {
+				"extension": "reviewer", "event": "review", "outcome": "blocked",
+				"metadata": {"reason": "empty-diff"},
+			},
+		}}))
+		blockers, review = build_app.round_blockers(
+			verify_passed=True, pi_failed=False, pi_timed_out=False,
+			traces=empty_diff, review_policy="required",
+		)
+		self.assertEqual(review.detail, "empty-diff")
+		self.assertEqual(blockers, ["review unavailable (empty-diff)"])
+
+	def test_empty_diff_fails_fast_instead_of_burning_the_round_budget(self):
+		# No amount of retrying turns an empty diff non-empty, so this is a
+		# NON_RETRYABLE_REVIEW_FAILURES entry: stop after round 1 with an
+		# honest "never reviewed" halt rather than looping to max_rounds.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Already-done ticket")
+			output = json.dumps({"type": "entry_appended", "entry": {
+				"customType": "pi-harness-trace", "data": {
+					"extension": "reviewer", "event": "review", "outcome": "blocked",
+					"metadata": {"reason": "empty-diff"},
+				},
+			}})
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
+				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, output, "")) as run,
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=6, containment=False, timeout_minutes=1,
+				)
+		self.assertFalse(result.succeeded)
+		self.assertEqual(len(result.rounds), 1)
+		self.assertEqual(run.call_count, 1)
+		self.assertIn("empty-diff", result.stopped_reason)
+
+	def test_review_base_sha_is_threaded_to_the_pi_invocation_env(self):
+		# ticket_runner.py passes its prior-ticket-boundary commit here so the
+		# reviewer anchors to the ticket's real start instead of "HEAD when
+		# this process happens to start" -- see cross-model-review.ts's
+		# AI_REVIEW_BASE_SHA handling.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
+				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, pi_output("clean"), "")) as run,
+			):
+				build_app.run_build(
+					root, spec, max_rounds=1, containment=False, timeout_minutes=1,
+					review_base_sha="deadbeef",
+				)
+			self.assertEqual(run.call_args.kwargs["env"]["AI_REVIEW_BASE_SHA"], "deadbeef")
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)

@@ -64,6 +64,13 @@ NON_RETRYABLE_REVIEW_FAILURES = {
 	"invalid-configuration",
 	"same-primary",
 	"no-task-spec",
+	# With --review-base-sha threading the true ticket boundary through to
+	# the reviewer (see run_build), an empty diff means literally nothing
+	# has changed since the ticket started -- not "this round found nothing
+	# new" (that's "unchanged-since-last-review", still retryable). No
+	# amount of re-prompting can produce a decisive verdict for zero
+	# changes, so fail fast instead of burning the full round budget.
+	"empty-diff",
 }
 
 
@@ -395,6 +402,7 @@ def run_build(
 	thinking: str | None = None,
 	review_policy: str = "required",
 	sonnet_fallback: bool = False,
+	review_base_sha: str | None = None,
 ) -> BuildResult:
 	workspace.mkdir(parents=True, exist_ok=True)
 	ensure_git_repo(workspace)
@@ -403,6 +411,19 @@ def run_build(
 
 	result = BuildResult(workspace=workspace, spec_path=spec_path)
 	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
+	# Anchors the independent reviewer's diff scope to the ticket's true
+	# starting commit (the caller's job to know -- ticket_runner.py passes
+	# its own prior-ticket-boundary sha) instead of cross-model-review.ts's
+	# own default of "HEAD when this OS process happened to start". Without
+	# this, a build_app.py invocation retried against a ticket a prior,
+	# interrupted process already finished and committed sees an empty diff
+	# (nothing changed since *this* process's start) and can never get a
+	# decisive review verdict for work that was, in fact, never reviewed by
+	# anyone -- see PR #25 review discussion. Omitted for standalone
+	# build_app.py usage with no known ticket boundary; the reviewer falls
+	# back to its own HEAD-at-process-start default.
+	if review_base_sha:
+		env["AI_REVIEW_BASE_SHA"] = review_base_sha
 	prompt = spec_text
 	escalation_prompt = ""
 
@@ -620,6 +641,14 @@ def main() -> int:
 		help="After local rounds are exhausted, authorize one billed claude-sonnet-5 corrective pass.",
 	)
 	parser.add_argument(
+		"--review-base-sha",
+		default=None,
+		help="Commit the independent reviewer should diff against for the whole invocation, "
+		"instead of HEAD when this process starts -- pass the true ticket-start boundary "
+		"(e.g. ticket_runner.py's prior-ticket commit) so a retried invocation against "
+		"already-committed work still gets reviewed rather than seeing an empty diff.",
+	)
+	parser.add_argument(
 		"--containment", action="store_true",
 		help="Currently refused unconditionally: the Docker containment launcher's network-denied "
 		"profile cannot reach the ai-stack-local model, so no round could ever run. See "
@@ -635,6 +664,7 @@ def main() -> int:
 		timeout_minutes=args.timeout_minutes,
 		thinking=args.thinking, review_policy=args.review_policy,
 		sonnet_fallback=args.sonnet_fallback,
+		review_base_sha=args.review_base_sha,
 	)
 	report_path = write_report(result)
 	print(f"Report written to {report_path}")
