@@ -41,6 +41,7 @@ const EXEC_TIMEOUT_MS = 5000;
 // a real multi-file diff's analysis while capping cost/latency well below
 // the failure point observed live.
 const MAX_REVIEW_TOKENS = 8192;
+const RETRYABLE_REVIEW_FAILURES = new Set<ReviewUnavailableReason>(["empty-response", "request-failed"]);
 
 export interface ReviewerConfig {
 	enabled: boolean;
@@ -149,6 +150,7 @@ export function renderFindings(findings: ReviewVerdict["findings"]): string {
  */
 export type ReviewUnavailableReason =
 	| "not-configured"
+	| "cancelled"
 	| "model-rejected"
 	| "empty-response"
 	| "request-failed"
@@ -188,6 +190,7 @@ async function callReviewer(
 	signal: AbortSignal | undefined,
 	fetchImpl: typeof fetch,
 ): Promise<ReviewCallResult> {
+	if (signal?.aborted) return { outcome: "transient", reason: "cancelled" };
 	try {
 		const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
 			method: "POST",
@@ -229,6 +232,7 @@ async function callReviewer(
 			? { outcome: "clean", text }
 			: { outcome: "flagged", text: renderFindings(parsed.findings) || text };
 	} catch {
+		if (signal?.aborted) return { outcome: "transient", reason: "cancelled" };
 		return { outcome: "transient", reason: "request-failed" };
 	}
 }
@@ -242,14 +246,26 @@ export async function requestReview(
 ): Promise<ReviewCallResult> {
 	if (!config.enabled || !config.baseUrl || !config.model) return { outcome: "transient", reason: "not-configured" };
 	const first = await callReviewer(config, buildReviewPrompt(spec, diff, false), signal, fetchImpl);
-	if (first.reason !== "truncated-response") return first;
-	// A retry of the identical prompt at temperature 0 would just reproduce
-	// the same truncation deterministically -- the retry only has a chance of
-	// landing because the prompt itself changes to a stricter brevity
-	// instruction. One retry, not a loop: if this attempt also truncates,
-	// report it as-is rather than spending a second full REVIEW_TIMEOUT_MS
-	// window chasing a diff this model can't summarize briefly.
-	return callReviewer(config, buildReviewPrompt(spec, diff, true), signal, fetchImpl);
+	if (first.reason === "truncated-response") {
+		// A retry of the identical prompt at temperature 0 would just reproduce
+		// the same truncation deterministically -- the retry only has a chance of
+		// landing because the prompt itself changes to a stricter brevity
+		// instruction. One retry, not a loop.
+		return signal?.aborted
+			? { outcome: "transient", reason: "cancelled" }
+			: callReviewer(config, buildReviewPrompt(spec, diff, true), signal, fetchImpl);
+	}
+	const retryable = first.outcome === "transient" && (
+		(first.reason !== undefined && RETRYABLE_REVIEW_FAILURES.has(first.reason)) ||
+		(first.reason === "model-rejected" && first.status !== undefined && (first.status === 429 || first.status >= 500))
+	);
+	if (!retryable) return first;
+	// Transport and empty-response failures are normally transient. Give the
+	// same bounded review request one more chance, then preserve the failure so
+	// the build gate cannot mistake unavailable review for a clean verdict.
+	return signal?.aborted
+		? { outcome: "transient", reason: "cancelled" }
+		: callReviewer(config, buildReviewPrompt(spec, diff, false), signal, fetchImpl);
 }
 
 function taskSpec(ctx: ExtensionContext): string {
@@ -265,6 +281,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 	const config = resolveReviewerConfig();
 	let baseSha: string | undefined;
 	let lastReviewedDiff: string | undefined;
+	let transientRetryDiff: string | undefined;
 	let reviewInFlight = false;
 	// A review round (~60-120s network round trip) routinely outlives the
 	// model's own remaining turns: pi settles and -p mode exits without
@@ -301,6 +318,7 @@ export default function reviewer(pi: ExtensionAPI): void {
 	// compaction.
 	pi.on("before_agent_start", () => {
 		lastReviewedDiff = undefined;
+		transientRetryDiff = undefined;
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
@@ -337,7 +355,8 @@ export default function reviewer(pi: ExtensionAPI): void {
 			.then(async (diff) => {
 				if (reviewRunId !== runId) return;
 				const spec = taskSpec(ctx);
-				if (!diff || !spec || diff === lastReviewedDiff) {
+				const transientRetryExhausted = diff !== undefined && diff === transientRetryDiff;
+				if (!diff || !spec || diff === lastReviewedDiff || transientRetryExhausted) {
 					appendHarnessTrace(pi, {
 						extension: "reviewer",
 						diffHash: null,
@@ -347,7 +366,13 @@ export default function reviewer(pi: ExtensionAPI): void {
 						metadata: {
 							kind: config.kind,
 							trigger,
-							reason: !diff ? "empty-diff" : !spec ? "no-task-spec" : "unchanged-since-last-review",
+							reason: !diff
+								? "empty-diff"
+								: !spec
+									? "no-task-spec"
+									: transientRetryExhausted
+										? "transient-retry-exhausted"
+										: "unchanged-since-last-review",
 						},
 					});
 					return;
@@ -372,8 +397,12 @@ export default function reviewer(pi: ExtensionAPI): void {
 						...(result.outcome === "flagged" && result.text ? { findings: result.text } : {}),
 					},
 				});
-				if (result.outcome === "transient") return;
+				if (result.outcome === "transient") {
+					transientRetryDiff = diff;
+					return;
+				}
 				lastReviewedDiff = diff;
+				transientRetryDiff = undefined;
 				// Deliberately does not act on a flagged verdict any further --
 				// this extension no longer injects a corrective follow-up into
 				// the live session. A queued `deliverAs: "followUp"` message is

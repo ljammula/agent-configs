@@ -113,6 +113,20 @@ class BuildAppTests(unittest.TestCase):
 		]))
 		self.assertEqual(build_app.review_signal(unchanged).outcome, "clean")
 
+		# A bounded transient retry is followed by a blocked settlement marker;
+		# preserve the original transport failure so the outer runner can retry.
+		transient_retry_exhausted = build_app.parse_pi_traces("\n".join([
+			json.dumps({"type": "entry_appended", "entry": {"customType": "pi-harness-trace", "data": {
+				"extension": "reviewer", "event": "review", "outcome": "transient",
+				"metadata": {"reason": "request-failed"},
+			}}}),
+			json.dumps({"type": "entry_appended", "entry": {"customType": "pi-harness-trace", "data": {
+				"extension": "reviewer", "event": "review", "outcome": "blocked",
+				"metadata": {"reason": "transient-retry-exhausted"},
+			}}}),
+		]))
+		self.assertEqual(build_app.review_signal(transient_retry_exhausted).detail, "request-failed")
+
 		blockers, review = build_app.round_blockers(
 			verify_passed=True, pi_failed=False, pi_timed_out=False,
 			traces=[], review_policy="degraded",

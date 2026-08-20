@@ -35,7 +35,7 @@ coverage doesn't silently depend on the model happening to run one.
 python3 pi/scripts/build_app.py \
   --workspace /path/to/app \
   --spec /path/to/spec.md \
-  --max-rounds 6 \
+  --max-rounds 3 \
   --timeout-minutes 45 \
   [--thinking off|minimal|low|medium|high|xhigh] \
   [--review-policy required|degraded] \

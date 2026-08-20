@@ -132,7 +132,7 @@ Thin outer loop, no new harness machinery:
 
 - For each ticket in order: stage the ticket's acceptance slice (Phase 1),
   then a fresh `build_app.py` invocation (`--workspace <app> --spec
-  spec/tickets/NNN.md --max-rounds 6 --timeout-minutes 60`). Fresh session
+  spec/tickets/NNN.md --max-rounds 3 --timeout-minutes 60`). Fresh session
   per ticket — never one long `--continue`; on-disk state, not context,
   carries memory.
 - Per-ticket prompt suffix (in the ticket file template): read

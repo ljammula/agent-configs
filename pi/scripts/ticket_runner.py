@@ -80,12 +80,14 @@ TICKET_RE = re.compile(r"^(\d{3})-(.+)\.md$")
 COMMIT_RE_TEMPLATE = r"^ticket\({nnn}\):"
 BUILD_APP_TIMEOUT_S = 90 * 60
 MAX_BUILD_ATTEMPTS = 3
+MAX_BUILDER_ROUNDS = 3
 BUILD_RETRY_BACKOFF_S = 30
 TRANSIENT_BUILD_MARKERS = (
 	"pi invocation timed out",
 	"pi invocation failed",
 	"stall-timeout",
 	"review unavailable (request-failed)",
+	"review unavailable (no-review-verdict)",
 )
 # The Makefile and verify scripts are agent-writable but gate-trusted --
 # nothing byte-checks them the way oracle_drift() byte-checks acceptance
@@ -197,6 +199,22 @@ def next_build_attempt(pilot_dir: Path, ticket: Ticket) -> int:
 	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	if not report_dir.exists():
 		return 1
+	started = {
+		int(match.group(1))
+		for path in report_dir.glob("build-attempt-*.started.json")
+		if (match := re.search(r"-attempt-(\d+)\.started\.json$", path.name))
+	}
+	completed = {
+		int(match.group(1))
+		for path in report_dir.glob("build-attempt-*.log")
+		if (match := re.search(r"-attempt-(\d+)\.log$", path.name))
+	}
+	incomplete = started - completed
+	if incomplete:
+		# A process can die after reserving a slot but before archiving its
+		# build log. Resume that same slot; the interruption did not create a
+		# fourth build attempt and the immutable start marker remains evidence.
+		return max(incomplete)
 	numbers = _attempt_numbers(report_dir, ("build", "BUILD_REPORT"))
 	if numbers:
 		return max(numbers) + 1
@@ -214,6 +232,20 @@ def next_gate_attempt(pilot_dir: Path, ticket: Ticket) -> int:
 	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	if not report_dir.exists():
 		return 1
+	started = {
+		int(match.group(1))
+		for path in report_dir.glob("gate-attempt-*.started.json")
+		if (match := re.search(r"-attempt-(\d+)\.started\.json$", path.name))
+	}
+	completed = {
+		int(match.group(1))
+		for path in report_dir.glob("gate-attempt-*.json")
+		if not path.name.endswith(".started.json")
+		and (match := re.search(r"-attempt-(\d+)\.json$", path.name))
+	}
+	incomplete = started - completed
+	if incomplete:
+		return max(incomplete)
 	numbers = _attempt_numbers(report_dir, ("gate",))
 	if numbers:
 		return max(numbers) + 1
@@ -487,6 +519,16 @@ def invoke_build_app(build_cmd: list[str], timeout: float) -> tuple[int, str, st
 		return -1, text_output(stdout), text_output(stderr), True
 
 
+def builder_command(workspace: Path, ticket: Ticket) -> list[str]:
+	return [
+		sys.executable, str(BUILD_APP),
+		"--workspace", str(workspace),
+		"--spec", str(ticket.path),
+		"--max-rounds", str(MAX_BUILDER_ROUNDS),
+		"--timeout-minutes", "60",
+	]
+
+
 def append_halt_record(workspace: Path, ticket: Ticket, reasons: list[str]) -> None:
 	progress = workspace / "PROGRESS.md"
 	existing = progress.read_text(errors="ignore") if progress.exists() else ""
@@ -553,10 +595,12 @@ def run_ticket(
 	checks: list[dict] = []
 	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	report_dir.mkdir(parents=True, exist_ok=True)
-	write_once(
-		report_dir / f"gate-attempt-{gate_attempt:02d}.started.json",
-		json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
-	)
+	gate_started = report_dir / f"gate-attempt-{gate_attempt:02d}.started.json"
+	if not gate_started.exists():
+		write_once(
+			gate_started,
+			json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
+		)
 
 	if skip_build:
 		print("commit already exists but no passing gate record -- re-gating only, not invoking build_app.py (rescue flow)")
@@ -571,18 +615,14 @@ def run_ticket(
 		if report_path.exists():
 			report_path.unlink()
 
-		build_cmd = [
-			sys.executable, str(BUILD_APP),
-			"--workspace", str(workspace),
-			"--spec", str(ticket.path),
-			"--max-rounds", "6",
-			"--timeout-minutes", "60",
-		]
+		build_cmd = builder_command(workspace, ticket)
 		print(f"running: {' '.join(build_cmd)}")
-		write_once(
-			report_dir / f"build-attempt-{build_attempt:02d}.started.json",
-			json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
-		)
+		build_started = report_dir / f"build-attempt-{build_attempt:02d}.started.json"
+		if not build_started.exists():
+			write_once(
+				build_started,
+				json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
+			)
 		returncode, stdout, stderr, timed_out = invoke_build_app(build_cmd, BUILD_APP_TIMEOUT_S)
 		print(stdout[-2000:])
 		if timed_out:
