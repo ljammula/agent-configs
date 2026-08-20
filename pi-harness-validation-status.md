@@ -767,26 +767,120 @@ ranking, which didn't yet know about F1/F2):**
   must be validated by counting thinking-block chars (as the pair-7 trial
   did), not assumed.
 
-**Two new process gaps found, not yet acted on:**
-- **G1**: `run_single_arm.py`'s manifest captures `pi_version`,
-  `agent_configs_revision`, and per-extension sha256, but not the `PI_*`
-  env overrides (`PI_STALL_GUARD_BACKSTOP_MINUTES`,
-  `PI_STALL_GUARD_INTERCEPT`, `PI_EVAL_THINKING_LEVEL`) that actually
-  defined the two most consequential recent runs (Rec 1's live validation,
-  the Rec-2 threshold-lowering attempt) — and the Rec-2 attempt's manifest
-  doesn't disclose that an uncommitted source edit (lowered thresholds,
-  reverted after) was also part of what ran. As Rec 2's next trial leans
-  even harder on env-gated experiments, this becomes a correctness gap in
-  the evidence base, not a nicety — worth capturing a `PI_*` allowlist plus
-  `git diff` (when dirty) into the manifest before the next such trial.
-- **G2/G3 (lower-priority, informational)**: env is read once at
-  extension-construction time, so identical extension sha256s across two
-  runs with different env produce materially different behavior — compounds
-  G1's false confidence from hash-pinning alone. And there's no test
-  asserting exactly one abort when both hard-abort paths (`tool_result`
-  and the timer tick) could land in the same window — low risk today
-  (single-threaded, guard re-read after the await) but an unguarded seam
-  for a future change to either path.
+**F3-F8 and G1/G3 addressed same day (2026-08-20), following up on the
+initial F1/F2 pass above.** After F1/F2 landed, the rest of the same Opus
+review's findings were worked through rather than left deferred — `npm run
+typecheck && npm test`: 228/228 throughout (up from 225 after F1/F2; F4, F5,
+and G3 each added a regression test, F3/F6/F7/F8 verified by inspection or
+existing coverage rather than a new test — see below for which):
+
+- **F3** (unhandled-rejection risk on session teardown): the timer tick runs
+  inside a bare `void (async () => …)()`, not a pi handler emit, so an
+  uncaught throw was a raw unhandled promise rejection — Node's default for
+  that is process termination, not a logged error. Fixed: wrapped the tick
+  body in try/catch using the same `isStaleContextError` helper
+  `git-checkpoint.ts` already uses for this exact class of error (a `ctx`
+  that's since been invalidated by session replacement), stopping the timer
+  on a stale hit instead of re-throwing every 15s; added a `session_shutdown`
+  handler alongside the existing `agent_settled` one as a second, broader
+  stop path. Verified `session_shutdown` is a real event
+  (`@earendil-works/pi-coding-agent`'s `dist/core/extensions/types.d.ts:464,864`)
+  before adding the handler, not assumed from the review's citation.
+- **F4** (soft-stage check skipped for test-file-only edit loops): the
+  `tool_result` handler's write/edit branch returned before the backstop
+  elapsed check ever ran, so a model looping on test-file edits (correctly
+  not counted as progress) never saw the soft warning either. Fixed: a
+  trustworthy edit still returns immediately; a test-file-only or failed
+  write/edit now falls through to the shared backstop check like any other
+  tool call. New regression test, confirmed to fail pre-fix.
+- **F5** (dirty-path signature reset on *any* difference, including a path
+  going clean): fixed to require a genuinely *added* non-test path — a
+  revert or cleanup is not progress. New regression test, confirmed to fail
+  pre-fix. (The other direction F5 flagged — a genuinely new *scratch* file
+  created inside the repo, not under `/tmp`, still reads as progress under
+  `--untracked-files=all` — left as an accepted, documented gap: closing it
+  would mean either losing detection of a model's own newly-created source
+  file, or pattern-matching filenames to guess scratch-vs-source, which is
+  the exact fragility this git-based approach exists to avoid.)
+- **F6** (`-z` porcelain rename parsing): the original parse split on `\n`
+  as well as `\0` and sliced every field by a fixed offset, mis-parsing a
+  rename/copy entry's second (unprefixed) field into a 1-character garbage
+  path. Fixed: split on `\0` only, walk entries with an index cursor, and
+  discard the paired orig-path field for rename/copy status codes. No
+  dedicated regression test — under the mocked-`git`-output test harness a
+  static, byte-identical rename entry produces the same (garbage, pre-fix)
+  or same (correct, post-fix) result on every tick, so the bug wasn't
+  reliably distinguishable in a black-box test; fixed by direct code
+  inspection instead, consistent with the review's own "bounded impact"
+  assessment.
+- **F7** (no re-entrancy guard on the git-status poll): `setInterval` doesn't
+  await its callback, and the poll awaits a bounded-but-non-instant `git
+  exec`. Fixed with a `ticking` boolean guard, skipping (not queueing) an
+  overlapping tick.
+- **F8** (off-by-one in the intercept text): `sameFailure` is zero-based (0
+  on the first occurrence), so a streak of `sameFailure === 8` is actually
+  the 9th occurrence, not the 8th as the model-facing text said. Fixed to
+  report `sameFailure + 1`; two existing tests that pinned the old (wrong)
+  "8 times" wording updated to assert the correct "9 times."
+- **G1** (manifest doesn't capture what actually defined a run):
+  `installed_runtime_identity()` (shared by `run_single_arm.py`,
+  `run_single_pair.py`, and `run_screening.py`'s own manifest, one function
+  change reaching all three) now also captures an allowlisted `PI_*` env
+  snapshot (`PI_STALL_GUARD_BACKSTOP_MINUTES`, `PI_STALL_GUARD_INTERCEPT`,
+  `PI_EVAL_THINKING_LEVEL` — extend as new overrides earn the same status)
+  and a `git diff` scoped to `extensions/` when the tree is dirty there.
+  Verified live against this repo's own dirty tree while F1-F8 were
+  in progress (correctly captured the real in-flight diff, empty env
+  snapshot when unset).
+- **G3** (no test for the two hard-abort paths interacting): added a test
+  asserting exactly one `ctx.abort()` when the timer reaches the hard
+  deadline first (no tool_result had ever fired) and a `tool_result` then
+  lands at the same simulated instant — passes on both old and new code
+  (the shared `backstopHardFired` guard already existed), so this is
+  coverage for existing-correct behavior, not a bug-fix regression test.
+
+**G2** (env read once at extension-construction time, so identical
+extension sha256s across runs with different env produce materially
+different behavior) is informational only — G1's env snapshot now surfaces
+the actual env alongside the hash, which is the practical mitigation; no
+code change was needed beyond that.
+
+Deliberately not addressed here, per explicit user direction: Recommendation
+3's Sonnet-escalation build-out (the user will drive that manually) and any
+further work on Recommendations 2/4 beyond the reframing already recorded
+above — both stay queued after Recommendation 2's next live trial, unchanged
+from the P0-P3 ranking above.
+
+*(The "Two new process gaps found, not yet acted on" bullets that used to
+follow here — G1's missing `PI_*`/`git diff` capture, G2/G3's informational
+notes — are superseded by the F3-F8/G1/G3 section directly above: G1 landed
+the allowlist + `git diff` capture described there, G3 added the
+hard-abort-interaction test, and G2 stays informational, now mitigated by
+G1's env snapshot. See `extensions_dir_diff()`'s follow-up refinement below
+for the two gaps Codex's PR #21 review found in that G1 landing itself.)*
+
+## PR #21 Codex review follow-up (2026-08-20)
+
+Two P2 findings on the just-landed G1 manifest capture, both addressed:
+
+- **Untracked/staged extension changes weren't captured**: `extensions_dir_diff()`
+  used `git diff -- extensions`, which only compares the index against the
+  working tree and misses both staged changes and untracked files entirely —
+  a newly added, not-yet-`git add`-ed extension file would produce
+  `extensions_dir_dirty_diff: null` while `agent_configs_revision` still
+  pointed at code that doesn't match what ran. Fixed: diff against `HEAD`
+  (covers staged + unstaged) and separately list untracked files under
+  `extensions/` (`git ls-files --others --exclude-standard`) with their full
+  content appended, rather than silently dropping them.
+- **Allowlist missed other behavior-changing overrides**: `ENV_OVERRIDE_ALLOWLIST`
+  only had the three vars from the Recommendation 1/2 trials
+  (`PI_STALL_GUARD_BACKSTOP_MINUTES`, `PI_STALL_GUARD_INTERCEPT`,
+  `PI_EVAL_THINKING_LEVEL`), missing `wall-clock-budget-nudge.ts`'s
+  `PI_HARNESS_TIMEOUT_MINUTES` and `external-effects.ts`'s
+  `PI_ALLOW_EXTERNAL_EFFECTS` — both real, already-shipped env reads that
+  change installed-extension behavior, confirmed by grepping every
+  `process.env.PI_*` read across `pi/extensions/*.ts` rather than guessing.
+  Both added to the allowlist.
 
 ## Per-task `--thinking` level table (2026-08-19/20)
 

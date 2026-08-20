@@ -311,6 +311,50 @@ test("git status noise present since the baseline tick does not repeatedly reset
 	}
 });
 
+// Regression test for "F5" (Opus review of the Bug-5 fix, 2026-08-20): the
+// original comparison reset on *any* difference in the dirty-path set,
+// including a path going clean (a revert, `git checkout`, or a build cleanup)
+// -- not evidence of progress, and should not read as some.
+test("a dirty path going clean does not reset the wall-clock backstop", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	let dirty = true;
+	try {
+		const harness = new ExtensionHarness({
+			idle: false,
+			exec: (call) => {
+				if (call.command === "git" && call.args[0] === "status") {
+					return { code: 0, stdout: dirty ? "\0 M lib/lru.go\0" : "", stderr: "", killed: false };
+				}
+				return { code: 0, stdout: "", stderr: "", killed: false };
+			},
+		});
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		// First tick establishes the dirty baseline.
+		await mock.timers.tick(15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// The model (or a revert) makes the tree clean again -- a genuine
+		// change to the set, but in the wrong direction to count as progress.
+		dirty = false;
+		await mock.timers.tick(2 * 60_000 + 15_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1, "a path going clean must not reset the wall clock");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression test, live-observed 2026-08-19 (`go-flutter/bookmarks-app`,
 // pair 4 -- see the file header's "Bug 5"): agent_end fires per internal
 // agent loop (retry, auto-compaction, queued continuation), not once per
@@ -469,6 +513,53 @@ test("the timer survives multiple agent_end/agent_start retry cycles without dou
 	}
 });
 
+// Regression test for "G3" (Opus review of the Bug-5 fix, 2026-08-20): the
+// hard-abort stage is reachable from two independent paths -- the timer
+// tick (`source: "wall-clock-timer"`) and the `tool_result` handler -- both
+// guarded by the same `backstopHardFired` flag, but nothing previously
+// asserted that guard actually prevents a double-abort when both paths could
+// plausibly fire in the same window (a tick lands at the hard deadline with
+// no tool_result ever having fired first, matching this file's own "hang
+// with no tool call at all" motivation for adding the timer).
+test("only one abort fires when the hard deadline is reached by the timer with no prior tool_result", async () => {
+	mock.timers.enable({ apis: ["setInterval", "Date"] });
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness({ idle: false });
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		// The timer reaches the hard deadline first -- no tool_result has fired
+		// at all, exactly the "hung bash call" shape the timer exists for.
+		await mock.timers.tick(2 * 60_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(harness.abortCalls, 1);
+		assert.equal((harness.entries.at(-1)?.data as any).source, "wall-clock-timer");
+
+		// A tool_result then lands at the same simulated instant (the abort
+		// hasn't actually torn down this mocked session) -- it must not fire a
+		// second, independent hard-abort through the tool_result path.
+		await harness.emit({
+			type: "tool_result",
+			toolCallId: "late-1",
+			toolName: "bash",
+			input: { command: "go test ./..." },
+			content: [{ type: "text", text: FAILURE_TEXT }],
+			isError: true,
+		} as any);
+
+		assert.equal(harness.abortCalls, 1, "backstopHardFired must prevent a second, independent abort");
+	} finally {
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+		mock.timers.reset();
+	}
+});
+
 // Regression test for "F1" (Opus review of the Bug-5 fix, 2026-08-20):
 // startTimer()'s old stop-then-recreate implementation restarted the 15s
 // tick cadence from zero on every call, so agent_start firing more often
@@ -616,6 +707,43 @@ test("an edit to a test file does not reset the stall counters", async () => {
 	}
 
 	assert.equal(harness.messages.length, 0);
+});
+
+// Regression test for "F4" (Opus review of the Bug-5 fix, 2026-08-20): a
+// write/edit tool call used to return before the backstop check ran at all,
+// so a model looping on test-file-only edits never saw the soft-stage
+// warning -- silently inheriting the same "diagnostic-command-shape gating"
+// blind spot Recommendation 1 was written to close everywhere else.
+test("a test-file-only edit loop still reaches the soft backstop warning", async () => {
+	const originalNow = Date.now;
+	let now = 0;
+	Date.now = () => now;
+	const originalMinutes = process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+	process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = "1";
+	try {
+		const harness = new ExtensionHarness();
+		progressStallGuard(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+
+		now = 60_000; // past the 1-minute soft threshold
+		const [warning] = await harness.emit({
+			type: "tool_result",
+			toolCallId: "w1",
+			toolName: "write",
+			input: { path: "debug_test.go" },
+			content: [],
+			isError: false,
+		} as any);
+
+		assert.ok(warning, "a test-file-only write must still return the soft-stage warning content");
+		assert.match((warning as any).content.at(-1).text, /stall warning/);
+		const trace = harness.entries.at(-1)?.data as any;
+		assert.equal(trace.stallBackstop, true);
+	} finally {
+		Date.now = originalNow;
+		if (originalMinutes === undefined) delete process.env.PI_STALL_GUARD_BACKSTOP_MINUTES;
+		else process.env.PI_STALL_GUARD_BACKSTOP_MINUTES = originalMinutes;
+	}
 });
 
 test("a passing test run resets sameFailure even without a source edit", async () => {
@@ -1018,7 +1146,11 @@ test("the intercept action names the masking mechanism when the trigger was a ma
 		}
 
 		assert.match(lastOutcome.content[1].text, /\[pi-harness\]/);
-		assert.match(lastOutcome.content[1].text, /8 times/);
+		// "9 times", not "8 times" -- sameFailure is zero-based (0 on the
+		// first occurrence), so a streak of sameFailure===8 is the 9th
+		// occurrence; the intercept text now reports the true count ("F8",
+		// Opus review 2026-08-20).
+		assert.match(lastOutcome.content[1].text, /9 times/);
 		assert.match(
 			lastOutcome.content[1].text,
 			/pipe's last command/i,
@@ -1186,7 +1318,11 @@ test("the intercepted tool_result appends to the model's own content instead of 
 
 		assert.equal(lastOutcome.content[0].text, FAILURE_TEXT, "the model's original result text is preserved first");
 		assert.match(lastOutcome.content[1].text, /\[pi-harness\]/);
-		assert.match(lastOutcome.content[1].text, /8 times/);
+		// "9 times", not "8 times" -- sameFailure is zero-based (0 on the
+		// first occurrence), so a streak of sameFailure===8 is the 9th
+		// occurrence; the intercept text now reports the true count ("F8",
+		// Opus review 2026-08-20).
+		assert.match(lastOutcome.content[1].text, /9 times/);
 		assert.doesNotMatch(lastOutcome.content[1].text, /\btry\b|\badd\b|\bpipefail\b/i, "states a fact, not a suggested fix");
 	} finally {
 		delete process.env.PI_STALL_GUARD_INTERCEPT;
