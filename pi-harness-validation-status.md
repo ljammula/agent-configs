@@ -1062,3 +1062,88 @@ zero-entries case was this same benign path or something else is now
 unrecoverable — noted honestly as a gap in the record rather than
 assumed resolved. If this pattern is worth chasing further, it would need
 a fresh run with the raw evidence preserved until the question is closed.
+
+## Full 9-pair harness-only battery, seed 20260802 (2026-08-20)
+
+First full-battery run against the fully-merged post-PR#22 state, with the
+per-task `TASK_THINKING_LEVELS` table applying automatically (`xhigh` on
+`go/lru-cache`, `medium` everywhere else) and `run_screening.py`'s baseline
+arm deliberately skipped (harness-only, via a small driver script looping
+`run_single_arm.py` per pair) so the harness's own reliability could be
+checked in isolation before spending baseline time. Host's `kvproxy` was
+restarted (`launchctl kickstart -k`) immediately before this run to rule out
+stale-connection contention as a confound. **7/9 valid+passed, 2/9 valid but
+failed** (both `go-flutter` dual-stack tasks) — no timeouts, no stall-guard
+activity in any pair, no extension errors.
+
+| Pair | Task | Result | Seconds | Note |
+|---:|---|:---:|---:|---|
+| 1 | `go-flutter/notes-app` | ❌ | 2192.7 | Scratch-test/hidden-test name collision (see below) |
+| 2 | `go/notes-api` | ✅ | 620.3 | Clean |
+| 3 | `dart/task-manager` | ✅ | 775.0 | Clean |
+| 4 | `go-flutter/bookmarks-app` | ❌ | 2084.4 | **Genuine new race-condition regression** (see below) |
+| 5 | `dart/sequential-runner` | ✅ | 271.4 | Clean — the historically stall-prone fixture, fast and clean this time |
+| 6 | `dart/notes-app` | ✅ | 1552.2 | Clean |
+| 7 | `go/lru-cache` | ✅ | 680.0 | Clean, `xhigh` |
+| 8 | `go/lru-cache` | ✅ | 454.3 | Clean, `xhigh` |
+| 9 | `go/notes-api` | ✅ | 407.3 | Clean |
+
+**Pair 1 (`go-flutter/notes-app`) — the scratch-test/hidden-test collision
+recurs, now 2/2 on `go-flutter` tasks.** Confirmed via md5: `server/
+notesapi_test.go` at grading time is byte-identical to `local-model-bench/
+tasks/go-flutter/notes-app/tests/server/notesapi_test.go` (harness-injected
+post-session, the model never touched it), colliding with the model's own
+leftover scratch file `server/notesapi_impl_test.go` on two function names
+(`TestGetNote`, `TestUnknownRoutes`). **This revises the pair4-postfix21-rerun2
+entry's "structurally not reproducible" framing**: that entry was right
+that Dart specifically can't collide this way (isolated per-file `main()`),
+but the underlying pattern — the model leaving an untracked scratch Go test
+file behind, independently picking the same obvious names the hidden test's
+author picked for the same obvious scenarios — is not a one-off; it's now
+reproduced on two independent `go-flutter` tasks with completely different
+function names each time. Still a fixture/harness-methodology issue, not a
+model or extension defect, and still unreachable by any in-session
+mechanism (the colliding file doesn't exist until post-session grading).
+
+**Pair 4 (`go-flutter/bookmarks-app`) — a genuinely different, new failure
+this time: a real data race, not the collision.** Same task as the two
+prior clean reruns (`pair4-medium-rerun2-postfix`, the standalone
+`pair4-postfix21-rerun2` earlier the same day), but this attempt shipped a
+different incorrect fix for the same race condition. `handleList` now reads:
+
+```go
+s.mu.Lock()
+list := make([]*Bookmark, len(s.items))
+copy(list, s.items)
+s.mu.Unlock()
+sort.Slice(list, ...)       // reads list[i].Visits outside the lock
+writeJSON(w, http.StatusOK, list)
+```
+
+`s.items` is `[]*Bookmark`; `copy()` on a pointer slice copies the pointers,
+not the pointed-to structs, so `list[i].Visits` is read outside the lock
+through the *same* `*Bookmark` that `handleVisit` mutates under lock
+elsewhere — the exact race class this task exists to test, just a different
+incorrect-fix shape than the earlier `append(list, *bm)`-without-dereference
+mistake. `go test -race` caught it correctly (`WARNING: DATA RACE`); quality-
+gate and the reviewer both flagged it in-session too. **This is the harness
+working exactly as designed** (a real bug shipped, real `-race` evidence
+caught it, `passed: false` is the correct verdict) **and a genuine model-
+reliability negative**, not a harness or extension defect — consistent with
+this investigation's repeated finding elsewhere (`go/lru-cache`'s 0/4→4/4→
+regressed-a-3rd-time history) that `medium`/`xhigh` thinking closes most but
+not all of the correctness gap on tasks with this bug class; it does not
+make the model deterministically correct every attempt.
+
+**Net read**: the harness itself (extensions, per-task thinking table,
+manifest capture, hidden-test grading) performed correctly across all 9
+pairs — every failure was a genuine, correctly-detected problem, not a
+harness defect, and the harness's own machinery (backstop, quality-gate,
+reviewer, artifact-guard) never misfired once. The two failures are real
+findings about the *task fixtures* (a fixable naming-collision gap,
+`local-model-bench`-side) and the *model* (this race-condition class isn't
+100% reliably fixed even with reasoning on), not about this repo's own
+code. Full raw evidence: `pi/evals/battery-results/
+2026-08-20-seed20260802-harness-only/` (not committed, per this repo's
+evidence-bundle-commits-paused convention; manifest/summary/results.jsonl
+only).
