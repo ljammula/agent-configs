@@ -5365,8 +5365,31 @@ unconditionally on every `agent_start` (already idempotent -- it calls
 `stopTimer()` first), keeping the state-reset gated to the true first
 start only, unchanged. Added a regression test that fails against the old
 code (verified directly by stashing the fix and re-running) and passes
-against the fix. Full detail: `progress-stall-guard.ts`'s file header,
-"Bug 5."
+against the fix.
+
+Confirmed directly against pair 4's own evidence, not just plausible from
+the mechanism: `pair4-medium-rerun/evidence/pi-output.jsonl` contains
+exactly `agent_start` (event 3), `agent_end` (7262), `agent_start` (7264),
+and no further `agent_end` in an 8421-event run -- the timer died at 7262
+and never restarted; the last `pi-stall-trace` is at 7953 and the fatal
+`go run` hang begins around 8135.
+
+An Opus review of this fix caught two further issues, both fixed same
+day: (1) `lastBashEditSignature = undefined` had moved into `startTimer()`
+itself, so it silently started resetting on every retry once
+`startTimer()` became unconditional -- the exact class of bug
+`seenFirstAgentStart` exists to prevent, for a field that hadn't been
+gated yet; a bash-driven edit landing right after a retry would get
+folded into the fresh baseline instead of resetting the stall clock,
+leaving the run *closer* to a spurious hard abort. Moved back into the
+gated reset block. (2) `stopTimer()` moved from `agent_end` to
+`agent_settled`: stopping on `agent_end` left a narrower version of the
+same coverage gap (a hang between one `agent_end` and the next
+`agent_start` had no timer running), and `agent_settled` is the
+genuinely-once-per-invocation event the fix actually needed --
+confirmed safe via the tick's own `isIdle()` guard, which already
+prevents timing out a truly idle session. Full detail:
+`progress-stall-guard.ts`'s file header, "Bug 5."
 
 **A planned `xhigh` follow-up (same task, same bug, per the original
 pair-7 precedent of retrying a failure at higher reasoning) was launched

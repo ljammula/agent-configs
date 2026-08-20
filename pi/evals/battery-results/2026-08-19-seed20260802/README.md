@@ -128,7 +128,15 @@ an unrelated reason.**
   permanently killed the timer for the rest of the session. Fixed in
   `progress-stall-guard.ts` (`startTimer()` now runs unconditionally on
   every `agent_start`, idempotently) with a regression test that fails
-  against the old code and passes against the fix. See
+  against the old code and passes against the fix. Confirmed directly
+  against this pair's own `pi-output.jsonl`, not just plausible from the
+  mechanism: exactly `agent_start`/`agent_end`/`agent_start` appear, no
+  further `agent_end`, in an 8421-event run — the timer died at that
+  `agent_end` and never restarted, matching the fix's premise exactly. An
+  Opus review of the first-pass fix caught two further issues (a
+  retry-boundary state-reset regression the fix itself introduced, and a
+  narrower version of the same coverage gap from stopping on `agent_end`
+  instead of the genuinely-once `agent_settled`), both fixed same day. See
   `pi-harness-history.md`'s matching entry and `progress-stall-guard.ts`'s
   file header ("Bug 5") for full detail.
 
