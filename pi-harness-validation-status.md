@@ -1025,3 +1025,40 @@ likely, not a fluke — worth a distinctive prefix or isolated package/build-tag
 convention; (3) reproducibility: is this collision a one-off (this model
 happened to pick the same name and habit this run) or does it recur —
 untested, a same-config rerun is the next step.
+
+**Item (3) resolved (2026-08-20): a same-config rerun did not reproduce
+the collision, and it's structurally not reproducible on the Dart side at
+all.** Reran pair 4 (`go-flutter/bookmarks-app`, harness arm, identical
+seed/config, PR #22 merged) — `valid: true, passed: true`, 1534.5s
+(~25.6 min), `hidden_test_exit: 0`. `ok bookmarksapi 1.392s` — both Go and
+Dart hidden tests passed clean. The model again left its own scratch test
+behind, but this run entirely on the Dart side (`client/test/
+bookmarks_smoke_test.dart`), not the Go side that collided last time; no
+collision resulted, and none could have — Dart's test runner gives each
+file its own isolated `main()`, not Go's shared package-level symbol
+table, so two independently-named test files simply both run rather than
+redeclaring anything. **Conclusion: the original collision was genuine
+run-to-run variance in where the model happens to leave scratch work
+(confirmed, not assumed, by comparing the two runs' own untracked-file
+sets), not a reliable habit, and the specific failure mode is inherently
+Go-only** — this task's Dart side can never reproduce it regardless of
+model behavior.
+
+**A secondary finding from this rerun**: contrary to what the pair4-postfix21
+entry above speculated (`agent_end` maybe not firing at all in `pi -p`
+mode, drawing a parallel to `goal-gate.ts`'s documented `session_compact`
+gap), this run's own `agent_start`/`agent_end` counts are 1/1 — the event
+genuinely fired. `quality-gate.ts`'s `agent_end` handler still produced no
+trace entry of its own shape, but the far more mundane explanation fits
+here: the handler's `evidencePassesCurrentDiff` early-return correctly
+recognized the model's last `tool_result`-observed check (already a clean
+pass at the current diff hash) as sufficient, and skipped a redundant
+re-run — that's the intended optimization working as designed, not a bug.
+**This walks back the "agent_end-never-firing" framing from the pair4-postfix21
+entry** rather than confirming it twice; that entry's own raw evidence was
+deleted in a since-performed `/private/tmp` cleanup before this could be
+cross-checked against it directly, so whether the *first* run's specific
+zero-entries case was this same benign path or something else is now
+unrecoverable — noted honestly as a gap in the record rather than
+assumed resolved. If this pattern is worth chasing further, it would need
+a fresh run with the raw evidence preserved until the question is closed.
