@@ -139,6 +139,37 @@ class BuildAppTests(unittest.TestCase):
 		)
 		self.assertEqual(required_blockers, ["review unavailable (no-review-verdict)"])
 
+	def test_empty_diff_with_passing_verify_does_not_block_completion(self):
+		# A retried build_app.py invocation against a ticket a prior,
+		# interrupted session already finished and committed sees no diff
+		# since baseSha -- the reviewer correctly has nothing to review. That
+		# must not be an unresolvable blocker (retrying can never produce a
+		# non-empty diff for already-done work); the outer per-ticket gate
+		# still requires a real commit and touched state files.
+		empty_diff = build_app.parse_pi_traces(json.dumps({"type": "entry_appended", "entry": {
+			"customType": "pi-harness-trace", "data": {
+				"extension": "reviewer", "event": "review", "outcome": "blocked",
+				"metadata": {"reason": "empty-diff"},
+			},
+		}}))
+		blockers, review = build_app.round_blockers(
+			verify_passed=True, pi_failed=False, pi_timed_out=False,
+			traces=empty_diff, review_policy="required",
+		)
+		self.assertEqual(review.detail, "empty-diff")
+		self.assertEqual(blockers, [])
+
+		# Same empty-diff signal, but verification did NOT pass: still block on
+		# both -- the empty-diff exemption only applies once verify passes.
+		blocked_by_verify, _review = build_app.round_blockers(
+			verify_passed=False, pi_failed=False, pi_timed_out=False,
+			traces=empty_diff, review_policy="required",
+		)
+		self.assertEqual(
+			blocked_by_verify,
+			["canonical verification failed", "review unavailable (empty-diff)"],
+		)
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)

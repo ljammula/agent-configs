@@ -210,7 +210,17 @@ def round_blockers(
 	if review.outcome == "flagged":
 		blockers.append("reviewer flagged the current diff")
 	elif review.outcome != "clean" and review_policy == "required":
-		blockers.append(f"review unavailable ({review.detail})")
+		# "empty-diff" means the reviewer found nothing to look at -- with the
+		# canonical verification passing too, that's evidence this round's
+		# workspace already satisfies the task (e.g. build_app.py retried
+		# against a ticket a prior, interrupted session already finished and
+		# committed before baseSha was captured), not a broken review
+		# pipeline. No amount of retrying turns an empty diff non-empty, so
+		# don't block completion on it -- unlike a from-scratch round that
+		# genuinely produced no review verdict ("no-review-verdict"), which
+		# still blocks below.
+		if not (review.detail == "empty-diff" and verify_passed):
+			blockers.append(f"review unavailable ({review.detail})")
 	return blockers, review
 
 
