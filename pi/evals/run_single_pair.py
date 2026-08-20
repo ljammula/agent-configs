@@ -71,8 +71,8 @@ def main() -> int:
     reviewer = check_reviewer_route()
     model_payload = model_identity(args.host)
     pi_version = run(["pi", "--version"]).stdout.strip()
-    if pi_version != "0.83.0":
-        raise RuntimeError(f"expected Pi 0.83.0, found {pi_version!r}")
+    if pi_version != "0.84.2":
+        raise RuntimeError(f"expected Pi 0.84.2, found {pi_version!r}")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_root = (args.output or Path(tempfile.mkdtemp(prefix=f"pi-pair-{timestamp}-", dir="/tmp"))).resolve()

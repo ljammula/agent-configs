@@ -83,9 +83,19 @@ ARMS = ("baseline", "harness")
 #     progress-stall-guard.ts's wall-clock backstop, not by thinking level) --
 #     there is no evidence reasoning makes it better or worse, so it follows
 #     the same default as everything else rather than a special-cased "off".
-# Because Pi has no thinkingLevelMap entry for Qwen3.8 (pi#6951), "medium"/
-# "high"/"xhigh" are not distinct requests -- all non-"off" values produce
-# the identical enable_thinking: true, so the only real dial is on vs. off.
+# Correction (2026-08-20): the line that used to be here claimed "medium"/
+# "xhigh" collapse to an identical request (no thinkingLevelMap entry for
+# Qwen3.8, pi#6951) -- traced against the installed package source and
+# found false for this repo's setup. ai-stack-local.ts's custom Qwen3.8
+# registration declares its own thinkingLevelMap ({low, medium, xhigh}),
+# which pi-ai's "qwen" thinkingFormat branch (openai-completions.js:571-576)
+# does read: enable_thinking collapses to true for any non-"off" level, but
+# reasoning_effort carries the literal level through unclamped ("medium" vs
+# "xhigh", not the same string) -- a real, distinct dial the local proxy
+# acts on. See pi-harness-validation-status.md's "Per-task --thinking level
+# table" section for the full trace and citations. pi#6951 may still be a
+# real upstream gap for models relying on pi-ai's bundled catalog; it does
+# not apply here since this provider is fully custom-registered.
 TASK_THINKING_LEVELS: dict[str, str] = {
     "go/lru-cache": "xhigh",
     "dart/sequential-runner": "medium",
@@ -162,6 +172,32 @@ def schedule(
             thinking_level = TASK_THINKING_LEVELS.get(task, "medium")
         result.append(ScheduledPair(index, task, (arms[0], arms[1]), thinking_level))
     return result
+
+
+def remove_prohibited_scratch_files(work_dir: Path, metadata: dict[str, Any]) -> list[str]:
+    """Delete any file under work_dir matching one of the task's own
+    forbidden_test_globs (meta.json), and return the paths removed.
+
+    Exists because a model has twice now left an untracked scratch test
+    file behind that its own task spec explicitly forbids creating (see
+    pi-harness-validation-status.md's scratch-test/hidden-test collision
+    and devcheck_test.dart findings) -- once causing a Go package-symbol
+    redeclaration, once causing a Dart test-file load failure that failed
+    the whole grading run despite every real hidden-test assertion
+    passing. Both starter fixtures ship zero files matching these globs
+    (verified directly, not assumed), so anything matching them in the
+    working tree at this point -- after the model's session, before
+    hidden-test injection -- is unambiguously model-authored, regardless
+    of git tracked state. A no-op for any task whose meta.json doesn't
+    declare forbidden_test_globs.
+    """
+    removed: list[str] = []
+    for pattern in metadata.get("forbidden_test_globs", []):
+        for match in sorted(work_dir.glob(pattern)):
+            if match.is_file():
+                match.unlink()
+                removed.append(str(match.relative_to(work_dir)))
+    return removed
 
 
 def copy_contents(source: Path, destination: Path) -> None:
@@ -462,6 +498,8 @@ def execute_arm(
     diff = run(["git", "diff", "--stat", "HEAD"], cwd=work_dir)
     diff_stat = diff.stdout.strip()
 
+    removed_prohibited_scratch_files = remove_prohibited_scratch_files(work_dir, metadata)
+
     setup_command = metadata.get("setup_cmd", "")
     setup_exit = 0
     setup_output = ""
@@ -527,6 +565,7 @@ def execute_arm(
             for trace in traces
         ],
         "diff_stat": diff_stat,
+        "removed_prohibited_scratch_files": removed_prohibited_scratch_files,
         "artifact_dir": str(run_dir),
     }
     with (artifact_root / "results.jsonl").open("a") as output:
@@ -630,8 +669,8 @@ def main() -> int:
         parser.error(f"--max-pairs must be between 1 and {len(planned)}")
     model_payload = model_identity(args.host)
     pi_version = run(["pi", "--version"]).stdout.strip()
-    if pi_version != "0.83.0":
-        raise RuntimeError(f"expected Pi 0.83.0, found {pi_version!r}")
+    if pi_version != "0.84.2":
+        raise RuntimeError(f"expected Pi 0.84.2, found {pi_version!r}")
 
     if args.resume:
         artifact_root = args.output.resolve()
