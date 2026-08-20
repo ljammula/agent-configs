@@ -58,7 +58,7 @@ const NUDGE_MESSAGES = {
 	"failed-verification":
 		"The latest verification command failed. Inspect its output, make the smallest corrective edit, and rerun the relevant check. Do not stop until it passes.",
 	"inconclusive-verification":
-		"The latest verification result was inconclusive because its shell pipeline can mask the real exit status. Do not edit code based on this result. Rerun the project's canonical verification command unpiped, or enable pipefail, and continue only from that trustworthy result.",
+		"The latest verification result was inconclusive because its shell command can mask the real exit status. Do not edit code based on this result. Rerun the project's canonical verification command with all exit-status masking removed: use a standalone command, or enable pipefail if output must be piped. Continue only from that trustworthy result.",
 } as const;
 
 const MAX_NUDGES_PER_RUN = 3;
