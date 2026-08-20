@@ -5417,3 +5417,36 @@ and fixed the same day, see `progress-stall-guard.ts`'s file header ("Bug
 5") and its matching regression test. Full per-pair working tree and
 evidence (including the 33MB `pi-output.jsonl` and full session trace) at
 `pi/evals/battery-results/2026-08-19-seed20260802/pair4-medium-rerun/`.
+
+## Update 2026-08-19: Codex P0 implementation review findings addressed
+
+Implemented the three P0s added to
+`plans/pi-harness-hardening-backlog-2026-08-19.md` after PR #21.
+
+1. **Cross-prompt stall reset.** A direct extension-harness reproduction
+   showed a second top-level prompt could inherit the prior prompt's elapsed
+   wall clock and abort on its first tool result. `progress-stall-guard.ts`
+   now resets the complete episode on `before_agent_start`; internal
+   retry/compaction `agent_start` events still preserve evidence. The focused
+   two-fully-settled-prompts regression passes.
+2. **One production policy.** `build_app.py` no longer forces
+   `--thinking off`; omission inherits installed settings (`medium` today),
+   with an explicit override retained. The Python root-only verifier was
+   removed. `scripts/resolve-verification.ts` now calls the same
+   `lib/verification.ts` resolver as `quality-gate.ts`, including nested
+   manifests and Flutter-vs-Dart selection. An integration test creates two
+   nested components and proves either component failing rejects the build.
+3. **Actionable correctness signals and bounded escalation.** The outer loop
+   now treats canonical verification failure, reviewer flag/unavailability,
+   Pi failure/timeout, and `stall-timeout` as blockers and feeds their concrete
+   evidence into the next `--continue` round. Independent review is required
+   by default; `--review-policy degraded` explicitly labels unavailable-review
+   success, while a flag always blocks. Local exhaustion exits nonzero with
+   `escalation required`; `--sonnet-fallback` is explicit authorization for
+   exactly one billed `claude-sonnet-5` pass, so cloud spend is never implicit.
+
+Validation for this change is deterministic/source-level, not a new live
+battery claim: TypeScript typecheck passed; 229 TypeScript tests and 6 Python
+orchestrator tests passed. The fallback command path is tested with a stubbed
+process and has not incurred a billed live call. Suite-level Sonnet parity
+remains the P1 acceptance gate.

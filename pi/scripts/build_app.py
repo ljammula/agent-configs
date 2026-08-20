@@ -2,26 +2,28 @@
 """Zero-human full-stack app builder on top of the pi harness.
 
 Give it a spec file and a workspace directory; it drives `pi -p` through
-however many corrective rounds it takes to get real, current-diff-bound
-verification evidence passing -- no chat interaction, no human review step.
+however many corrective rounds it takes to get real canonical verification
+and independent-review evidence passing -- no chat interaction or human
+review step.
 
-Why this exists rather than relying on quality-gate.ts's in-session
-corrective loop alone: as of pi-harness-validation-status.md, whether a
-`sendUserMessage(..., {deliverAs: "followUp"})` sent from agent_settled
-reliably produces a second turn under `pi -p` is *unresolved* -- an
-isolated test showed it working, a real multi-turn build session showed it
-not firing at all, and the difference isn't explained. This script does not
-depend on that mechanism working. It treats each `pi -p` invocation as
-possibly final, runs the *real* verification command itself from the
-outside once pi exits, and if that fails, starts a brand new `pi -p
---continue` round with the failure as the prompt. This is the same shape as
+Why this exists outside the extensions: `quality-gate.ts` and
+`cross-model-review.ts` deliberately report settlement evidence without
+injecting an in-band corrective turn. This script consumes that evidence
+after each `pi -p` invocation, reruns the shared canonical verification
+command, and starts a fresh `pi -p --continue` round when any required
+signal fails. This is the same shape as
 the already-proven `PiHarness.run()` bounded-follow-up fix in
 local-model-bench (commits 8531917/dfe4620), generalized from
 "context-budget-exceeded" endings to "verification still failing" endings.
 
 Usage:
     python3 build_app.py --workspace /path/to/app --spec spec.md \
-        [--max-rounds 6] [--timeout-minutes 45]
+        [--max-rounds 6] [--timeout-minutes 45] [--sonnet-fallback]
+
+The installed Pi thinking policy is inherited by default. Independent review
+is required for unattended success unless `--review-policy degraded` is
+chosen explicitly. `--sonnet-fallback` authorizes one billed Sonnet pass only
+after the local corrective-round budget is exhausted.
 
 --containment currently refuses to run at all (see check_containment_can_
 reach_model's docstring below): its network-denied Docker profile has no
@@ -30,7 +32,8 @@ immediately with no round attempted and no BUILD_REPORT.md written --
 unlike every other failure mode this script handles, which always ends in
 a report. That exception is deliberate, not an oversight.
 
-Exit code 0 only if real verification evidence passes by the round budget.
+Exit code 0 only if canonical verification and the selected review policy
+pass by the round budget (or an explicitly authorized Sonnet fallback passes).
 A BUILD_REPORT.md is always written to the workspace on any full run,
 whether it succeeded or the round budget ran out -- the point of
 zero-human is that the report, not a chat transcript, is the record of
@@ -53,14 +56,31 @@ PI_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PI_ROOT.parent
 CONTAINMENT_DIR = PI_ROOT / "containment"
 MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit"
+SONNET_MODEL = "claude-sonnet-5"
+VERIFY_RESOLVER = PI_ROOT / "scripts" / "resolve-verification.ts"
+TSX = PI_ROOT / "node_modules" / ".bin" / "tsx"
+NON_RETRYABLE_REVIEW_FAILURES = {
+	"missing-configuration",
+	"invalid-configuration",
+	"same-primary",
+	"no-task-spec",
+}
 
-# Tried in this order against the workspace root. Mirrors
-# lib/verification.ts's makefileVerificationCommand priority (verify > test >
-# check) plus its per-manifest fallbacks -- kept as a small, explicit list
-# here rather than re-implementing the TS resolver in Python, since this
-# script only needs "good enough to gate a corrective round", not the exact
-# nested-manifest scan quality-gate.ts does inside the session.
-VERIFY_CANDIDATES = [
+
+def sh(args: list[str], *, cwd: Path | None = None, timeout: float | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+	return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout, check=False)
+
+
+# Root-only fallback used when the TS resolver can't run at all -- e.g. a
+# fresh checkout where `npm install` was never run (pi/node_modules is
+# gitignored, tsx is a devDependency, and install.sh doesn't install it).
+# Not nested-manifest aware like resolve-verification.ts; good enough to gate
+# a corrective round, not a substitute for the real resolver. Found via a
+# Codex PR #22 review, 2026-08-20: without this fallback, resolve_verify_command
+# silently returned None on every fresh installation, so build_app.py stopped
+# after its first round with "no canonical verification command resolvable"
+# even against a workspace with a valid Makefile or manifest.
+_FALLBACK_VERIFY_CANDIDATES = [
 	("Makefile", "verify", "make verify"),
 	("Makefile", "test", "make test"),
 	("Makefile", "check", "make check"),
@@ -71,26 +91,44 @@ VERIFY_CANDIDATES = [
 ]
 
 
-def sh(args: list[str], *, cwd: Path | None = None, timeout: float | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
-	return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout, check=False)
-
-
-def resolve_verify_command(workspace: Path) -> str | None:
+def _resolve_verify_command_fallback(workspace: Path) -> str | None:
 	makefile = workspace / "Makefile"
 	if makefile.exists():
 		lines = makefile.read_text(errors="ignore").splitlines()
 		targets = {line.split(":", 1)[0].strip() for line in lines if ":" in line and not line.startswith(("\t", " ", "#"))}
-		for filename, target, command in VERIFY_CANDIDATES:
+		for filename, target, command in _FALLBACK_VERIFY_CANDIDATES:
 			if filename != "Makefile":
 				continue
 			if target in targets:
 				return command
-	for filename, _target, command in VERIFY_CANDIDATES:
+	for filename, _target, command in _FALLBACK_VERIFY_CANDIDATES:
 		if filename == "Makefile":
 			continue
 		if (workspace / filename).exists():
 			return command
 	return None
+
+
+def resolve_verify_command(workspace: Path) -> str | None:
+	"""Resolve through the exact TypeScript implementation used by
+	quality-gate when it's available; falls back to a root-only heuristic
+	scan when the TS resolver can't even run (tsx missing/erroring), rather
+	than silently reporting no command exists. A clean run of the real
+	resolver that itself finds nothing is trusted as-is -- that's a more
+	accurate answer than the fallback's shallower scan, not a failure to
+	paper over."""
+	if TSX.exists():
+		try:
+			result = sh([str(TSX), str(VERIFY_RESOLVER), str(workspace)], cwd=PI_ROOT, timeout=30)
+		except (OSError, subprocess.TimeoutExpired):
+			result = None
+		if result is not None and result.returncode == 0:
+			try:
+				command = json.loads(result.stdout).get("command")
+			except (json.JSONDecodeError, AttributeError):
+				command = None
+			return command if isinstance(command, str) and command else None
+	return _resolve_verify_command_fallback(workspace)
 
 
 def redact(output: str, limit: int = 3000) -> str:
@@ -110,9 +148,68 @@ def parse_pi_traces(output: str) -> list[dict]:
 		except json.JSONDecodeError:
 			continue
 		entry = event.get("entry") or {}
-		if event.get("type") == "entry_appended" and entry.get("customType") == "pi-harness-trace":
-			traces.append(entry.get("data") or {})
+		custom_type = entry.get("customType")
+		if event.get("type") == "entry_appended" and custom_type in ("pi-harness-trace", "pi-stall-trace"):
+			trace = dict(entry.get("data") or {})
+			trace["customType"] = custom_type
+			if custom_type == "pi-stall-trace":
+				trace.setdefault("extension", "progress-stall-guard")
+				trace.setdefault("event", "stall")
+			traces.append(trace)
 	return traces
+
+
+@dataclass(frozen=True)
+class ReviewSignal:
+	outcome: str
+	detail: str = ""
+
+
+def review_signal(traces: list[dict]) -> ReviewSignal:
+	decisive: ReviewSignal | None = None
+	startup_reason = ""
+	for trace in traces:
+		if trace.get("extension") != "reviewer":
+			continue
+		if trace.get("event") == "startup" and trace.get("outcome") == "blocked":
+			startup_reason = str(trace.get("metadata", {}).get("reason") or "reviewer-disabled")
+			continue
+		if trace.get("event") != "review":
+			continue
+		outcome = str(trace.get("outcome") or "unavailable")
+		metadata = trace.get("metadata") or {}
+		if outcome in ("clean", "flagged"):
+			decisive = ReviewSignal(outcome, str(metadata.get("findings") or ""))
+		elif outcome == "blocked" and metadata.get("reason") == "unchanged-since-last-review" and decisive:
+			continue
+		else:
+			decisive = ReviewSignal("unavailable", str(metadata.get("reason") or outcome))
+	return decisive or ReviewSignal("unavailable", startup_reason or "no-review-verdict")
+
+
+def round_blockers(
+	*,
+	verify_passed: bool | None,
+	pi_failed: bool,
+	pi_timed_out: bool,
+	traces: list[dict],
+	review_policy: str,
+) -> tuple[list[str], ReviewSignal]:
+	blockers: list[str] = []
+	if pi_timed_out:
+		blockers.append("pi invocation timed out")
+	elif pi_failed:
+		blockers.append("pi invocation failed")
+	if any(trace.get("outcome") == "stall-timeout" or trace.get("stallTimeout") is True for trace in traces):
+		blockers.append("stall-timeout")
+	if verify_passed is not True:
+		blockers.append("canonical verification failed")
+	review = review_signal(traces)
+	if review.outcome == "flagged":
+		blockers.append("reviewer flagged the current diff")
+	elif review.outcome != "clean" and review_policy == "required":
+		blockers.append(f"review unavailable ({review.detail})")
+	return blockers, review
 
 
 def parse_usage(output: str) -> dict | None:
@@ -129,10 +226,13 @@ def parse_usage(output: str) -> dict | None:
 @dataclass
 class Round:
 	index: int
+	agent: str
 	command: list[str]
 	pi_returncode: int
+	pi_timed_out: bool
 	pi_usage: dict | None
 	traces: list[dict]
+	reviewer: ReviewSignal
 	verify_command: str | None
 	verify_passed: bool | None
 	verify_timed_out: bool
@@ -149,7 +249,15 @@ class BuildResult:
 	stopped_reason: str = ""
 
 
-def pi_invocation(workspace: Path, *, prompt: str, session_dir: Path, containment: bool, continue_session: bool) -> list[str]:
+def pi_invocation(
+	workspace: Path,
+	*,
+	prompt: str,
+	session_dir: Path,
+	containment: bool,
+	continue_session: bool,
+	thinking: str | None,
+) -> list[str]:
 	# Deliberately excludes the "pi" executable name itself: for a direct host
 	# invocation it's prepended below, but for containment run-contained.sh's
 	# "$@" is forwarded to container-entrypoint.sh, which already does
@@ -159,9 +267,13 @@ def pi_invocation(workspace: Path, *, prompt: str, session_dir: Path, containmen
 		"--print", "--mode", "json",
 		"--provider", "ai-stack-local",
 		"--model", MODEL,
-		"--thinking", "off",
 		"--session-dir", str(session_dir),
 	]
+	# Omit the flag by default so the installed settings.json policy applies
+	# (currently medium). An explicit override remains available for controlled
+	# experiments and reproductions.
+	if thinking is not None:
+		pi_args += ["--thinking", thinking]
 	if continue_session:
 		pi_args += ["--continue"]
 	pi_args += [prompt]
@@ -169,6 +281,15 @@ def pi_invocation(workspace: Path, *, prompt: str, session_dir: Path, containmen
 		return ["pi", *pi_args]
 	run_contained = CONTAINMENT_DIR / "run-contained.sh"
 	return [str(run_contained), str(workspace), *pi_args]
+
+
+def sonnet_invocation(prompt: str) -> list[str]:
+	return [
+		"claude", "-p", prompt,
+		"--model", SONNET_MODEL,
+		"--permission-mode", "bypassPermissions",
+		"--output-format", "json",
+	]
 
 
 def ensure_git_repo(workspace: Path) -> None:
@@ -215,7 +336,64 @@ def check_containment_can_reach_model(containment: bool) -> None:
 	)
 
 
-def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment: bool, timeout_minutes: int) -> BuildResult:
+def run_verification(workspace: Path) -> tuple[str | None, bool | None, bool, str]:
+	command = resolve_verify_command(workspace)
+	if not command:
+		return None, None, False, ""
+	try:
+		completed = sh(["bash", "-o", "pipefail", "-lc", command], cwd=workspace, timeout=20 * 60)
+		return command, completed.returncode == 0, False, redact(f"{completed.stdout}\n{completed.stderr}")
+	except subprocess.TimeoutExpired as exc:
+		output = (
+			f"verification command timed out after 20 minutes: {command}\n"
+			f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
+		)
+		return command, False, True, redact(output)
+
+
+def corrective_prompt(
+	*,
+	round_index: int,
+	max_rounds: int,
+	verify_command: str | None,
+	verify_tail: str,
+	blockers: list[str],
+	reviewer: ReviewSignal,
+) -> str:
+	parts = [
+		f"The previous harness round did not earn completion (attempt {round_index}/{max_rounds}).",
+		f"Blocking signals: {', '.join(blockers)}.",
+	]
+	if verify_command and verify_tail:
+		parts += [f"Canonical command: `{verify_command}`", f"Redacted failure excerpt:\n\n{verify_tail}"]
+	if reviewer.outcome == "flagged" and reviewer.detail:
+		parts += [f"Independent reviewer findings:\n\n{reviewer.detail}"]
+	parts.append("Inspect these concrete signals, make the smallest fix needed, and rerun the canonical verification before finishing.")
+	return "\n\n".join(parts)
+
+
+def parse_sonnet_usage(output: str) -> dict | None:
+	try:
+		payload = json.loads(output)
+	except json.JSONDecodeError:
+		return None
+	usage = payload.get("usage")
+	if not isinstance(usage, dict):
+		return None
+	return {**usage, "total_cost_usd": payload.get("total_cost_usd")}
+
+
+def run_build(
+	workspace: Path,
+	spec_path: Path,
+	*,
+	max_rounds: int,
+	containment: bool,
+	timeout_minutes: int,
+	thinking: str | None = None,
+	review_policy: str = "required",
+	sonnet_fallback: bool = False,
+) -> BuildResult:
 	workspace.mkdir(parents=True, exist_ok=True)
 	ensure_git_repo(workspace)
 	session_dir = workspace / ".pi-build-session"
@@ -224,12 +402,14 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 	result = BuildResult(workspace=workspace, spec_path=spec_path)
 	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
 	prompt = spec_text
+	escalation_prompt = ""
 
 	for round_index in range(1, max_rounds + 1):
 		continue_session = round_index > 1
 		command = pi_invocation(
 			workspace, prompt=prompt, session_dir=session_dir,
 			containment=containment, continue_session=continue_session,
+			thinking=thinking,
 		)
 		started = time.monotonic()
 		try:
@@ -238,30 +418,13 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 		except subprocess.TimeoutExpired:
 			completed = None
 			timed_out = True
+		except OSError as exc:
+			completed = subprocess.CompletedProcess(command, 127, "", str(exc))
+			timed_out = False
 		duration = time.monotonic() - started
 		stdout = completed.stdout if completed else ""
 
-		verify_command = resolve_verify_command(workspace)
-		verify_passed: bool | None = None
-		verify_timed_out = False
-		verify_tail = ""
-		if verify_command:
-			try:
-				verify_result = sh(["bash", "-o", "pipefail", "-lc", verify_command], cwd=workspace, timeout=20 * 60)
-				verify_passed = verify_result.returncode == 0
-				verify_tail = redact(f"{verify_result.stdout}\n{verify_result.stderr}")
-			except subprocess.TimeoutExpired as exc:
-				# Record this as a failed round instead of letting the
-				# exception propagate past write_report -- the orchestrator's
-				# whole point is that a BUILD_REPORT.md always gets written,
-				# success or failure, so a silent crash here would be exactly
-				# the failure mode this script exists to avoid.
-				verify_timed_out = True
-				verify_passed = False
-				verify_tail = redact(
-					f"verification command timed out after 20 minutes: {verify_command}\n"
-					f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
-				)
+		verify_command, verify_passed, verify_timed_out, verify_tail = run_verification(workspace)
 
 		pi_returncode = completed.returncode if completed else -1
 		# A nonzero pi exit means the CLI itself crashed, was invoked wrong, or
@@ -271,14 +434,25 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 		# the workspace and would happily report "passed" against a tree pi
 		# never touched. Success requires both: pi actually ran to completion
 		# (returncode 0) and the real verification command passed.
-		pi_failed = (not timed_out) and pi_returncode != 0
+		pi_failed = timed_out or pi_returncode != 0
+		traces = parse_pi_traces(stdout)
+		blockers, reviewer = round_blockers(
+			verify_passed=verify_passed,
+			pi_failed=pi_failed,
+			pi_timed_out=timed_out,
+			traces=traces,
+			review_policy=review_policy,
+		)
 
 		rnd = Round(
 			index=round_index,
+			agent="pi-local",
 			command=command,
 			pi_returncode=pi_returncode,
+			pi_timed_out=timed_out,
 			pi_usage=parse_usage(stdout),
-			traces=parse_pi_traces(stdout),
+			traces=traces,
+			reviewer=reviewer,
 			verify_command=verify_command,
 			verify_passed=verify_passed,
 			verify_timed_out=verify_timed_out,
@@ -287,43 +461,73 @@ def run_build(workspace: Path, spec_path: Path, *, max_rounds: int, containment:
 		)
 		result.rounds.append(rnd)
 
-		if timed_out:
-			result.stopped_reason = "pi invocation timed out"
-			break
 		if verify_command is None:
-			result.stopped_reason = "no verification command resolvable (unconfigured)"
+			result.stopped_reason = "no canonical verification command resolvable"
 			break
-		if verify_passed and not pi_failed:
+		if not blockers:
 			result.succeeded = True
-			result.stopped_reason = "verification passed"
+			result.stopped_reason = (
+				"canonical verification passed and independent review was clean"
+				if reviewer.outcome == "clean"
+				else f"canonical verification passed; degraded review ({reviewer.detail})"
+			)
 			break
 
-		# Not passing yet and rounds remain: build the corrective follow-up
-		# prompt ourselves, same content quality-gate.ts's in-session message
-		# has, and start a fresh --continue round on top of the same session.
-		if round_index == max_rounds:
-			result.stopped_reason = (
-				f"round budget ({max_rounds}) exhausted, pi exited {pi_returncode} on the last round"
-				if pi_failed
-				else f"round budget ({max_rounds}) exhausted, verification still failing"
-			)
+		prompt = corrective_prompt(
+			round_index=round_index,
+			max_rounds=max_rounds,
+			verify_command=verify_command,
+			verify_tail=verify_tail,
+			blockers=blockers,
+			reviewer=reviewer,
+		)
+		escalation_prompt = "\n\n".join([
+			"The local Pi harness exhausted its bounded corrective budget. Take one bounded corrective pass over the existing workspace.",
+			f"Original task specification:\n\n{spec_text}",
+			prompt,
+		])
+		if review_policy == "required" and reviewer.outcome == "unavailable" and reviewer.detail in NON_RETRYABLE_REVIEW_FAILURES:
+			result.stopped_reason = f"review unavailable; escalation required: {reviewer.detail}"
 			break
-		if pi_failed:
-			prompt = (
-				f"The previous `pi` invocation exited with code {pi_returncode} instead of "
-				f"completing normally (attempt {round_index}/{max_rounds}); no completed turn "
-				"can be trusted from that round. Continue the work from wherever it left off, "
-				"make the smallest fix needed, and rerun the project's real verification "
-				"command yourself before finishing this turn."
-			)
+		if round_index == max_rounds:
+			result.stopped_reason = f"local round budget ({max_rounds}) exhausted; escalation required: {', '.join(blockers)}"
+			break
+
+	if not result.succeeded and sonnet_fallback and escalation_prompt and resolve_verify_command(workspace):
+		command = sonnet_invocation(escalation_prompt)
+		started = time.monotonic()
+		try:
+			completed = sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=env)
+			timed_out = False
+		except subprocess.TimeoutExpired:
+			completed = None
+			timed_out = True
+		except OSError as exc:
+			completed = subprocess.CompletedProcess(command, 127, "", str(exc))
+			timed_out = False
+		duration = time.monotonic() - started
+		verify_command, verify_passed, verify_timed_out, verify_tail = run_verification(workspace)
+		returncode = completed.returncode if completed else -1
+		result.rounds.append(Round(
+			index=len(result.rounds) + 1,
+			agent=SONNET_MODEL,
+			command=command,
+			pi_returncode=returncode,
+			pi_timed_out=timed_out,
+			pi_usage=parse_sonnet_usage(completed.stdout if completed else ""),
+			traces=[],
+			reviewer=ReviewSignal("sonnet-fallback"),
+			verify_command=verify_command,
+			verify_passed=verify_passed,
+			verify_timed_out=verify_timed_out,
+			verify_output_tail=verify_tail,
+			duration_s=duration,
+		))
+		if not timed_out and returncode == 0 and verify_passed is True:
+			result.succeeded = True
+			result.stopped_reason = "Sonnet fallback passed canonical verification"
 		else:
-			prompt = (
-				f"The verification command `{verify_command}` did not pass "
-				f"(attempt {round_index}/{max_rounds}).\n\n"
-				f"Redacted failure excerpt:\n\n{verify_tail}\n\n"
-				"Inspect the failure, make the smallest fix, and rerun it yourself "
-				"before finishing this turn."
-			)
+			result.stopped_reason = "Sonnet fallback did not pass canonical verification"
 
 	return result
 
@@ -352,9 +556,12 @@ def write_report(result: BuildResult) -> Path:
 	]
 	for rnd in result.rounds:
 		lines.append(f"### Round {rnd.index}")
-		lines.append(f"- pi exit code: {rnd.pi_returncode}")
+		lines.append(f"- agent: {rnd.agent}")
+		lines.append(f"- agent exit code: {rnd.pi_returncode}")
+		lines.append(f"- agent timed out: {rnd.pi_timed_out}")
 		if rnd.pi_usage:
-			lines.append(f"- pi usage: {json.dumps(rnd.pi_usage)}")
+			lines.append(f"- agent usage: {json.dumps(rnd.pi_usage)}")
+		lines.append(f"- reviewer outcome: {rnd.reviewer.outcome}{f' ({rnd.reviewer.detail})' if rnd.reviewer.detail else ''}")
 		lines.append(f"- verify command: `{rnd.verify_command or '(none resolved)'}`")
 		verify_status = "timed out" if rnd.verify_timed_out else str(rnd.verify_passed)
 		lines.append(f"- verify passed: {verify_status}")
@@ -374,11 +581,10 @@ def write_report(result: BuildResult) -> Path:
 	lines.append("")
 	if not verdicts:
 		lines.append(
-			"No review verdict was recorded in any round's trace log. Either the "
-			"reviewer is not configured (AI_REVIEW_BASE_URL/AI_REVIEW_MODEL), or "
-			"it never got a materially non-empty diff to review. Check "
-			"`.pi-build-session` session JSONL for `reviewer` traces before "
-			"trusting this build unreviewed."
+			"No decisive clean/flagged verdict was recorded. The default required "
+			"policy prevents local success in this state; if degraded policy was "
+			"selected, that choice and the unavailable reason appear in the round "
+			"summary above."
 		)
 	else:
 		for verdict in verdicts:
@@ -395,6 +601,23 @@ def main() -> int:
 	parser.add_argument("--spec", required=True, type=Path)
 	parser.add_argument("--max-rounds", type=int, default=6)
 	parser.add_argument(
+		"--thinking",
+		choices=("off", "minimal", "low", "medium", "high", "xhigh"),
+		default=None,
+		help="Override Pi thinking for this build; omitted inherits installed settings.json (currently medium).",
+	)
+	parser.add_argument(
+		"--review-policy",
+		choices=("required", "degraded"),
+		default="required",
+		help="Require a clean independent-review verdict for success, or explicitly permit labeled degraded success when review is unavailable.",
+	)
+	parser.add_argument(
+		"--sonnet-fallback",
+		action="store_true",
+		help="After local rounds are exhausted, authorize one billed claude-sonnet-5 corrective pass.",
+	)
+	parser.add_argument(
 		"--containment", action="store_true",
 		help="Currently refused unconditionally: the Docker containment launcher's network-denied "
 		"profile cannot reach the ai-stack-local model, so no round could ever run. See "
@@ -408,6 +631,8 @@ def main() -> int:
 		args.workspace.resolve(), args.spec.resolve(),
 		max_rounds=args.max_rounds, containment=args.containment,
 		timeout_minutes=args.timeout_minutes,
+		thinking=args.thinking, review_policy=args.review_policy,
+		sonnet_fallback=args.sonnet_fallback,
 	)
 	report_path = write_report(result)
 	print(f"Report written to {report_path}")

@@ -372,6 +372,16 @@
  *     its own, so it was mis-sliced into a 1-character garbage path. Fixed
  *     to walk entries with an index cursor and discard the paired orig-path
  *     field for rename/copy status codes instead of parsing it as a path.
+ *
+ * CROSS-PROMPT RESET (Codex implementation review, 2026-08-19): the reset
+ * guard above distinguished retries from the first `agent_start`, but it was
+ * scoped to the extension lifetime rather than one top-level prompt.
+ * `agent_settled` stopped the timer without clearing that guard, so a second
+ * prompt in the same interactive session inherited the prior prompt's
+ * `lastSourceEditAt` and could be aborted on its first tool result. The reset
+ * now runs on `before_agent_start`, Pi's top-level-prompt-only boundary; the
+ * first `agent_start` remains a fallback for runtimes/tests that omit that
+ * event, and retry/compaction `agent_start` events still preserve evidence.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isStaleContextError } from "./lib/stale-context.ts";
@@ -834,7 +844,24 @@ export default function (pi: ExtensionAPI) {
 		timer.unref?.();
 	}
 
-	let seenFirstAgentStart = false;
+	let topLevelRunInitialized = false;
+	function resetTopLevelRun() {
+		resetStallState();
+		lastBashEditPaths = undefined;
+		sawTestThisTurn = false;
+		intercepts = 0;
+		topLevelRunInitialized = true;
+	}
+
+	// `before_agent_start` is the genuine top-level prompt boundary. Unlike
+	// `agent_start`, it does not fire for retries, compaction, or queued
+	// continuations (the reviewer extension relies on the same distinction).
+	// Reset the whole stall episode here so a second prompt in a long-lived
+	// interactive session cannot inherit the previous prompt's wall clock.
+	pi.on("before_agent_start", () => {
+		resetTopLevelRun();
+	});
+
 	pi.on("agent_start", (_event, ctx) => {
 		liveCtx = ctx;
 		liveCwd = ctx.cwd;
@@ -848,8 +875,8 @@ export default function (pi: ExtensionAPI) {
 		// stop-then-recreate, which would restart the 15s cadence from zero on
 		// every call and could starve the tick entirely under frequent retries.
 		startTimer();
-		// Only the true first start of this invocation resets state -- a retry
-		// restart must not wipe real evidence of repeated inaction. See file
+		// Only the top-level prompt boundary resets state -- a retry restart must
+		// not wipe real evidence of repeated inaction. See file
 		// header, "Two bugs found live 2026-08-16," item 2. lastBashEditPaths
 		// belongs to this same gated reset, not to startTimer() (Opus review of
 		// the Bug 5 fix, 2026-08-19): it's stall-tracking state exactly like the
@@ -857,12 +884,11 @@ export default function (pi: ExtensionAPI) {
 		// window each time -- a bash-driven edit landing between a retry and the
 		// timer's next tick gets silently absorbed into the new baseline instead
 		// of counting as progress.
-		if (seenFirstAgentStart) return;
-		seenFirstAgentStart = true;
-		resetStallState();
-		lastBashEditPaths = undefined;
-		sawTestThisTurn = false;
-		intercepts = 0;
+		// Fallback for runtimes/tests that enter through agent_start without a
+		// preceding before_agent_start. Once initialized, later agent_start
+		// events are internal continuations and must preserve stall evidence.
+		if (topLevelRunInitialized) return;
+		resetTopLevelRun();
 	});
 
 	// agent_settled, not agent_end (Opus review of the Bug 5 fix, 2026-08-19):
