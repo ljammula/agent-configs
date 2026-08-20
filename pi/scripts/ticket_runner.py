@@ -89,6 +89,7 @@ MAX_BUILD_ATTEMPTS = 3
 MAX_BUILDER_ROUNDS = 3
 BUILD_RETRY_BACKOFF_S = 30
 DEFAULT_REVIEW_POLICY = "advisory"
+REVIEW_POLICY_STRENGTH = {"advisory": 0, "degraded": 1, "required": 2}
 TRANSIENT_BUILD_MARKERS = (
 	"pi invocation timed out",
 	"pi invocation failed",
@@ -189,6 +190,28 @@ def failed_check_names(gate: dict | None) -> set[str]:
 		for check in gate.get("checks", [])
 		if not check.get("ok")
 	}
+
+
+def gate_review_policy(gate: dict | None) -> str | None:
+	"""Return the policy represented by gate evidence.
+
+	Older gates predate the persisted policy field and were produced while
+	`build_app.py` required clean review by default, so treat missing policy as
+	`required` for backward-compatible, conservative evidence handling.
+	"""
+	if not gate:
+		return None
+	if "review_policy" not in gate:
+		return "required"
+	policy = gate.get("review_policy")
+	return policy if policy in REVIEW_POLICY_STRENGTH else None
+
+
+def gate_satisfies_review_policy(gate: dict | None, requested: str) -> bool:
+	if not gate or gate.get("passed") is not True:
+		return False
+	recorded = gate_review_policy(gate)
+	return recorded is not None and REVIEW_POLICY_STRENGTH[recorded] >= REVIEW_POLICY_STRENGTH[requested]
 
 
 def _attempt_numbers(report_dir: Path, prefixes: tuple[str, ...]) -> list[int]:
@@ -308,21 +331,36 @@ def retryable_build_state(pilot_dir: Path, workspace: Path, ticket: Ticket) -> b
 	return failed <= {"BUILD_REPORT.md SUCCEEDED"}
 
 
-def ticket_done(pilot_dir: Path, workspace: Path, ticket: Ticket) -> bool:
+def ticket_done(
+	pilot_dir: Path,
+	workspace: Path,
+	ticket: Ticket,
+	review_policy: str = DEFAULT_REVIEW_POLICY,
+) -> bool:
 	if commit_sha_for(workspace, ticket.number) is None:
 		return False
 	gate = read_gate(pilot_dir, ticket)
-	return bool(gate and gate.get("passed") is True)
+	return gate_satisfies_review_policy(gate, review_policy)
 
 
-def next_ticket(tickets: list[Ticket], pilot_dir: Path, workspace: Path) -> tuple[Ticket | None, str | None]:
+def next_ticket(
+	tickets: list[Ticket],
+	pilot_dir: Path,
+	workspace: Path,
+	review_policy: str = DEFAULT_REVIEW_POLICY,
+) -> tuple[Ticket | None, str | None]:
 	"""Returns (ticket, mode) where mode is "build" (no commit yet -- run
 	build_app.py), "retry" (a previous build stopped before report evidence),
 	or "regate" (a commit exists but no passing gate record -- re-run the gate
-	only, e.g. after a rescue commit). (None, None) means every ticket is done."""
+	only, e.g. after a rescue commit), or "policy" (a passing gate exists but
+	was produced under a weaker review policy and must be rebuilt). (None, None)
+	means every ticket is done."""
 	for t in tickets:
-		if ticket_done(pilot_dir, workspace, t):
+		gate = read_gate(pilot_dir, t)
+		if ticket_done(pilot_dir, workspace, t, review_policy):
 			continue
+		if commit_sha_for(workspace, t.number) is not None and gate and gate.get("passed") is True:
+			return t, "policy"
 		if retryable_build_state(pilot_dir, workspace, t):
 			return t, "retry"
 		mode = "regate" if commit_sha_for(workspace, t.number) is not None else "build"
@@ -446,13 +484,28 @@ def run_make(workspace: Path, target: str, timeout: float) -> tuple[bool, str]:
 		return False, f"`make {target}` timed out after {timeout:.0f}s\n{out[-4000:]}"
 
 
-def build_report_succeeded(workspace: Path) -> tuple[bool, str]:
+def build_report_succeeded(
+	workspace: Path,
+	review_policy: str = DEFAULT_REVIEW_POLICY,
+) -> tuple[bool, str]:
 	report = workspace / "BUILD_REPORT.md"
 	if not report.exists():
 		return False, "BUILD_REPORT.md not found"
 	text = report.read_text(errors="ignore")
 	line = next((l for l in text.splitlines() if l.startswith("Outcome:")), "")
-	return line.startswith("Outcome: SUCCEEDED"), line or "no Outcome line found"
+	if not line.startswith("Outcome: SUCCEEDED"):
+		return False, line or "no Outcome line found"
+	policy_line = next((l for l in text.splitlines() if l.startswith("Review policy:")), "")
+	if not policy_line:
+		recorded_policy = "required"
+	else:
+		match = re.fullmatch(r"Review policy: `([^`]+)`", policy_line)
+		recorded_policy = match.group(1) if match and match.group(1) in REVIEW_POLICY_STRENGTH else None
+	if recorded_policy is None:
+		return False, f"unrecognized review policy evidence: {policy_line}"
+	if REVIEW_POLICY_STRENGTH[recorded_policy] < REVIEW_POLICY_STRENGTH[review_policy]:
+		return False, f"report review policy {recorded_policy!r} is weaker than requested {review_policy!r}"
+	return True, line
 
 
 def commit_and_state_files_ok(workspace: Path, ticket: Ticket, base_sha: str | None) -> tuple[bool, str]:
@@ -587,7 +640,12 @@ def archive_evidence(
 		)
 		write_once(dest / report_name, report.read_bytes())
 	(dest / "gate.json").write_text(json.dumps(gate_result, indent=2))
-	log_lines = [f"# Gate log -- ticket {ticket.nnn}", f"passed: {gate_result['passed']}", ""]
+	log_lines = [
+		f"# Gate log -- ticket {ticket.nnn}",
+		f"review policy: {gate_result.get('review_policy', 'unknown')}",
+		f"passed: {gate_result['passed']}",
+		"",
+	]
 	for check in gate_result["checks"]:
 		log_lines.append(f"## {check['name']}: {'PASS' if check['ok'] else 'FAIL'}")
 		if check.get("detail"):
@@ -678,7 +736,7 @@ def run_ticket(
 		frozen_ok, frozen_detail = check_verify_surface_frozen(pilot_dir, workspace)
 		checks.append({"name": "verify-surface frozen", "ok": frozen_ok, "detail": frozen_detail})
 
-	report_ok, report_detail = build_report_succeeded(workspace)
+	report_ok, report_detail = build_report_succeeded(workspace, review_policy)
 	checks.append({"name": "BUILD_REPORT.md SUCCEEDED", "ok": report_ok, "detail": report_detail})
 
 	commit_ok, commit_detail = commit_and_state_files_ok(workspace, ticket, base_sha)
@@ -689,7 +747,12 @@ def run_ticket(
 	if ticket.number == 1 and passed:
 		save_verify_baseline(pilot_dir, workspace)
 
-	gate_result = {"ticket": ticket.nnn, "passed": passed, "checks": checks}
+	gate_result = {
+		"ticket": ticket.nnn,
+		"review_policy": review_policy,
+		"passed": passed,
+		"checks": checks,
+	}
 	archive_evidence(
 		pilot_dir,
 		ticket,
@@ -721,10 +784,15 @@ def run_ticket(
 	return passed
 
 
-def print_status(pilot_dir: Path, tickets: list[Ticket], workspace: Path) -> None:
+def print_status(
+	pilot_dir: Path,
+	tickets: list[Ticket],
+	workspace: Path,
+	review_policy: str = DEFAULT_REVIEW_POLICY,
+) -> None:
 	done_commits = committed_ticket_numbers(workspace)
 	rescued = sum(1 for subject in done_commits.values() if "[rescued]" in subject)
-	nxt, mode = next_ticket(tickets, pilot_dir, workspace)
+	nxt, mode = next_ticket(tickets, pilot_dir, workspace, review_policy)
 	print(f"pilot dir: {pilot_dir}")
 	print(f"tickets total: {len(tickets)}")
 	print(f"tickets committed: {len(done_commits)} (of which rescued: {rescued})")
@@ -733,7 +801,7 @@ def print_status(pilot_dir: Path, tickets: list[Ticket], workspace: Path) -> Non
 	else:
 		print(f"next ticket: {nxt.nnn}-{nxt.slug} ({mode})")
 	for t in tickets:
-		done = ticket_done(pilot_dir, workspace, t)
+		done = ticket_done(pilot_dir, workspace, t, review_policy)
 		has_commit = t.number in done_commits
 		marker = "x" if done else ("~" if has_commit else " ")
 		rescue_tag = " [rescued]" if has_commit and "[rescued]" in done_commits[t.number] else ""
@@ -768,18 +836,18 @@ def main() -> int:
 		return 1
 
 	if args.status:
-		print_status(pilot_dir, tickets, workspace)
+		print_status(pilot_dir, tickets, workspace, args.review_policy)
 		return 0
 
 	while True:
-		t, mode = next_ticket(tickets, pilot_dir, workspace)
+		t, mode = next_ticket(tickets, pilot_dir, workspace, args.review_policy)
 		if t is None:
 			print("\nall tickets complete.")
 			return 0
 		build_attempt: int | None = None
-		if mode in ("build", "retry"):
+		if mode in ("build", "retry", "policy"):
 			build_attempt = next_build_attempt(pilot_dir, t)
-			if build_attempt > MAX_BUILD_ATTEMPTS:
+			if mode != "policy" and build_attempt > MAX_BUILD_ATTEMPTS:
 				gate = read_gate(pilot_dir, t)
 				reasons = sorted(failed_check_names(gate)) or ["build retry limit exhausted"]
 				append_halt_record(workspace, t, reasons)
@@ -809,7 +877,7 @@ def main() -> int:
 			review_policy=args.review_policy,
 		)
 		if not ok:
-			if mode in ("build", "retry") and retryable_build_state(pilot_dir, workspace, t):
+			if mode in ("build", "retry", "policy") and retryable_build_state(pilot_dir, workspace, t):
 				continue
 			return 1
 

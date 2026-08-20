@@ -189,6 +189,19 @@ class BuildAppTests(unittest.TestCase):
 		self.assertIn("Review policy: `advisory`", report_text)
 		self.assertIn("stale diff", report_text)
 
+	def test_no_verdict_report_explains_advisory_policy_without_required_contradiction(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			result = build_app.BuildResult(
+				workspace=root,
+				spec_path=root / "spec.md",
+				review_policy="advisory",
+			)
+			report_text = build_app.write_report(result).read_text()
+
+		self.assertIn("Advisory policy allows success", report_text)
+		self.assertNotIn("default required policy prevents", report_text)
+
 	def test_empty_diff_always_blocks_required_review_even_with_passing_verify(self):
 		# An empty diff means the reviewer genuinely had nothing to look at --
 		# with --review-base-sha anchoring the reviewer to the ticket's real

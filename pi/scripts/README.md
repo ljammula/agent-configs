@@ -73,6 +73,8 @@ python3 pi/scripts/build_app.py \
   release-hardening runs. The normal ticket workflow uses advisory review so a
   mis-scoped or low-confidence reviewer flag does not consume the bounded
   builder budget, while the verdict remains available in the archived report.
+  Gate evidence records the policy used; a later strict run rebuilds tickets
+  whose passing evidence was produced under a weaker policy.
 - `--sonnet-fallback` explicitly authorizes one billed
   `claude-sonnet-5` corrective pass after the bounded local rounds are
   exhausted. Without it, the report exits non-zero with `escalation

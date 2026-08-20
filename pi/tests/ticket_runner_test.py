@@ -21,9 +21,9 @@ class TicketRunnerRetryTests(unittest.TestCase):
 	def setUp(self):
 		self.ticket = ticket_runner.Ticket(1, "workspace-scaffold", Path("001-workspace-scaffold.md"))
 
-	def next_mode(self, pilot_dir, workspace, commit_sha=None):
+	def next_mode(self, pilot_dir, workspace, commit_sha=None, review_policy="advisory"):
 		with mock.patch.object(ticket_runner, "commit_sha_for", return_value=commit_sha):
-			return ticket_runner.next_ticket([self.ticket], pilot_dir, workspace)[1]
+			return ticket_runner.next_ticket([self.ticket], pilot_dir, workspace, review_policy)[1]
 
 	def test_fresh_ticket_starts_a_build(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -38,6 +38,70 @@ class TicketRunnerRetryTests(unittest.TestCase):
 	def test_builder_command_accepts_strict_review_for_release_runs(self):
 		command = ticket_runner.builder_command(Path("workspace"), self.ticket, "deadbeef", "required")
 		self.assertEqual(command[command.index("--review-policy") + 1], "required")
+
+	def test_required_mode_rebuilds_a_passing_advisory_gate(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate.json").write_text(json.dumps({
+				"ticket": "001",
+				"review_policy": "advisory",
+				"passed": True,
+				"checks": [],
+			}))
+			self.assertEqual(
+				self.next_mode(root, root / "workspace", "commit-sha", "required"),
+				"policy",
+			)
+
+	def test_required_mode_accepts_a_passing_required_gate(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate.json").write_text(json.dumps({
+				"ticket": "001",
+				"review_policy": "required",
+				"passed": True,
+				"checks": [],
+			}))
+			self.assertEqual(
+				self.next_mode(root, root / "workspace", "commit-sha", "required"),
+				None,
+			)
+
+	def test_unknown_explicit_gate_policy_is_not_trusted(self):
+		gate = {"review_policy": "mystery", "passed": True, "checks": []}
+		self.assertFalse(ticket_runner.gate_satisfies_review_policy(gate, "advisory"))
+
+	def test_legacy_gate_without_policy_retains_required_semantics(self):
+		gate = {"passed": True, "checks": []}
+		self.assertTrue(ticket_runner.gate_satisfies_review_policy(gate, "required"))
+
+	def test_required_mode_rejects_successful_advisory_build_report(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			(workspace / "BUILD_REPORT.md").write_text(
+				"Review policy: `advisory`\nOutcome: SUCCEEDED\n"
+			)
+			ok, detail = ticket_runner.build_report_succeeded(workspace, "required")
+		self.assertFalse(ok)
+		self.assertIn("weaker than requested", detail)
+
+	def test_required_mode_accepts_successful_required_build_report(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			(workspace / "BUILD_REPORT.md").write_text(
+				"Review policy: `required`\nOutcome: SUCCEEDED\n"
+			)
+			self.assertTrue(ticket_runner.build_report_succeeded(workspace, "required")[0])
+
+	def test_legacy_successful_build_report_retains_required_semantics(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			(workspace / "BUILD_REPORT.md").write_text("Outcome: SUCCEEDED\n")
+			self.assertTrue(ticket_runner.build_report_succeeded(workspace, "required")[0])
 
 	def test_builder_command_threads_review_base_sha_to_anchor_the_reviewer(self):
 		# Without this, a build_app.py invocation retried against a ticket a
@@ -233,6 +297,34 @@ class TicketRunnerRetryTests(unittest.TestCase):
 				gate_attempt=3,
 				build_attempt=None,
 				review_policy="advisory",
+			)
+
+	def test_policy_upgrade_is_not_blocked_by_prior_build_attempt_budget(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			with (
+				mock.patch.object(
+					sys,
+					"argv",
+					["ticket_runner.py", "--pilot-dir", str(root), "--review-policy", "required"],
+				),
+				mock.patch.object(ticket_runner, "discover_tickets", return_value=[self.ticket]),
+				mock.patch.object(ticket_runner, "next_ticket", return_value=(self.ticket, "policy")),
+				mock.patch.object(ticket_runner, "next_build_attempt", return_value=4),
+				mock.patch.object(ticket_runner, "next_gate_attempt", return_value=4),
+				mock.patch.object(ticket_runner, "retryable_build_state", return_value=False),
+				mock.patch.object(ticket_runner, "run_ticket", return_value=False) as run_ticket,
+			):
+				self.assertEqual(ticket_runner.main(), 1)
+			run_ticket.assert_called_once_with(
+				root.resolve(),
+				root.resolve() / "workspace",
+				self.ticket,
+				[self.ticket],
+				skip_build=False,
+				gate_attempt=4,
+				build_attempt=4,
+				review_policy="required",
 			)
 
 	def test_per_attempt_evidence_is_append_only_and_regates_are_separate(self):

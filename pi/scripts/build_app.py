@@ -616,12 +616,24 @@ def write_report(result: BuildResult) -> Path:
 	lines.append("## Independent review verdicts")
 	lines.append("")
 	if not verdicts:
-		lines.append(
-			"No decisive clean/flagged verdict was recorded. The default required "
-			"policy prevents local success in this state; if degraded policy was "
-			"selected, that choice and the unavailable reason appear in the round "
-			"summary above."
-		)
+		if result.review_policy == "advisory":
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Advisory policy "
+				"allows success based on canonical verification; the unavailable "
+				"reason appears in the round summary above."
+			)
+		elif result.review_policy == "degraded":
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Degraded policy "
+				"allows labeled success when review is unavailable; the reason "
+				"appears in the round summary above."
+			)
+		else:
+			lines.append(
+				"No decisive clean/flagged verdict was recorded. Required policy "
+				"prevents local success in this state; the unavailable reason "
+				"appears in the round summary above."
+			)
 	else:
 		for verdict in verdicts:
 			lines.append(f"- round {verdict['round']}: **{verdict['outcome']}** ({verdict.get('metadata', {}).get('trigger', 'unknown trigger')})")
