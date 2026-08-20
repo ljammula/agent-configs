@@ -120,6 +120,27 @@ Thin outer loop, no new harness machinery:
 - Ledger: append per-ticket outcome (rounds used, review verdicts,
   wall-clock) to `PROGRESS.md` — the pilot's evidence trail.
 
+**Work-tracking conventions (added 2026-08-20, borrowed from how Claude
+Code and Copilot's coding agent track work — both externalize state into
+artifacts with independent lifecycles, never model context):**
+
+- **The git log is the transactional ledger.** Each completed ticket ends
+  in exactly one commit whose message starts `ticket(NNN):`. The runner
+  derives its position and resume point from `git log` alone (Copilot's
+  branch-plus-draft-PR pattern, minus GitHub). `PROGRESS.md` is a
+  human-readable *projection* the agent maintains; the runner checks it
+  was touched but never trusts it for control flow — agent-written prose
+  is self-report, the exact signal this harness refuses as evidence
+  everywhere else.
+- **Ticket status is verification artifacts only** (Copilot's PR-checks
+  model, and `quality-gate.ts`'s evidence-not-claims rule promoted to the
+  ticket level): done = named acceptance tests green + `make verify`
+  green + the `ticket(NNN):` commit exists. Nothing the agent *says*
+  changes a ticket's status.
+- The spec-freeze checkpoint (Phase 0) is the analog of Claude Code's
+  plan-mode approval: decomposition is only compiled from a human-frozen
+  spec, never from a live conversation.
+
 ### Phase 3 — Halt policy: no cloud escalation (**decision 2026-08-20**)
 
 - **`--sonnet-fallback` is not used and `ticket_runner.py` has no
