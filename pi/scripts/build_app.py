@@ -18,7 +18,7 @@ local-model-bench (commits 8531917/dfe4620), generalized from
 
 Usage:
     python3 build_app.py --workspace /path/to/app --spec spec.md \
-        [--max-rounds 6] [--timeout-minutes 45] [--sonnet-fallback]
+        [--max-rounds 3] [--timeout-minutes 45] [--sonnet-fallback]
 
 The installed Pi thinking policy is inherited by default. Independent review
 is required for unattended success unless `--review-policy degraded` is
@@ -180,7 +180,9 @@ def review_signal(traces: list[dict]) -> ReviewSignal:
 		metadata = trace.get("metadata") or {}
 		if outcome in ("clean", "flagged"):
 			decisive = ReviewSignal(outcome, str(metadata.get("findings") or ""))
-		elif outcome == "blocked" and metadata.get("reason") == "unchanged-since-last-review" and decisive:
+		elif outcome == "blocked" and metadata.get("reason") in {
+			"unchanged-since-last-review", "transient-retry-exhausted",
+		} and decisive:
 			continue
 		else:
 			decisive = ReviewSignal("unavailable", str(metadata.get("reason") or outcome))
@@ -599,7 +601,7 @@ def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--workspace", required=True, type=Path)
 	parser.add_argument("--spec", required=True, type=Path)
-	parser.add_argument("--max-rounds", type=int, default=6)
+	parser.add_argument("--max-rounds", type=int, default=3)
 	parser.add_argument(
 		"--thinking",
 		choices=("off", "minimal", "low", "medium", "high", "xhigh"),

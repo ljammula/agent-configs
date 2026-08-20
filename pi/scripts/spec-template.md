@@ -58,7 +58,7 @@ unblock it -- rather than silently skipping it.
 python3 ~/code/agent-configs/pi/scripts/build_app.py \
   --workspace /path/to/your/repo \
   --spec /path/to/spec.md \
-  --max-rounds 6 \
+  --max-rounds 3 \
   --timeout-minutes 60
 ```
 

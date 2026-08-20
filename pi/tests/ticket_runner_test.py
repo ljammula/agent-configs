@@ -30,6 +30,10 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			root = Path(directory)
 			self.assertEqual(self.next_mode(root, root / "workspace"), "build")
 
+	def test_builder_command_uses_three_internal_rounds(self):
+		command = ticket_runner.builder_command(Path("workspace"), self.ticket)
+		self.assertEqual(command[command.index("--max-rounds") + 1], "3")
+
 	def test_interrupted_build_retries_instead_of_regating(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
@@ -90,7 +94,7 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			workspace = root / "workspace"
 			workspace.mkdir()
 			(workspace / "BUILD_REPORT.md").write_text(
-				"Outcome: DID NOT SUCCEED -- local round budget (6) exhausted; "
+				"Outcome: DID NOT SUCCEED -- local round budget (3) exhausted; "
 				"escalation required: pi invocation timed out, canonical verification failed\n"
 			)
 			reports = root / "reports" / "ticket-001"
@@ -104,6 +108,26 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			}))
 			self.assertTrue(ticket_runner.retryable_build_state(root, workspace, self.ticket))
 
+	def test_final_no_review_outcome_retries(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			workspace = root / "workspace"
+			workspace.mkdir()
+			(workspace / "BUILD_REPORT.md").write_text(
+				"Outcome: DID NOT SUCCEED -- local round budget (3) exhausted; "
+				"escalation required: review unavailable (no-review-verdict)\n"
+			)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate.json").write_text(json.dumps({
+				"passed": False,
+				"checks": [
+					{"name": "make verify", "ok": True},
+					{"name": "BUILD_REPORT.md SUCCEEDED", "ok": False},
+				],
+			}))
+			self.assertTrue(ticket_runner.retryable_build_state(root, workspace, self.ticket))
+
 	def test_build_attempt_numbers_survive_new_runner_processes(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
@@ -111,7 +135,24 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			reports.mkdir(parents=True)
 			self.assertEqual(ticket_runner.next_build_attempt(root, self.ticket), 2)
 			(reports / "build-attempt-02.started.json").write_text("{}")
+			(reports / "build-attempt-02.log").write_text("completed")
 			self.assertEqual(ticket_runner.next_build_attempt(root, self.ticket), 3)
+
+	def test_interrupted_build_slot_is_resumed_without_consuming_another_slot(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "build-attempt-03.started.json").write_text("{}")
+			self.assertEqual(ticket_runner.next_build_attempt(root, self.ticket), 3)
+
+	def test_interrupted_gate_slot_is_resumed_without_consuming_another_slot(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate-attempt-03.started.json").write_text("{}")
+			self.assertEqual(ticket_runner.next_gate_attempt(root, self.ticket), 3)
 
 	def test_three_build_attempts_exhaust_durable_budget(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -120,6 +161,7 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			reports.mkdir(parents=True)
 			for attempt in range(1, 4):
 				(reports / f"build-attempt-{attempt:02d}.started.json").write_text("{}")
+				(reports / f"build-attempt-{attempt:02d}.log").write_text("completed")
 			self.assertEqual(ticket_runner.next_build_attempt(root, self.ticket), 4)
 			self.assertGreater(ticket_runner.next_build_attempt(root, self.ticket), ticket_runner.MAX_BUILD_ATTEMPTS)
 
@@ -129,6 +171,7 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			reports = root / "reports" / "ticket-001"
 			reports.mkdir(parents=True)
 			(reports / "build-attempt-01.started.json").write_text("{}")
+			(reports / "build-attempt-01.log").write_text("completed")
 			for attempt in range(1, 5):
 				(reports / f"gate-attempt-{attempt:02d}.json").write_text("{}")
 			self.assertEqual(ticket_runner.next_build_attempt(root, self.ticket), 2)

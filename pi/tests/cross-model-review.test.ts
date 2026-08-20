@@ -73,6 +73,88 @@ test("review request classifies clean, flagged, malformed, and unreachable respo
 	assert.equal(truncated.finishReason, "length");
 });
 
+test("a transient reviewer transport failure gets one bounded retry", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	let callCount = 0;
+	const fetchImpl = (async () => {
+		callCount += 1;
+		if (callCount === 1) throw new Error("temporary connection failure");
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content: '{"verdict":"clean","findings":[]}' }, finish_reason: "stop" }] }),
+		} as Response;
+	}) as typeof fetch;
+
+	const result = await requestReview(config, "spec", "diff", undefined, fetchImpl);
+	assert.equal(callCount, 2);
+	assert.equal(result.outcome, "clean");
+});
+
+test("transient review failure is not retried again by settlement", async () => {
+	const previousBaseUrl = process.env.AI_REVIEW_BASE_URL;
+	const previousModel = process.env.AI_REVIEW_MODEL;
+	const previousFetch = globalThis.fetch;
+	process.env.AI_REVIEW_BASE_URL = "http://review/v1";
+	process.env.AI_REVIEW_MODEL = "reviewer";
+	let reviewRequests = 0;
+	globalThis.fetch = async () => {
+		reviewRequests += 1;
+		throw new Error("temporary connection failure");
+	};
+	try {
+		const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+		const harness = new ExtensionHarness({
+			branch,
+			exec: ({ command, args }: ExecCall) => {
+				if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "base\n", stderr: "", killed: false };
+				if (command === "git" && args[0] === "diff") return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n+changed\n", stderr: "", killed: false };
+				return { code: 1, stdout: "", stderr: "", killed: false };
+			},
+		});
+		reviewer(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "tool_result", toolCallId: "v1", toolName: "bash", input: { command: "make verify" }, content: [], details: {}, isError: false } as any);
+		await new Promise((resolve) => setImmediate(resolve));
+		await harness.emit({ type: "agent_end", messages: [] } as any);
+		await harness.emit({ type: "agent_end", messages: [] } as any);
+		assert.equal(reviewRequests, 2);
+	} finally {
+		if (previousBaseUrl === undefined) delete process.env.AI_REVIEW_BASE_URL;
+		else process.env.AI_REVIEW_BASE_URL = previousBaseUrl;
+		if (previousModel === undefined) delete process.env.AI_REVIEW_MODEL;
+		else process.env.AI_REVIEW_MODEL = previousModel;
+		globalThis.fetch = previousFetch;
+	}
+});
+
+test("caller cancellation is not retried as a transient reviewer failure", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	const controller = new AbortController();
+	controller.abort();
+	let callCount = 0;
+	const fetchImpl = (async () => {
+		callCount += 1;
+		throw new DOMException("cancelled", "AbortError");
+	}) as typeof fetch;
+
+	const result = await requestReview(config, "spec", "diff", controller.signal, fetchImpl);
+	assert.equal(callCount, 0);
+	assert.equal(result.reason, "cancelled");
+});
+
+test("a permanent reviewer rejection is not retried", async () => {
+	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
+	let callCount = 0;
+	const fetchImpl = (async () => {
+		callCount += 1;
+		return { ok: false, status: 400, json: async () => ({}) } as Response;
+	}) as typeof fetch;
+
+	const result = await requestReview(config, "spec", "diff", undefined, fetchImpl);
+	assert.equal(callCount, 1);
+	assert.equal(result.reason, "model-rejected");
+});
+
 test("a truncated first attempt retries once with a stricter brevity prompt and can recover", async () => {
 	const config = { enabled: true, kind: "independent-review" as const, baseUrl: "http://review/v1", model: "reviewer" };
 	let callCount = 0;
