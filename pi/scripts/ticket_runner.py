@@ -26,6 +26,12 @@ build_app.py again -- this is what makes the rescue flow below actually
 work. There is still no separate "resume" mode: `--status` and a normal
 run derive the same position, so crashing and rerunning is always safe.
 
+When a build attempt stops before trustworthy report evidence, a normal
+`make run` performs at most three total build attempts for that ticket,
+persisting per-attempt logs under `reports/ticket-NNN/`. Real verification,
+oracle-integrity, and frozen-surface failures remain stop-the-line failures;
+they are never retried as infrastructure noise.
+
 Rescue commits: if a ticket halts (this script exits non-zero) and a
 human fixes it -- typically by running build_app.py by hand against the
 ticket spec in a normal interactive session, or otherwise making the
@@ -51,10 +57,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,6 +79,14 @@ STAGED_EXTENSIONS = {
 TICKET_RE = re.compile(r"^(\d{3})-(.+)\.md$")
 COMMIT_RE_TEMPLATE = r"^ticket\({nnn}\):"
 BUILD_APP_TIMEOUT_S = 90 * 60
+MAX_BUILD_ATTEMPTS = 3
+BUILD_RETRY_BACKOFF_S = 30
+TRANSIENT_BUILD_MARKERS = (
+	"pi invocation timed out",
+	"pi invocation failed",
+	"stall-timeout",
+	"review unavailable (request-failed)",
+)
 # The Makefile and verify scripts are agent-writable but gate-trusted --
 # nothing byte-checks them the way oracle_drift() byte-checks acceptance
 # files, so a model could edit `make verify` to a no-op and pass checks 1-2
@@ -155,6 +172,103 @@ def read_gate(pilot_dir: Path, ticket: Ticket) -> dict | None:
 		return None
 
 
+def failed_check_names(gate: dict | None) -> set[str]:
+	if not gate:
+		return set()
+	return {
+		str(check.get("name"))
+		for check in gate.get("checks", [])
+		if not check.get("ok")
+	}
+
+
+def _attempt_numbers(report_dir: Path, prefixes: tuple[str, ...]) -> list[int]:
+	numbers = []
+	for prefix in prefixes:
+		for path in report_dir.glob(f"{prefix}-attempt-*"):
+			match = re.search(r"-attempt-(\d+)(?:\.|$)", path.name)
+			if match:
+				numbers.append(int(match.group(1)))
+	return numbers
+
+
+def next_build_attempt(pilot_dir: Path, ticket: Ticket) -> int:
+	"""Return the durable one-based number for the next build invocation."""
+	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
+	if not report_dir.exists():
+		return 1
+	numbers = _attempt_numbers(report_dir, ("build", "BUILD_REPORT"))
+	if numbers:
+		return max(numbers) + 1
+	# Older runners created the directory before invoking the builder and wrote
+	# only build.log after it returned. An empty directory is the interrupted
+	# form observed in the live pilot. Gate-only evidence does not consume the
+	# build budget.
+	if (report_dir / "build.log").exists() or not any(report_dir.iterdir()):
+		return 2
+	return 1
+
+
+def next_gate_attempt(pilot_dir: Path, ticket: Ticket) -> int:
+	"""Return the durable one-based number for the next archived gate."""
+	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
+	if not report_dir.exists():
+		return 1
+	numbers = _attempt_numbers(report_dir, ("gate",))
+	if numbers:
+		return max(numbers) + 1
+	return 2 if (report_dir / "gate.json").exists() else 1
+
+
+def write_once(path: Path, content: str | bytes) -> None:
+	"""Create immutable per-attempt evidence; never overwrite an old run."""
+	mode = "xb" if isinstance(content, bytes) else "x"
+	with path.open(mode) as handle:
+		handle.write(content)
+
+
+def retryable_build_state(pilot_dir: Path, workspace: Path, ticket: Ticket) -> bool:
+	"""Return true when a prior build attempt stopped before report evidence.
+
+	A missing report is recoverable infrastructure state. A gate with any real
+	verification, oracle, state-file, or review-equivalent failure is not: the
+	line must stop and require a human decision rather than silently repeating
+	implementation work.
+	"""
+	report = workspace / "BUILD_REPORT.md"
+	transient_report = False
+	if report.exists():
+		outcome_line = next(
+			(
+				line.strip().lower()
+				for line in report.read_text(errors="ignore").splitlines()
+				if line.startswith("Outcome:")
+			),
+			"",
+		)
+		transient_report = any(marker in outcome_line for marker in TRANSIENT_BUILD_MARKERS)
+		if not transient_report:
+			return False
+	gate = read_gate(pilot_dir, ticket)
+	if gate is None:
+		# run_ticket creates this directory before invoking build_app.py. Its
+		# existence distinguishes an interrupted prior build from a fresh pilot.
+		return (pilot_dir / "reports" / f"ticket-{ticket.nnn}").exists()
+	failed = failed_check_names(gate)
+	if "BUILD_REPORT.md SUCCEEDED" not in failed:
+		return False
+	if transient_report:
+		return not (failed & {"oracle integrity", "verify-surface frozen"})
+	# A builder timeout/nonzero exit is sufficient to retry even if the
+	# incomplete workspace also makes verification red. Oracle or frozen-surface
+	# drift is never treated as transient infrastructure.
+	if "build_app.py invocation" in failed:
+		return not (failed & {"oracle integrity", "verify-surface frozen"})
+	# This is the recovery shape produced when the outer runner was interrupted
+	# before it could archive the builder's invocation result.
+	return failed <= {"BUILD_REPORT.md SUCCEEDED"}
+
+
 def ticket_done(pilot_dir: Path, workspace: Path, ticket: Ticket) -> bool:
 	if commit_sha_for(workspace, ticket.number) is None:
 		return False
@@ -164,12 +278,14 @@ def ticket_done(pilot_dir: Path, workspace: Path, ticket: Ticket) -> bool:
 
 def next_ticket(tickets: list[Ticket], pilot_dir: Path, workspace: Path) -> tuple[Ticket | None, str | None]:
 	"""Returns (ticket, mode) where mode is "build" (no commit yet -- run
-	build_app.py) or "regate" (commit exists but no passing gate record --
-	re-run the gate only, e.g. after a rescue commit). (None, None) means
-	every ticket is done."""
+	build_app.py), "retry" (a previous build stopped before report evidence),
+	or "regate" (a commit exists but no passing gate record -- re-run the gate
+	only, e.g. after a rescue commit). (None, None) means every ticket is done."""
 	for t in tickets:
 		if ticket_done(pilot_dir, workspace, t):
 			continue
+		if retryable_build_state(pilot_dir, workspace, t):
+			return t, "retry"
 		mode = "regate" if commit_sha_for(workspace, t.number) is not None else "build"
 		return t, mode
 	return None, None
@@ -319,11 +435,56 @@ def invoke_build_app(build_cmd: list[str], timeout: float) -> tuple[int, str, st
 	"""Returns (returncode, stdout, stderr, timed_out). A timeout is
 	reported as a failed invocation, never an uncaught exception that
 	would crash the runner with no gate archived and no halt recorded."""
+	process = subprocess.Popen(
+		build_cmd,
+		text=True,
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		start_new_session=True,
+	)
+
+	def text_output(value: str | bytes | None) -> str:
+		if value is None:
+			return ""
+		if isinstance(value, bytes):
+			return value.decode(errors="replace")
+		return value
+
 	try:
-		result = subprocess.run(build_cmd, text=True, capture_output=True, timeout=timeout, check=False)
-		return result.returncode, result.stdout, result.stderr, False
+		stdout, stderr = process.communicate(timeout=timeout)
+		return process.returncode, text_output(stdout), text_output(stderr), False
 	except subprocess.TimeoutExpired as exc:
-		return -1, exc.stdout or "", exc.stderr or "", True
+		stdout = exc.stdout
+		stderr = exc.stderr
+		try:
+			os.killpg(process.pid, signal.SIGTERM)
+		except ProcessLookupError:
+			pass
+		try:
+			term_stdout, term_stderr = process.communicate(timeout=10)
+			stdout = term_stdout or stdout
+			stderr = term_stderr or stderr
+		except subprocess.TimeoutExpired as term_exc:
+			stdout = term_exc.stdout or stdout
+			stderr = term_exc.stderr or stderr
+		# The direct parent may exit promptly on SIGTERM while a nested agent or
+		# command ignores it. Always address the original process group with
+		# SIGKILL after the grace period before permitting a retry.
+		try:
+			os.killpg(process.pid, signal.SIGKILL)
+		except ProcessLookupError:
+			pass
+		if process.poll() is None:
+			try:
+				kill_stdout, kill_stderr = process.communicate(timeout=5)
+				stdout = kill_stdout or stdout
+				stderr = kill_stderr or stderr
+			except subprocess.TimeoutExpired:
+				process.kill()
+				kill_stdout, kill_stderr = process.communicate()
+				stdout = kill_stdout or stdout
+				stderr = kill_stderr or stderr
+		return -1, text_output(stdout), text_output(stderr), True
 
 
 def append_halt_record(workspace: Path, ticket: Ticket, reasons: list[str]) -> None:
@@ -341,12 +502,25 @@ def append_halt_record(workspace: Path, ticket: Ticket, reasons: list[str]) -> N
 	progress.write_text(existing + block)
 
 
-def archive_evidence(pilot_dir: Path, ticket: Ticket, gate_result: dict) -> None:
+def archive_evidence(
+	pilot_dir: Path,
+	ticket: Ticket,
+	gate_result: dict,
+	*,
+	gate_attempt: int,
+	build_attempt: int | None,
+) -> None:
 	dest = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	dest.mkdir(parents=True, exist_ok=True)
 	report = pilot_dir / "workspace" / "BUILD_REPORT.md"
 	if report.exists():
 		shutil.copyfile(report, dest / "BUILD_REPORT.md")
+		report_name = (
+			f"BUILD_REPORT-attempt-{build_attempt:02d}.md"
+			if build_attempt is not None
+			else f"BUILD_REPORT-regate-{gate_attempt:02d}.md"
+		)
+		write_once(dest / report_name, report.read_bytes())
 	(dest / "gate.json").write_text(json.dumps(gate_result, indent=2))
 	log_lines = [f"# Gate log -- ticket {ticket.nnn}", f"passed: {gate_result['passed']}", ""]
 	for check in gate_result["checks"]:
@@ -355,21 +529,40 @@ def archive_evidence(pilot_dir: Path, ticket: Ticket, gate_result: dict) -> None
 			log_lines.append("```")
 			log_lines.append(str(check["detail"])[:4000])
 			log_lines.append("```")
-	(dest / "gate.log").write_text("\n".join(log_lines))
+	log_text = "\n".join(log_lines)
+	(dest / "gate.log").write_text(log_text)
+	write_once(dest / f"gate-attempt-{gate_attempt:02d}.json", json.dumps(gate_result, indent=2))
+	write_once(dest / f"gate-attempt-{gate_attempt:02d}.log", log_text)
 
 
-def run_ticket(pilot_dir: Path, workspace: Path, ticket: Ticket, tickets: list[Ticket], *, skip_build: bool) -> bool:
-	print(f"\n=== ticket {ticket.nnn}: {ticket.slug} ({'regate only' if skip_build else 'build'}) ===")
+def run_ticket(
+	pilot_dir: Path,
+	workspace: Path,
+	ticket: Ticket,
+	tickets: list[Ticket],
+	*,
+	skip_build: bool,
+	gate_attempt: int,
+	build_attempt: int | None,
+) -> bool:
+	mode_label = "regate only" if skip_build else ("build retry" if build_attempt and build_attempt > 1 else "build")
+	print(f"\n=== ticket {ticket.nnn}: {ticket.slug} ({mode_label}, gate {gate_attempt}) ===")
 	stage(pilot_dir, workspace, ticket.number)
 	base_sha = prior_boundary_sha(workspace, tickets, ticket)
 
 	checks: list[dict] = []
 	report_dir = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	report_dir.mkdir(parents=True, exist_ok=True)
+	write_once(
+		report_dir / f"gate-attempt-{gate_attempt:02d}.started.json",
+		json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
+	)
 
 	if skip_build:
 		print("commit already exists but no passing gate record -- re-gating only, not invoking build_app.py (rescue flow)")
 	else:
+		if build_attempt is None:
+			raise ValueError("build_attempt is required when invoking build_app.py")
 		# A stale BUILD_REPORT.md from a previous ticket/run must never be
 		# able to satisfy THIS run's "reports SUCCEEDED" check -- e.g. if
 		# build_app.py crashes or is killed by our own timeout below before
@@ -386,6 +579,10 @@ def run_ticket(pilot_dir: Path, workspace: Path, ticket: Ticket, tickets: list[T
 			"--timeout-minutes", "60",
 		]
 		print(f"running: {' '.join(build_cmd)}")
+		write_once(
+			report_dir / f"build-attempt-{build_attempt:02d}.started.json",
+			json.dumps({"ticket": ticket.nnn, "started": datetime.now(timezone.utc).isoformat()}),
+		)
 		returncode, stdout, stderr, timed_out = invoke_build_app(build_cmd, BUILD_APP_TIMEOUT_S)
 		print(stdout[-2000:])
 		if timed_out:
@@ -393,10 +590,13 @@ def run_ticket(pilot_dir: Path, workspace: Path, ticket: Ticket, tickets: list[T
 			checks.append({"name": "build_app.py invocation", "ok": False, "detail": f"timed out after {BUILD_APP_TIMEOUT_S}s"})
 		elif returncode != 0:
 			print(f"build_app.py exited {returncode}", file=sys.stderr)
-		(report_dir / "build.log").write_text(
+			checks.append({"name": "build_app.py invocation", "ok": False, "detail": f"exited with code {returncode}"})
+		build_log = (
 			f"$ {' '.join(build_cmd)}\ntimed_out: {timed_out}\nreturncode: {returncode}\n\n"
 			f"--- stdout ---\n{stdout}\n\n--- stderr ---\n{stderr}\n"
 		)
+		(report_dir / "build.log").write_text(build_log)
+		write_once(report_dir / f"build-attempt-{build_attempt:02d}.log", build_log)
 
 	verify_ok, verify_out = run_make(workspace, "verify", timeout=25 * 60)
 	checks.append({"name": "make verify", "ok": verify_ok, "detail": verify_out})
@@ -426,18 +626,32 @@ def run_ticket(pilot_dir: Path, workspace: Path, ticket: Ticket, tickets: list[T
 		save_verify_baseline(pilot_dir, workspace)
 
 	gate_result = {"ticket": ticket.nnn, "passed": passed, "checks": checks}
-	archive_evidence(pilot_dir, ticket, gate_result)
+	archive_evidence(
+		pilot_dir,
+		ticket,
+		gate_result,
+		gate_attempt=gate_attempt,
+		build_attempt=build_attempt,
+	)
 
 	if not passed:
 		reasons = [c["name"] for c in checks if not c["ok"]]
+		recoverable = retryable_build_state(pilot_dir, workspace, ticket)
 		if drift:
 			print(f"oracle drift detected, restoring canonical copies: {drift}")
 			stage(pilot_dir, workspace, ticket.number)
 		if ticket.number != 1 and not frozen_ok:
 			print("verify-surface drift detected, restoring ticket 001's frozen baseline")
 			restore_verify_baseline(pilot_dir, workspace)
-		append_halt_record(workspace, ticket, reasons)
-		print(f"GATE FAILED for ticket {ticket.nnn}: {', '.join(reasons)}", file=sys.stderr)
+		if recoverable:
+			print(
+				f"recoverable build evidence failure for ticket {ticket.nnn}: "
+				f"{', '.join(reasons)}",
+				file=sys.stderr,
+			)
+		else:
+			append_halt_record(workspace, ticket, reasons)
+			print(f"GATE FAILED for ticket {ticket.nnn}: {', '.join(reasons)}", file=sys.stderr)
 	else:
 		print(f"GATE PASSED for ticket {ticket.nnn}")
 	return passed
@@ -492,8 +706,40 @@ def main() -> int:
 		if t is None:
 			print("\nall tickets complete.")
 			return 0
-		ok = run_ticket(pilot_dir, workspace, t, tickets, skip_build=(mode == "regate"))
+		build_attempt: int | None = None
+		if mode in ("build", "retry"):
+			build_attempt = next_build_attempt(pilot_dir, t)
+			if build_attempt > MAX_BUILD_ATTEMPTS:
+				gate = read_gate(pilot_dir, t)
+				reasons = sorted(failed_check_names(gate)) or ["build retry limit exhausted"]
+				append_halt_record(workspace, t, reasons)
+				print(
+					f"build attempt limit ({MAX_BUILD_ATTEMPTS}) exhausted for ticket {t.nnn}; "
+					"stopping with evidence",
+					file=sys.stderr,
+				)
+				return 1
+		if mode == "retry":
+			retry_count = build_attempt - 1
+			print(
+				f"previous build attempt ended without report evidence; "
+				f"retrying {retry_count}/{MAX_BUILD_ATTEMPTS - 1} after {BUILD_RETRY_BACKOFF_S}s",
+				file=sys.stderr,
+			)
+			time.sleep(BUILD_RETRY_BACKOFF_S)
+		gate_attempt = next_gate_attempt(pilot_dir, t)
+		ok = run_ticket(
+			pilot_dir,
+			workspace,
+			t,
+			tickets,
+			skip_build=(mode == "regate"),
+			gate_attempt=gate_attempt,
+			build_attempt=build_attempt,
+		)
 		if not ok:
+			if mode in ("build", "retry") and retryable_build_state(pilot_dir, workspace, t):
+				continue
 			return 1
 
 
