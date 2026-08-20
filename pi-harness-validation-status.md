@@ -236,10 +236,23 @@ evidence-cited version of each):
   never reached a true idle turn. **No `harness_timeout_minutes` change
   applied** — the evidence argues against one; genuine settlement here took
   under a minute, and a larger budget would only let an identical stall run
-  longer. New open item (not fixed): `progress-stall-guard.ts`'s `isError`
-  check is blind to shell-masked pipe output the same way quality-gate used
-  to be. Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 4:
+  longer. Full trail: `pi-harness-history.md`'s 2026-08-19 "Task 4:
   dart/sequential-runner clean-isolation rerun" entry.
+  **The `isError`-masking-blindness item this entry originally flagged as
+  open was resolved the same day**, later in this file's own history: item
+  4 of `progress-stall-guard.ts`'s file-header bug list (`explainVerificationMasking`,
+  reused from `quality-gate.ts`) makes exactly this "maskable exit-0"
+  shape fall through to be fingerprinted as a failure instead of resetting
+  the streak. Stale text left uncorrected until 2026-08-19's stall-guard
+  timer investigation caught the doc drift; see `progress-stall-guard.ts`'s
+  own header for the fix and `pi-harness-history.md`'s matching entry.
+  **`go-flutter/bookmarks-app`/`go-flutter/notes-app`'s stock budgets
+  raised 45 -> 75 min, same day** (`local-model-bench` commit `44877d2`) —
+  bookmarks-app had used 42.6 of its 45-minute budget at `--thinking off`
+  alone in the 2026-08-19 seed20260802 battery, leaving no real headroom
+  for a thinking-enabled rerun; see that battery's `pair4-medium-rerun`
+  entry in `pi-harness-history.md` for why. `dart/sequential-runner`
+  deliberately left unchanged, per the paragraph above.
 - **Background-process kills** (four unattended `/goal` runs killed
   mid-round historically, 2026-08-12): **root cause found 2026-08-19
   (Task 5)** — Pi's client-side HTTP idle timeout (`httpIdleTimeoutMs`,
