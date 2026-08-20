@@ -787,3 +787,40 @@ ranking, which didn't yet know about F1/F2):**
   and the timer tick) could land in the same window — low risk today
   (single-threaded, guard re-read after the await) but an unguarded seam
   for a future change to either path.
+
+## Per-task `--thinking` level table (2026-08-19/20)
+
+`run_screening.py` previously hardcoded `--thinking off` as the default for
+every scheduled pair — a silent holdover from before the 2026-08-17
+reasoning/temperature hardening, meaning every un-flagged eval run (via
+`run_screening.py`, `run_single_pair.py`, or `run_single_arm.py`, which all
+share `schedule()`) reproduced the stale pre-hardening config unless someone
+remembered to pass `--thinking medium` by hand, exactly as the two prior
+pair-4 reruns had to. Fixed by making the per-task default explicit in code
+instead of implicit in doc prose, via a `TASK_THINKING_LEVELS` table in
+`run_screening.py`:
+
+| Task | Level | Basis |
+|---|---|---|
+| `go/lru-cache` | `xhigh` | Direct causal evidence: 0/4 passed with reasoning off (same key/value-confusion eviction bug every time); 4/4 clean with reasoning on (trials 6-9, at `medium`), plus a further 2/2 in the seed-`20260802` battery follow-up, recorded specifically at `xhigh` (`pair7-xhigh-trial1/2`). Set to `xhigh` to match that literal evidence. |
+| `go-flutter/bookmarks-app` | `medium` | Direct causal evidence: the reasoning-off battery run shipped a real data race (`handleList`/`handleVisit`) past 2 reviewer `clean` verdicts and 8 quality-gate rounds; the reasoning-on rerun found and fixed it correctly, confirmed twice (`pair4-medium-rerun`, `pair4-medium-rerun2-postfix`). |
+| `dart/sequential-runner`, `go/notes-api`, `dart/task-manager`, `dart/notes-app`, `go-flutter/notes-app` | `medium` | No task-specific evidence either way — these passed clean with reasoning off in the original battery, but that battery predates the hardening and was never a controlled comparison. Set to `medium` to match the standing system-wide default (`pi/settings.json`'s `defaultThinkingLevel`, the config every non-eval invocation of this harness already runs under) rather than staying on the eval-script-only `off` default that only ever existed because `run_screening.py` predates the hardening decision. `dart/sequential-runner` in particular has a well-documented stall history, but every stall reproduced so far traces to a tool-loop/verification-masking issue independent of reasoning level (now handled by `progress-stall-guard.ts`'s wall-clock backstop) — no evidence reasoning makes it better or worse, so it gets the same default as everything else rather than a special case. |
+
+Every entry currently resolves to "reasoning on" — there is no task with
+evidence that reasoning should stay off, so this is not yet a genuine
+per-task *dial*, just the decision this repo was already implicitly making
+per rerun, made explicit and default instead of ad hoc. It's also not a
+genuine `medium` vs. `xhigh` dial either: Pi has no `thinkingLevelMap` entry
+for Qwen3.8 ([pi#6951](https://github.com/earendil-works/pi/issues/6951)),
+so every non-`off` value produces the identical `enable_thinking: true`
+request — the `xhigh`/`medium` distinction in the table above documents
+which literal value each finding's evidence was recorded under, not a
+behavioral difference.
+
+Precedence in `schedule()`, highest to lowest: `--thinking-override
+PAIR=LEVEL` (per-pair position in the randomized schedule) → `--thinking`
+(forces one value uniformly across the whole run, e.g. `--thinking off` to
+deliberately reproduce the legacy pre-hardening baseline for comparison) →
+`TASK_THINKING_LEVELS` (the new per-task default, used whenever neither flag
+is passed). `run_single_arm.py`/`run_single_pair.py` call `schedule()` with
+no thinking arguments, so they inherit the table automatically.
