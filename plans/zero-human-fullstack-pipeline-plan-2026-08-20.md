@@ -267,6 +267,24 @@ is the controlled input the pilot's claim depends on.
 
 - New pi extensions, pi-subagents, containment work, overhead optimization,
   re-benchmarking anything already settled (incl. RTK).
+- **Temporal as runner infrastructure** (considered 2026-08-20). The
+  durability Temporal would provide is already provided by the
+  `ticket(NNN):` git ledger: any crash is recovered by re-running
+  `make run`, which re-derives position from `git log` — zero
+  infrastructure, and the recovery mechanism doubles as the evidence
+  trail. Temporal also can't reach the failure class that actually hurt
+  unattended runs historically (pi's client-side HTTP idle timeout dies
+  *inside* what would be the activity; Temporal would retry the dead
+  round, not prevent it — the wall-clock backstop and per-ticket timeout
+  already bound that). **Revisit trigger:** this flips to worth doing if
+  the pipeline becomes a build farm — multiple apps building
+  concurrently, runs queued across machines, scheduled builds, or a
+  human-in-the-loop signal for post-verdict rescue. At that point wrap
+  `run_ticket` as an activity and the loop as a workflow, keeping the git
+  ledger underneath unchanged. Separately, Temporal-as-*app-domain* (a
+  second pilot spec including a Temporal worker, exercising the existing
+  `temporal-go` stack skill) is a good post-pilot hardening test of the
+  pipeline itself.
 - Multi-app generalization before one pilot succeeds.
 
 ## Decisions log (all resolved 2026-08-20)
