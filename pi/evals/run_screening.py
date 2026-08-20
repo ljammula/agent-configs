@@ -47,6 +47,55 @@ TASKS = [
 ]
 ARMS = ("baseline", "harness")
 
+# Per-task default --thinking level, applied when neither --thinking nor
+# --thinking-override is given explicitly. There is no task with evidence
+# that reasoning should stay off, so this is not yet a real per-task dial,
+# just the table this repo's own thinking-per-task decisions actually rest
+# on, made explicit instead of staying implicit in scattered doc prose:
+#   - go/lru-cache: direct causal evidence. 0/4 passed with reasoning off
+#     (same key/value-confusion eviction bug every time); 4/4 clean with
+#     reasoning on (trials 6-9, at "medium"), plus a further 2/2 in the
+#     seed-20260802 battery follow-up, run and recorded specifically at
+#     "xhigh" (pair7-xhigh-trial1/2) -- set to "xhigh" here to match that
+#     literal evidence rather than blur it with bookmarks-app's separately
+#     recorded "medium" trial; behaviorally identical either way (see the
+#     thinkingLevelMap note below). See pi-harness-validation-status.md's
+#     "Post-migration claude-sonnet-5 comparison" and "That hypothesis is no
+#     longer untested" entries.
+#   - go-flutter/bookmarks-app: direct causal evidence. The reasoning-off
+#     battery run shipped a real data race (handleList/handleVisit) past 2
+#     reviewer "clean" verdicts and 8 quality-gate rounds; the reasoning-on
+#     rerun found and fixed it correctly, confirmed twice (pair4-medium-rerun,
+#     pair4-medium-rerun2-postfix). See the seed-20260802 battery README's
+#     "Follow-up: pair 4 rerun at medium thinking" section.
+#   - dart/sequential-runner, go/notes-api, dart/task-manager,
+#     dart/notes-app, go-flutter/notes-app: no task-specific evidence either
+#     way -- these passed clean with reasoning off in the original battery,
+#     but that battery predates the 2026-08-17 hardening and was never a
+#     controlled comparison. Set to "medium" to match the standing
+#     system-wide default (pi/settings.json's defaultThinkingLevel, the live
+#     config every non-eval invocation of this harness already runs under),
+#     not left on the stale eval-script-only "off" default that only ever
+#     existed because run_screening.py predates that hardening decision.
+#     dart/sequential-runner in particular has a well-documented stall
+#     history, but every stall reproduced so far was a tool-loop/verification
+#     -masking issue independent of reasoning level (now handled by
+#     progress-stall-guard.ts's wall-clock backstop, not by thinking level) --
+#     there is no evidence reasoning makes it better or worse, so it follows
+#     the same default as everything else rather than a special-cased "off".
+# Because Pi has no thinkingLevelMap entry for Qwen3.8 (pi#6951), "medium"/
+# "high"/"xhigh" are not distinct requests -- all non-"off" values produce
+# the identical enable_thinking: true, so the only real dial is on vs. off.
+TASK_THINKING_LEVELS: dict[str, str] = {
+    "go/lru-cache": "xhigh",
+    "dart/sequential-runner": "medium",
+    "go/notes-api": "medium",
+    "dart/task-manager": "medium",
+    "dart/notes-app": "medium",
+    "go-flutter/notes-app": "medium",
+    "go-flutter/bookmarks-app": "medium",
+}
+
 
 @dataclass(frozen=True)
 class ScheduledPair:
@@ -78,13 +127,21 @@ def run(
 def schedule(
     seed: int,
     skip_tasks: frozenset[str] = frozenset(),
-    default_thinking: str = "off",
+    default_thinking: str | None = None,
     thinking_overrides: dict[int, str] | None = None,
 ) -> list[ScheduledPair]:
     # thinking_overrides keys are 1-based pair numbers, assigned *after*
     # shuffling below -- they target a position in the randomized schedule
     # (e.g. "rerun pair 7 with reasoning on"), not a task name, since the
-    # same task can appear at a different pair number every seed.
+    # same task can appear at a different pair number every seed. This is
+    # the highest-precedence source: an explicit per-pair rerun request
+    # always wins.
+    #
+    # default_thinking is a *forced uniform override* for the whole run
+    # (e.g. --thinking off, to deliberately reproduce the legacy
+    # pre-hardening baseline for comparison) -- None (the default) means
+    # "no override," so each pair falls through to TASK_THINKING_LEVELS'
+    # per-task default instead of one flat value for every task.
     overrides = thinking_overrides or {}
     rng = random.Random(seed)
     tasks = TASKS.copy()
@@ -97,7 +154,12 @@ def schedule(
         if task in skip_tasks:
             continue
         index += 1
-        thinking_level = overrides.get(index, default_thinking)
+        if index in overrides:
+            thinking_level = overrides[index]
+        elif default_thinking is not None:
+            thinking_level = default_thinking
+        else:
+            thinking_level = TASK_THINKING_LEVELS.get(task, "medium")
         result.append(ScheduledPair(index, task, (arms[0], arms[1]), thinking_level))
     return result
 
@@ -188,11 +250,19 @@ def path_digest(path: Path) -> str | None:
 # own manifest). An allowlist, not "every PI_* var in the environment", so
 # unrelated PI_* noise (an operator's own shell config, say) doesn't get
 # captured as if it were part of the experiment; extend this list when a new
-# override earns the same "this changes what ran" status.
+# override earns the same "this changes what ran" status. Sourced by
+# grepping every `process.env.PI_*` read across pi/extensions/*.ts, not
+# guessed -- PI_HARNESS_TIMEOUT_MINUTES (wall-clock-budget-nudge.ts) and
+# PI_ALLOW_EXTERNAL_EFFECTS (external-effects.ts) added 2026-08-20 per a
+# Codex PR #21 review that caught this list only covering the three vars
+# from the Recommendation 1/2 trials, not every installed extension's own
+# behavior-changing override.
 ENV_OVERRIDE_ALLOWLIST = (
     "PI_STALL_GUARD_BACKSTOP_MINUTES",
     "PI_STALL_GUARD_INTERCEPT",
     "PI_EVAL_THINKING_LEVEL",
+    "PI_HARNESS_TIMEOUT_MINUTES",
+    "PI_ALLOW_EXTERNAL_EFFECTS",
 )
 
 
@@ -209,11 +279,33 @@ def extensions_dir_diff() -> str | None:
     # Scoped to extensions/ specifically, not the whole repo -- a dirty
     # working tree elsewhere (docs, this very script) doesn't change what the
     # harness run itself executed.
-    result = run(["git", "diff", "--", "extensions"], cwd=PI_ROOT)
-    if result.returncode != 0:
+    #
+    # Diffs against HEAD (not a bare `git diff`) so staged-but-uncommitted
+    # changes are captured too, and separately lists untracked files under
+    # extensions/ with their full content -- a bare `git diff` covers
+    # neither case, so a newly added, not-yet-`git add`-ed extension file
+    # used to silently produce a null diff here while agent_configs_revision
+    # still pointed at code that didn't match what ran (Codex PR #21 review,
+    # 2026-08-20).
+    tracked = run(["git", "diff", "HEAD", "--", "extensions"], cwd=PI_ROOT)
+    if tracked.returncode != 0:
         return None
-    diff = result.stdout
-    return diff if diff.strip() else None
+    parts = [tracked.stdout] if tracked.stdout.strip() else []
+    untracked = run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "extensions"],
+        cwd=PI_ROOT,
+    )
+    if untracked.returncode == 0:
+        for rel_path in untracked.stdout.splitlines():
+            if not rel_path:
+                continue
+            try:
+                content = (PI_ROOT / rel_path).read_text()
+            except OSError as error:
+                content = f"<unreadable: {error}>"
+            parts.append(f"--- untracked: {rel_path} ---\n{content}")
+    combined = "\n".join(parts)
+    return combined if combined.strip() else None
 
 
 def installed_runtime_identity() -> dict[str, Any]:
@@ -459,10 +551,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--thinking",
-        default=os.environ.get("PI_EVAL_THINKING_LEVEL", "off"),
-        help="default --thinking level applied to every scheduled pair unless "
-        "overridden with --thinking-override; defaults to $PI_EVAL_THINKING_LEVEL "
-        'or "off", matching every prior battery run\'s behavior unchanged.',
+        default=os.environ.get("PI_EVAL_THINKING_LEVEL"),
+        help="force this --thinking level uniformly on every scheduled pair, "
+        "ignoring TASK_THINKING_LEVELS; overridden per-pair by "
+        "--thinking-override. Defaults to $PI_EVAL_THINKING_LEVEL, or unset "
+        "(each pair uses its task's entry in TASK_THINKING_LEVELS instead of "
+        "one flat value). Pass e.g. --thinking off to deliberately reproduce "
+        "the legacy pre-2026-08-17 baseline for comparison.",
     )
     parser.add_argument(
         "--thinking-override",

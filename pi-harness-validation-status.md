@@ -850,3 +850,71 @@ Deliberately not addressed here, per explicit user direction: Recommendation
 further work on Recommendations 2/4 beyond the reframing already recorded
 above — both stay queued after Recommendation 2's next live trial, unchanged
 from the P0-P3 ranking above.
+
+*(The "Two new process gaps found, not yet acted on" bullets that used to
+follow here — G1's missing `PI_*`/`git diff` capture, G2/G3's informational
+notes — are superseded by the F3-F8/G1/G3 section directly above: G1 landed
+the allowlist + `git diff` capture described there, G3 added the
+hard-abort-interaction test, and G2 stays informational, now mitigated by
+G1's env snapshot. See `extensions_dir_diff()`'s follow-up refinement below
+for the two gaps Codex's PR #21 review found in that G1 landing itself.)*
+
+## PR #21 Codex review follow-up (2026-08-20)
+
+Two P2 findings on the just-landed G1 manifest capture, both addressed:
+
+- **Untracked/staged extension changes weren't captured**: `extensions_dir_diff()`
+  used `git diff -- extensions`, which only compares the index against the
+  working tree and misses both staged changes and untracked files entirely —
+  a newly added, not-yet-`git add`-ed extension file would produce
+  `extensions_dir_dirty_diff: null` while `agent_configs_revision` still
+  pointed at code that doesn't match what ran. Fixed: diff against `HEAD`
+  (covers staged + unstaged) and separately list untracked files under
+  `extensions/` (`git ls-files --others --exclude-standard`) with their full
+  content appended, rather than silently dropping them.
+- **Allowlist missed other behavior-changing overrides**: `ENV_OVERRIDE_ALLOWLIST`
+  only had the three vars from the Recommendation 1/2 trials
+  (`PI_STALL_GUARD_BACKSTOP_MINUTES`, `PI_STALL_GUARD_INTERCEPT`,
+  `PI_EVAL_THINKING_LEVEL`), missing `wall-clock-budget-nudge.ts`'s
+  `PI_HARNESS_TIMEOUT_MINUTES` and `external-effects.ts`'s
+  `PI_ALLOW_EXTERNAL_EFFECTS` — both real, already-shipped env reads that
+  change installed-extension behavior, confirmed by grepping every
+  `process.env.PI_*` read across `pi/extensions/*.ts` rather than guessing.
+  Both added to the allowlist.
+
+## Per-task `--thinking` level table (2026-08-19/20)
+
+`run_screening.py` previously hardcoded `--thinking off` as the default for
+every scheduled pair — a silent holdover from before the 2026-08-17
+reasoning/temperature hardening, meaning every un-flagged eval run (via
+`run_screening.py`, `run_single_pair.py`, or `run_single_arm.py`, which all
+share `schedule()`) reproduced the stale pre-hardening config unless someone
+remembered to pass `--thinking medium` by hand, exactly as the two prior
+pair-4 reruns had to. Fixed by making the per-task default explicit in code
+instead of implicit in doc prose, via a `TASK_THINKING_LEVELS` table in
+`run_screening.py`:
+
+| Task | Level | Basis |
+|---|---|---|
+| `go/lru-cache` | `xhigh` | Direct causal evidence: 0/4 passed with reasoning off (same key/value-confusion eviction bug every time); 4/4 clean with reasoning on (trials 6-9, at `medium`), plus a further 2/2 in the seed-`20260802` battery follow-up, recorded specifically at `xhigh` (`pair7-xhigh-trial1/2`). Set to `xhigh` to match that literal evidence. |
+| `go-flutter/bookmarks-app` | `medium` | Direct causal evidence: the reasoning-off battery run shipped a real data race (`handleList`/`handleVisit`) past 2 reviewer `clean` verdicts and 8 quality-gate rounds; the reasoning-on rerun found and fixed it correctly, confirmed twice (`pair4-medium-rerun`, `pair4-medium-rerun2-postfix`). |
+| `dart/sequential-runner`, `go/notes-api`, `dart/task-manager`, `dart/notes-app`, `go-flutter/notes-app` | `medium` | No task-specific evidence either way — these passed clean with reasoning off in the original battery, but that battery predates the hardening and was never a controlled comparison. Set to `medium` to match the standing system-wide default (`pi/settings.json`'s `defaultThinkingLevel`, the config every non-eval invocation of this harness already runs under) rather than staying on the eval-script-only `off` default that only ever existed because `run_screening.py` predates the hardening decision. `dart/sequential-runner` in particular has a well-documented stall history, but every stall reproduced so far traces to a tool-loop/verification-masking issue independent of reasoning level (now handled by `progress-stall-guard.ts`'s wall-clock backstop) — no evidence reasoning makes it better or worse, so it gets the same default as everything else rather than a special case. |
+
+Every entry currently resolves to "reasoning on" — there is no task with
+evidence that reasoning should stay off, so this is not yet a genuine
+per-task *dial*, just the decision this repo was already implicitly making
+per rerun, made explicit and default instead of ad hoc. It's also not a
+genuine `medium` vs. `xhigh` dial either: Pi has no `thinkingLevelMap` entry
+for Qwen3.8 ([pi#6951](https://github.com/earendil-works/pi/issues/6951)),
+so every non-`off` value produces the identical `enable_thinking: true`
+request — the `xhigh`/`medium` distinction in the table above documents
+which literal value each finding's evidence was recorded under, not a
+behavioral difference.
+
+Precedence in `schedule()`, highest to lowest: `--thinking-override
+PAIR=LEVEL` (per-pair position in the randomized schedule) → `--thinking`
+(forces one value uniformly across the whole run, e.g. `--thinking off` to
+deliberately reproduce the legacy pre-hardening baseline for comparison) →
+`TASK_THINKING_LEVELS` (the new per-task default, used whenever neither flag
+is passed). `run_single_arm.py`/`run_single_pair.py` call `schedule()` with
+no thinking arguments, so they inherit the table automatically.
