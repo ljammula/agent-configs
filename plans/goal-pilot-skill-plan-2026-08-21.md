@@ -1,382 +1,338 @@
-# `goal-pilot` skill — plan
+# `goal-pilot` — plan
 
-**Date:** 2026-08-21. **Status: plan only — nothing below is built yet.**
-**Extends:** `zero-human-fullstack-pipeline-plan-2026-08-20.md` (all context,
-evidence, and terminology below assumes that document; this file doesn't
-re-derive it).
+**Date:** 2026-08-21 (rewritten same day after an architecture correction —
+see "Architecture history" below). **Status: plan only — nothing below is
+built yet.**
+**Extends:** `zero-human-fullstack-pipeline-plan-2026-08-20.md` (all
+context, evidence, and terminology below assumes that document; this file
+doesn't re-derive it).
 
 ## What's being asked for
 
-A Claude Code skill, `goal-pilot`, that takes a user's spec input (a rough
-idea — prose, bullets, a doc, doesn't need to be precise) and drives the
-*entire* pipeline end to end: draft spec → freeze → contract + acceptance
-tests → tickets → `ticket_runner.py` build loop → verdict. One invocation
-covers what the pilot did by hand across a day of human orchestration.
+A `pi.dev`-native orchestrator, `goal_pilot.py`, that takes a user's spec
+input (a rough idea — prose, bullets, a doc, doesn't need to be precise)
+and drives the *entire* pipeline end to end: draft spec → freeze →
+contract + acceptance tests → tickets → `ticket_runner.py` build loop →
+verdict. One invocation covers what the pilot did by hand across a day of
+human orchestration, and what Phase 5's `/spec-plan`/`/contract-plan` cover
+only as individually-triggered steps.
 
-**Invocation shape (user decision, 2026-08-21): the two policy forks below
-are explicit per-invocation parameters, each with a stated default.**
-Every run states both up front — there is no silent default behavior to
-be unaware of, but an unopinionated user isn't forced to specify either:
+This is not a rerun of the pilot: the pilot's job was to *measure* the
+local model with a human doing every judgment step by hand. `goal_pilot.py`'s
+job is to make the pipeline *usable* — the human still owns spec approval
+(and, per `/contract-plan`'s own existing design, the acceptance-suite
+review), but everything mechanical in between is one invocation.
+
+## Architecture history (read this before the rest — it changed once)
+
+The first draft of this plan had a Claude Code session (this agent)
+author the spec/contract/tickets/acceptance-tests directly, treating
+`/spec-plan`/`/contract-plan` as unused. **That was wrong and has been
+reversed following direct user correction (2026-08-21).** `goal-pilot` is
+`pi.dev` harness work: it belongs beside `ticket_runner.py` in
+`pi/scripts/`, and it uses the **local model**, via `pi` itself, for the
+judgment steps — exactly the Phase 5 mechanism
+(`/spec-plan`/`/contract-plan`) the parent plan already built and this
+plan should drive, not duplicate or bypass. The corrected design below is
+also strictly better on its own terms, independent of who asked for the
+correction: the original draft would have had to re-derive every
+gate-matched convention `/spec-plan`/`/contract-plan` already encode
+(exact `## Commit` sections, Go-slice staging rules, the scaffold safety
+check, the `STATUS: FROZEN` marker) as parallel prose, which is a second
+copy that drifts. Driving the existing prompts headlessly instead means
+there is exactly one place those conventions live.
+
+## Where `goal_pilot.py` sits relative to existing pieces
+
+| Piece | What it is | Who runs it |
+|---|---|---|
+| `/spec-plan`, `/contract-plan` | pi prompt templates — **local model** drafts spec/tickets, then contract/tests | invoked inside a `pi` session, interactively or headlessly |
+| `ticket_runner.py` | outer loop, one `build_app.py` run per ticket | invoked from a shell (`make run`) |
+| `build_app.py` | inner loop, local model implements one ticket | invoked by `ticket_runner.py`, shells to `pi --print ...` |
+| **`goal_pilot.py`** (new) | outermost loop — drives `/spec-plan`, a human checkpoint, `/contract-plan`, another checkpoint, then `ticket_runner.py`, then halt/rescue handling | invoked from a shell, same as `ticket_runner.py` |
+
+`goal_pilot.py` is a **deterministic Python script**, not a pi skill and
+not a Claude Code skill. That distinction already exists in this repo and
+matters here: prompt templates (`/spec-plan`, `/contract-plan`) are
+model-interpreted instructions, selected by the human typing a slash
+command in a `pi` session; scripts (`ticket_runner.py`, `build_app.py`)
+are plain Python control flow that shells out to `pi` for the parts that
+need a model. `goal_pilot.py` is the latter, one level further out —
+verified feasible directly against `build_app.py:pi_invocation()`, which
+already shows the exact non-interactive form: `pi --print --mode json
+--provider ai-stack-local --model <model> --session-dir <dir> "<prompt
+text>"`. `goal_pilot.py` invokes `pi` the same way with `"/spec-plan
+<input> <pilot-dir>"` and `"/contract-plan <pilot-dir>"` as the prompt
+text.
+
+**Consequence: no skill-installation question.** The earlier draft spent
+real effort on where to register a Claude/pi skill and got the
+`install.sh` list wrong in the process (caught by Opus review, see
+history below). None of that applies to a script. `goal_pilot.py` lives at
+`pi/scripts/goal_pilot.py`, is not symlinked by `install.sh` (`ticket_runner.py`
+isn't either — both are referenced by absolute path, e.g. from a pilot
+dir's `Makefile`, exactly like `ticket_runner.py` already is), and is
+invoked directly: `python3 ~/code/agent-configs/pi/scripts/goal_pilot.py
+--spec-input <path> --pilot-dir <dir> ...`.
+
+Implementation stays exactly where the pilot proved it: **local, via
+`ticket_runner.py` → `build_app.py`, zero cloud tokens**, unconditionally
+(see step 7 — this holds even under the resolved rescue policy).
+`goal_pilot.py` never modifies `build_app.py`/`ticket_runner.py` gate
+logic and never adds a cloud-escalation path.
+
+## Invocation (user decision, 2026-08-21: both policy forks are explicit
+per-invocation parameters, each with a stated default)
 
 ```
-/goal-pilot <spec-input> [pilot-dir]
+python3 pi/scripts/goal_pilot.py --spec-input <path> --pilot-dir <dir>
     --checkpoint=review|skip     (default: skip)
     --on-halt=report|auto-rescue (default: auto-rescue)
 ```
 
-`goal-pilot` always echoes the effective value of both — whether the user
-passed them or took the default — in its first response before doing
-anything else, so the user always sees what mode this run is in. Passing
-`--checkpoint=review` is how a user opts *into* the step-5 contract/ticket
-review for a first-time or high-stakes spec; `--on-halt=report` is how a
-user opts *into* the stricter no-silent-rescue behavior when they want to
-review the fix themselves rather than let `goal-pilot` apply it.
+`goal_pilot.py` always echoes the effective value of both — whether the
+user passed them or took the default — before doing anything else, so a
+resumed run and a fresh run both make the active mode explicit rather than
+assumed. The spec-freeze checkpoint (step 3) and the post-ticket-001
+checkpoint (step 5b) are outside both flags and are never skippable — see
+those steps for why.
 
-The step-3 spec-freeze checkpoint is not part of either flag and has no
-"skip" mode — see step 3.
-
-This is a new thing, not a rerun of the pilot: the pilot's job was to
-*measure* the local model with a human doing every judgment step by hand.
-`goal-pilot`'s job is to make the pipeline *usable* — the human still owns
-spec approval, but everything mechanical between "here's my idea" and "here's
-your app, or here's exactly where it stopped" is one skill invocation.
-
-## Where `goal-pilot` sits relative to existing pieces
-
-| Piece | What it is | Who runs it |
-|---|---|---|
-| `/spec-plan`, `/contract-plan` | pi prompt templates — **local model** drafts spec/tickets/contract/tests, cloud reviews after | invoked inside a `pi` session |
-| `ticket_runner.py` | outer loop, one `build_app.py` run per ticket | invoked from a shell (`make run`) |
-| `build_app.py` | inner loop, local model implements one ticket | invoked by `ticket_runner.py` |
-| **`goal-pilot`** | orchestrates all of the above from a Claude Code session, using **Claude itself** for the judgment steps | invoked as `/goal-pilot` in Claude Code |
-
-**Key design choice: `goal-pilot` does not shell out to `/spec-plan` /
-`/contract-plan`.** Those exist for the specific case of moving drafting
-*off* cloud and onto the local model (Phase 5), with mandatory human/cloud
-review afterward precisely because a local draft is unproven. `goal-pilot`
-runs inside a cloud session already — having it invoke `pi` to produce a
-local draft, then have itself (cloud) review that draft, is strictly worse
-than just authoring the spec/contract/tickets/acceptance tests directly:
-same cloud tokens spent, but with an extra indirection and no independence
-gained. So `goal-pilot` reuses the **Phase 0/1 shape** (cloud authors
-directly) that the pilot actually validated, not the Phase 5 shape. This
-also preserves the oracle-independence property the whole design leans on
-(`spec-plan.md`'s reasoning, contract-plan's item (1)): the acceptance
-suite is authored by an actor that never touches implementation.
-
-Implementation stays exactly where the pilot proved it: **local, via
-`ticket_runner.py` → `build_app.py`, zero cloud tokens.** `goal-pilot` never
-calls `pi` itself, never modifies `build_app.py`/`ticket_runner.py`
-behavior, never adds a `--sonnet-fallback`-style escalation inside the
-implementation loop.
-
-## What `goal-pilot` actually does, phase by phase
+## What `goal_pilot.py` actually does, phase by phase
 
 ### 1. Intake
 
-User provides: a spec description (inline text, or a path to notes) and a
-target pilot dir (default: prompt for one, e.g.
-`~/code/pilots/<slug>/`). `goal-pilot` does **not** assume a tech stack
-beyond what's proven: Go backend + Flutter web frontend, same
-`Makefile verify`/`verify-full` contract as `budget-pilot`. If the user
-wants a different stack, that's a separate, unproven experiment and out of
-scope for this skill's first version (matches the parent plan's "multi-app
-generalization before one pilot succeeds" exclusion).
+User provides: a spec description (inline text or a path to notes) and a
+target pilot dir. Tech stack stays what's proven — Go backend + Flutter
+web frontend, same `Makefile verify`/`verify-full` contract as
+`budget-pilot`; a different stack is a separate, unproven experiment and
+out of scope for v1 (matches the parent plan's "multi-app generalization
+before one pilot succeeds" exclusion).
 
-### 2. Draft spec (cloud, direct authoring)
+### 2. Draft spec + tickets (local model, via `/spec-plan`)
 
-Claude writes `spec/spec.md` itself, applying the parent plan's grill-pass
-principle live and interactively: every ambiguity becomes either a spec
-sentence or an explicit non-goal, resolved by asking the user rather than
-guessing (this is a real advantage over `/spec-plan`'s written-guesses
-approach — the user is available synchronously here). Output includes an
-explicit non-goals section.
+`goal_pilot.py` runs `pi` headlessly with `"/spec-plan <spec-input>
+<pilot-dir>"`. This is the existing, already-built mechanism: scaffolds
+the pilot dir if needed (`/spec-plan`'s own three-way safety check —
+already-scaffolded / empty-or-missing / non-empty-no-Makefile — stays the
+authority on this, `goal_pilot.py` doesn't reimplement it), drafts
+`spec/spec.md` under `STATUS: DRAFT` with every resolved ambiguity
+surfaced in its own "Assumptions & Interpretations" section, and drafts
+`spec/tickets/NNN-*.md`.
 
-### 3. Human checkpoint — spec freeze (hard stop, mandatory)
+### 3. Human checkpoint — spec freeze (hard stop, never skippable)
 
-This is the pipeline's plan-mode-approval analog and it does not get
-automated away. Present the drafted spec; require explicit user approval
-before writing anything else. No default "looks good, proceeding" — an
-unanswered prompt halts here, it does not time out into approval.
+This is the pipeline's plan-mode-approval analog. `goal_pilot.py` prints
+`spec/spec.md` (with Assumptions & Interpretations highlighted) to the
+terminal and blocks on explicit approval — not a timeout, not a default
+"looks fine." On approval, it rewrites the file's `STATUS: DRAFT` line to
+`STATUS: FROZEN -- reviewed <UTC-timestamp>` (the same marker
+`/contract-plan` already checks for and refuses to run without — this is
+also what makes step 9's resume able to detect "already past this step"
+from disk rather than re-asking). On rejection, `goal_pilot.py` exits with
+instructions: edit `spec/spec.md` by hand (or re-run `/spec-plan` in an
+interactive `pi` session against the same input for another draft), then
+re-invoke `goal_pilot.py` against the same `--pilot-dir` to continue.
 
-### 4. Compile the spec (cloud, direct authoring)
+### 4. Compile the spec (local model, via `/contract-plan`)
 
-Once frozen, mark `spec/spec.md`'s first line `STATUS: FROZEN -- reviewed
-<date>` (same machine-readable marker `/contract-plan` already checks for
-and refuses to run without — this also gives step 9's resume something
-real to test on disk instead of inferring freeze from file existence).
-Then:
-- `spec/contract.md` — endpoints, exact JSON field names/casing, status
-  codes, error shapes.
-- Failing-first acceptance suite, staged per ticket
-  (`spec/acceptance/NNN/`), same conventions as Phase 1: black-box Go
-  `httptest` (raw-bytes JSON assertions, restart-persistence test), Flutter
-  widget tests (rendered-text assertions for interpolated strings), plus
-  the staging-compatibility rules `/contract-plan` §2 already encodes
-  (`go.mod`/shared helpers live in the **first** Go slice only, one
-  `MANIFEST.md` per slice, slice-number-prefixed basenames so two
-  `handler_test.go`s across slices don't collide when staged flat).
-- `spec/tickets/NNN-*.md`, tracer-bullet ordered, 8–15 tickets, each
-  inside the proven ≤1-feature envelope, following the same mandatory
-  ticket-file shape `/spec-plan` §2 encodes: the exact `## Commit`
-  section and `ticket(NNN): <slug>` subject `commit_and_state_files_ok()`
-  gates on, the instruction to update `ARCHITECTURE.md` +
-  `PROGRESS.md` before finishing, and no references to acceptance-test
-  filenames (they don't exist yet when tickets are decomposed).
-- **Ticket 001 must scaffold the workspace verify surface itself** — the
-  `Makefile` (`verify`/`verify-full` targets) and `scripts/verify.sh` /
-  `scripts/verify-full.sh`, embedded verbatim in the ticket file the same
-  way the real pilot's `001-workspace-scaffold.md` does. These three files
-  are what `ticket_runner.py`'s `VERIFY_SURFACE_FILES` freezes after
-  ticket 001 passes and every later gate depends on — without an authored
-  ticket 001 that creates them, there is nothing for `make run` to gate
-  against and the pilot cannot start.
-- Pilot-dir scaffold (`Makefile`, `.gitignore`, `git init` + a
-  `chore: scaffold pilot dir` commit in the **pilot dir's own** repo —
-  never in `workspace/`, which gets its own separate repo only once
-  ticket 001 runs) — reuse the exact heredocs already merged into
-  `/spec-plan`'s step 0. **Not by copy-pasting that prose into the skill**
-  (a second copy drifts) — extract the scaffold heredocs and the
-  ticket/slice conventions above into one shared reference file both
-  `/spec-plan`/`/contract-plan` and `goal-pilot` cite (e.g.
-  `pi/pilot-conventions.md`), so there is exactly one source for
-  model-agnostic rules like these.
+Once frozen, `goal_pilot.py` runs `pi` headlessly with
+`"/contract-plan <pilot-dir>"`. Existing, already-verified mechanism:
+`spec/contract.md`, the failing-first acceptance suite staged per ticket
+(`spec/acceptance/NNN/`, with the Go-slice staging conventions —
+`go.mod`/shared helpers in the first slice only, `MANIFEST.md` per
+slice — already encoded in the prompt, not re-derived here), and the
+mechanical self-check (`go vet`/`go build` against a scratch module for
+Go; best-effort `dart analyze` against a scratch Flutter project for
+Dart, with an explicit flagged skip if that's not practical yet).
 
-**Self-check before freezing the acceptance suite** (closing the gap
-tickets 010/012 found the hard way — both were genuine bugs in a
-canonical oracle that shipped unvalidated): assemble Go acceptance slices
-into a scratch module, `go vet`/`go build`; best-effort `dart analyze`
-against a scratch Flutter project (`/contract-plan`'s existing, verified
-mechanism). **Plus a step `/contract-plan` itself doesn't do, which the
-parent plan's own verdict explicitly asked for and ticket 012 paid for
-skipping:** dry-run the `verify-full` server-restart lifecycle once
-against a stub server before freezing `scripts/verify-full.sh` — ticket
-012's bug (a backgrounded server inheriting `go test`'s stdout pipe,
-hanging the test's process wait well after its own assertions passed) is
-invisible to static analysis and needs the lifecycle actually exercised
-once.
+**Known residual gap, inherited from `/contract-plan` as-is, not fixed by
+`goal_pilot.py`:** the self-check doesn't dry-run the `verify-full`
+server-restart lifecycle, so a bug shaped like ticket 012's (a
+backgrounded server inheriting `go test`'s stdout pipe, hanging the
+process wait well after the test's own assertions pass) is still
+invisible to it. This is exactly the gap the parent plan's own verdict
+flagged as one of two cheap pre-run fixes and it remains open. Fixing it
+belongs in `/contract-plan` itself (one shared place, per the
+architecture-history reasoning above), as a small follow-up PR — not
+duplicated as script logic inside `goal_pilot.py`. Noted here so it isn't
+silently lost; not blocking this plan.
 
-### 5. Human checkpoint — contract/tickets review (lighter weight)
+### 5. Human/cloud checkpoint — acceptance-suite review
 
-Summarize contract + ticket list + self-check results; ask for confirmation
-before starting the build loop. Not a line-by-line spec-style review — a
-"does this decomposition look right" gate. Controlled by `--checkpoint`
-(default `skip`, see "Invocation shape" above): `--checkpoint=skip` moves
-straight to step 6 once the self-check passes; `--checkpoint=review`
-pauses here for explicit confirmation. The spec-freeze checkpoint in step 3
-is separate from this parameter and is never skippable — it's the one
-irreversible judgment call in the pipeline.
+`/contract-plan` already ends every run with a banner that must never
+claim or imply cloud review happened — that design doesn't change.
+`goal_pilot.py` preserves it exactly:
+- **`--checkpoint=review`**: pauses here, prints the self-check's real
+  output verbatim (the `go vet`/`go build` transcript; the `dart analyze`
+  transcript or its flagged skip) plus the contract and ticket list, and
+  tells the user directly: bring this to a separate cloud session
+  yourself for review-and-correct, the same human-triggered step
+  `/contract-plan`'s own header describes as the highest-stakes part of
+  the whole pipeline. Blocks on confirmation that this happened (or an
+  explicit "proceed anyway, self-check only" override, logged as such).
+- **`--checkpoint=skip`**: proceeds straight to step 5b on local
+  self-check evidence alone. `goal_pilot.py` still writes the same
+  disclaimer into `EXECUTION_LOG.md` (step 6) so the run's evidence trail
+  records that the highest-stakes artifact in the pipeline was never
+  independently reviewed, rather than leaving that discoverable only by
+  reading `/contract-plan`'s banner text after the fact.
+
+### 5b. Checkpoint — after ticket 001 gates green (always on, not covered
+by `--checkpoint`)
+
+Once ticket 001 passes its gate — the workspace verify surface
+(`Makefile`, `scripts/verify.sh`, `scripts/verify-full.sh`, embedded
+verbatim by `/spec-plan`'s ticket-001 template the same way the real
+pilot's `001-workspace-scaffold.md` does) is now frozen via
+`ticket_runner.py`'s `VERIFY_SURFACE_FILES`, and the app has booted for
+the first time — `goal_pilot.py` stops unconditionally and shows the
+user `make verify-full`'s real output. This is the one checkpoint that
+lands *after* code exists rather than only before, specifically because
+tickets 010 and 012 were bugs in exactly this frozen surface that no
+pre-run review could have caught (they only failed once the model
+actually exercised them). Cheap — one pause, roughly 20–60 minutes into a
+run that otherwise takes most of a day — and it's the last moment a human
+can catch a bad verify surface before ten more tickets build on top of
+it; after this point it's immutable except through `--amend-canon` (step
+7, class 2).
 
 ### 6. Run the build loop
 
-`make run` in the pilot dir, launched via the harness's `run_in_background`
-Bash flag specifically (not `nohup ... &; disown`) — the parent plan's own
-ticket-003/011 observations found the latter fragile under a wrapping
-shell/multiplexer and the former durable, and its output is redirected
-deterministically (`logs/run-<UTC-timestamp>.log`, indexed in an
-`EXECUTION_LOG.md` `goal-pilot` maintains alongside `PROGRESS.md`) rather
-than left in harness scratch — real pilot dirs accumulated seven ad-hoc,
-inconsistently-named log files this way, one of them silently empty, and
-`goal-pilot`'s own actions (not just `ticket_runner.py`'s) are exactly the
-part of that trail this plan cannot afford to leave informal (see step 7
-point 3 and 4c-style provenance concerns). One long-running process; use
-`Monitor` (not the nonexistent `ScheduleWakeup` tool) filtered on the
-runner's stdout, with the filter covering failure text (`GATE FAILED`,
-`build attempt limit`, `model route unreachable`) and not just success
-text — silence must not be mistaken for success.
+`goal_pilot.py` invokes `ticket_runner.py --pilot-dir <dir>
+--review-policy advisory` as a subprocess, redirecting its output to a
+deterministic log (`logs/run-<UTC-timestamp>.log`) and indexing it in an
+`EXECUTION_LOG.md` `goal_pilot.py` maintains alongside `PROGRESS.md`. This
+is a plain CLI script the user runs (foreground, `nohup`, `tmux`,
+whatever they'd already use to run a long process) — no host-harness
+concepts (background-task notifications, tool-specific monitoring) apply
+here, since nothing about this step depends on being invoked from inside
+a Claude Code session.
 
-`goal-pilot` should also treat a `.ticket_runner.lock` contention exit
-(`refusing to race it`) as "a run is already in progress," surfaced as
-such, not folded into the halt-handling below as if it were a build
-failure.
+**Explicit, stated choice, not inherited silently:** `--review-policy
+advisory` is the default because the actual pilot ran with an
+effectively dead review layer for most of its tickets and the user has
+separately decided not to pursue restoring the reviewer route. Stated in
+the initial echo (alongside `--checkpoint`/`--on-halt`) and in the step 8
+verdict.
 
-**Explicit, stated choice, not inherited silently:** `make run` always
-invokes `ticket_runner.py` with the default `--review-policy advisory`
-(the scaffolded Makefile has no flag to change this). Given the actual
-pilot ran with an effectively dead review layer for most of its tickets
-and the user has separately decided not to pursue restoring the reviewer
-route, `advisory` is likely the right default here too — but `goal-pilot`
-states this in its first-response echo (alongside `--checkpoint`/
-`--on-halt`) and in the step 8 verdict, rather than leaving it implicit.
+`goal_pilot.py` treats a `.ticket_runner.lock` contention exit
+(`refusing to race it`) as "a run is already in progress," reported as
+such, not folded into halt-handling below.
 
 ### 7. On a halt
 
-`ticket_runner.py` already stops the line and records the verdict — nothing
-new needed there. `goal-pilot`'s job is what happens *next*. **Resolved
-(user decision, 2026-08-21): `goal-pilot` supports auto-rescue, controlled
-by `--on-halt` (default `auto-rescue`).** Unlike the parent plan's pilot,
-`goal-pilot`'s purpose is to get a working app, not to measure the local
-model, so the Phase 3 human-triggered-rescue constraint doesn't carry over
-unchanged.
-
-**`auto-rescue` is not one behavior for every halt — the halt's class
-changes what "auto" is allowed to mean, because `goal-pilot` occupies a
-position the original pilot's human rescuer didn't: it is also the
-oracle's author.** Opus's review flagged this specifically and it holds:
-letting the same actor that wrote the acceptance suite also silently
-approve edits to that suite removes the last independent check in a run
-that, per the point above, already has advisory-only review. So `--on-halt`
-governs three distinct halt classes differently, not uniformly:
+`ticket_runner.py` already stops the line and records the verdict —
+nothing changes there. `goal_pilot.py`'s job is what happens *next*,
+governed by `--on-halt` (default `auto-rescue`), and **the halt's class
+changes what "auto" is allowed to mean** — a flat auto-rescue-or-not
+switch is unsafe here for the same reason it was in the earlier draft:
+`goal_pilot.py` is also the artifact's author (via `/spec-plan`/
+`/contract-plan`), so an actor that can silently amend its own frozen
+oracle removes the last independent check in a run that already defaults
+to advisory-only review.
 
 1. **Infrastructure halts** (stale/unreachable model route,
    `AI_STACK_HOST` staleness, a crashed process with recoverable
-   attempt-retry state — tickets 003/005/011's class in the parent plan):
-   **auto-handled under `auto-rescue`, no per-halt approval needed.**
-   These touch no app code and no oracle — e.g. retry the `kannas-mac-studio`
-   MagicDNS fallback on a `model route unreachable` blocker (already in
-   Claude's cross-session memory), then relaunch. Under `--on-halt=report`,
-   these still just get reported like any other halt, since the user
-   explicitly opted out of any unattended action.
-2. **Frozen-artifact-canon drift** (the model correctly fixed a genuine bug
-   in a frozen verify-surface file or a canonical acceptance test —
-   tickets 010/012's class): **never auto-applied, regardless of
-   `--on-halt`.** Always surfaced for per-instance approval, and when
-   approved, applied through `ticket_runner.py --amend-canon <file>
-   --reason "..."` (the sanctioned path built for exactly this) rather than
-   hand-editing the baseline/canon files directly.
-3. **Genuine implementation gaps** (the model made no forward progress —
-   ticket 004's class): under `--on-halt=auto-rescue`, `goal-pilot` may
-   write the fix itself; under `--on-halt=report`, it stops and reports.
-   Either way this is the class most likely to actually touch
-   implementation code, so it's the class step 8's
-   zero-cloud-implementation-tokens accounting most needs to get right.
+   attempt-retry state — tickets 003/005/011's class): under
+   `auto-rescue`, handled without asking — e.g. retry the
+   `kannas-mac-studio` MagicDNS fallback on a `model route unreachable`
+   blocker, then relaunch. Under `--on-halt=report`, reported like any
+   other halt.
+2. **Frozen-artifact-canon drift** (a correct fix to a genuine bug in a
+   frozen verify-surface file or canonical acceptance test — tickets
+   010/012's class): **never auto-applied, regardless of `--on-halt`.**
+   Always surfaced for explicit per-instance approval, applied through
+   `ticket_runner.py --amend-canon <file> --reason "..."` when approved —
+   never a direct hand-edit of the baseline/canon files.
+3. **Genuine implementation gap** (the model made no forward progress —
+   ticket 004's class): **resolved (user, 2026-08-21): under
+   `auto-rescue`, widen and retry locally, unconditionally zero cloud
+   tokens** — re-invoke `build_app.py` for that ticket with a larger
+   round/timeout budget, a fresh session, **and `--thinking xhigh`**
+   (`build_app.py` already exposes this via its `--thinking` flag,
+   independent of the installed default). This may still fail the same
+   way ticket 004 did — the local model made literally zero forward
+   progress across 3 rounds at the installed default, not a
+   budget-exhaustion case — so it is a bounded, single extra attempt
+   (widen-once), not a loop: if the widened retry still doesn't gate
+   green, `goal_pilot.py` stops and reports, it does not keep widening.
+   Under `--on-halt=report`, reported immediately without a retry.
 
-For classes 2 and 3, once a rescue is approved/performed:
-- Reads the full diagnosis first (ticket id, rounds spent, failing checks,
-  reviewer findings, `BUILD_REPORT.md` excerpt) — same evidence a human
-  rescuer would read.
-- Writes the fix, re-invokes `build_app.py` with the correct
-  `--review-base-sha` (per the parent plan's documented rescue procedure),
-  confirms `make verify`/`verify-full` green, commits
-  `ticket(NNN): ... [rescued]`, then resumes `make run`.
-- **Every rescue — all three classes — is logged unconditionally**, into
-  the same `EXECUTION_LOG.md`/`logs/` trail step 6 sets up, not left to be
-  inferred from commit messages: what halted, which class, what changed,
-  whether it was auto-applied or user-approved. The final verdict (step 8)
-  always states the rescued count, by class, and which tickets — never
-  presenting a rescued app as if the local model built it unassisted.
-  This is the direct fix for the exact gap the parent plan's
-  tickets-013–016 section documents (rescued/cloud-touched work that left
-  no trail and was later misread as hand-written); it matters more here
-  than it did there, because under `auto-rescue` this is routine rather
-  than rare.
-- A rescue attempt has its own bounded retry (1 attempt per halted ticket)
-  — if the rescue itself fails or the re-gate still doesn't pass,
-  `goal-pilot` stops and reports rather than looping on one ticket.
+For any rescue actually applied (classes 1–3):
+- **Logged unconditionally**, into the same `EXECUTION_LOG.md`/`logs/`
+  trail step 6 sets up: what halted, which class, what changed (including
+  the widened `--thinking`/round/timeout values for class 3), whether it
+  was auto-applied or user-approved. The final verdict (step 8) always
+  states the rescued count, by class, and which tickets — never
+  presenting a rescued app as if the local model built it unassisted at
+  default settings. This is the direct fix for the exact gap the parent
+  plan's tickets-013–016 section documents (rescued/cloud-touched — or
+  here, rescued/widened-local — work that left no trail and was later
+  misread as something else); it matters more here than it did there,
+  because under `auto-rescue` this is routine rather than rare.
 
 ### 8. Completion — verdict report
 
 When all tickets are committed and gated green: read `PROGRESS.md` +
-`reports/ticket-*/`, produce a verdict summary in the same shape as the
-parent plan's own "Pilot verdict" section (tickets unassisted vs. rescued,
-wall-clock, halts and their cause, zero-cloud-implementation-tokens claim
-verified from the evidence trail — not asserted). Offer to publish it.
+`reports/ticket-*/` + `goal_pilot.py`'s own `EXECUTION_LOG.md`, and write
+a verdict summary (`VERDICT.md` in the pilot dir) in the same shape as
+the parent plan's own "Pilot verdict" section — tickets unassisted vs.
+rescued (by class, per step 7), wall-clock, halts and their cause,
+`--review-policy`/`--checkpoint`/`--on-halt` actually used, and the
+zero-cloud-implementation-tokens claim verified from the evidence trail,
+not asserted (true unconditionally per this design — even class-3
+rescues stay local, just at widened settings).
 
 ### 9. Resume
 
-Re-invoking `goal-pilot` against an existing pilot dir with a frozen spec
-skips straight to step 6/7 — `ticket_runner.py` already derives position
-from `git log`, `goal-pilot` doesn't need its own resume state.
+Re-invoking `goal_pilot.py` against an existing pilot dir picks up from
+disk state, the same idempotent pattern `/spec-plan` already uses for its
+own scaffold step: `spec/spec.md`'s `STATUS:` line says whether to resume
+at step 2/3 or skip to step 4; `spec/contract.md`'s presence plus step 5's
+recorded confirmation says whether to skip to step 5b/6; `git log` in the
+workspace (already how `ticket_runner.py` derives its own position) says
+where the build loop is. No separate resume mode or extra state file
+needed beyond what each step already writes.
 
-## Design forks — resolved
+## Open items — not yet resolved, flagged rather than assumed
 
-1. **Step 5's checkpoint: mandatory every run, or skippable for full
-   unattended operation?** **Resolved (user, 2026-08-21): skippable** via
-   an explicit flag; on by default. See step 5.
-2. **Halt handling: strict report-only, or should `goal-pilot` support an
-   auto-rescue mode?** **Resolved (user, 2026-08-21): yes, auto-rescue.**
-   See step 7 — every rescue is still logged unconditionally and disclosed
-   in the final verdict, so the app's provenance stays honest even though
-   the human-approval gate on each individual rescue is gone.
-3. **Where does `goal-pilot` live?** `claude/skills/goal-pilot/SKILL.md`.
-   **Correction (Opus review):** the plan originally said "installed like
-   `PROJECT_SKILLS`" to mean globally reusable — backwards. Checked against
-   `install.sh`: `PROJECT_SKILLS` are deliberately *un-linked* from the
-   global dirs (project-scoped by design); `PORTABLE_SKILLS` is the list
-   that gets a global symlink. `goal-pilot`'s intent (reusable across any
-   pilot dir, like `/spec-plan`) maps to `PORTABLE_SKILLS` — but
-   `install.sh` explicitly warns against calling something "portable" when
-   no `codex/skills`/`pi/skills` counterpart exists (`link_skills` would
-   silently no-op on those two roots). Since `goal-pilot` genuinely has no
-   Codex or pi counterpart by design (it needs multi-file authoring,
-   background-process monitoring, and long-session judgment calls none of
-   those tools' models support), it needs its own small list or a bare
-   `link` line in `install.sh`, not a slot in either existing list.
-4. **Scope of "runs the full pipeline"**: does a first version need to
-   handle a from-scratch app only (matching the one proven pilot shape), or
-   also "add a feature to an existing pipeline-built app" (spec →
-   follow-up tickets, the shape tickets 013–016 actually were)? The parent
-   plan's tickets 013–016 section is evidence this second shape already
-   happened once, informally. Recommendation: v1 targets from-scratch only;
-   the follow-up-ticket shape is a natural v2 once the evidence-trail gap
-   that section flags (013–016 left no `reports/` trail) is fixed in
-   `ticket_runner.py` itself — no point building on top of a known gap.
+- The `/contract-plan` verify-full-dry-run gap (step 4) is real and
+  should get its own small follow-up PR against `/contract-plan` itself;
+  not scoped into `goal_pilot.py`.
+- Exact heuristics for classifying a halt into one of step 7's three
+  classes from `ticket_runner.py`'s existing halt records (`PROGRESS.md`'s
+  HALT block, `BUILD_REPORT.md`'s blocker text) need to be nailed down at
+  implementation time — the classes themselves are settled, the string-
+  matching isn't specified here.
+- Whether `/spec-plan`'s existing three-way scaffold check and
+  `STATUS: DRAFT`/`FROZEN` handling already behave correctly when
+  re-invoked against a dir with an unapproved draft already on disk (step
+  3's rejection path assumes re-running `/spec-plan` or hand-editing is
+  safe) — worth confirming against the actual prompt text before
+  implementation rather than assuming.
 
 ## What this explicitly does not change
 
-- No changes to `build_app.py`, `ticket_runner.py`'s gate logic, or the
-  Phase 3 no-cloud-escalation-during-implementation rule.
-- No new pi extensions or prompt templates.
-- Doesn't retry or replace `/spec-plan`/`/contract-plan` — those stay as
-  they are, for the local-decomposition experiment they were built for.
+- No changes to `build_app.py`'s or `ticket_runner.py`'s gate logic, or
+  the parent plan's Phase 3 no-cloud-escalation-during-implementation
+  rule — it holds unconditionally here too (step 7 class 3 stays local).
+- No new pi extensions.
+- Doesn't replace `/spec-plan`/`/contract-plan` — `goal_pilot.py` drives
+  them, it doesn't reimplement what they do.
 
-## Opus review — verdict and what's incorporated
+## Prior review (superseded by the architecture correction above)
 
-Opus reviewed the pre-parameterization version of this plan and verified
-its factual claims directly against `pi/prompts/spec-plan.md`,
-`pi/prompts/contract-plan.md`, `pi/scripts/ticket_runner.py`,
-`install.sh`, and the real `budget-pilot` dir (not just read the plan's
-prose). Its verdict: **needs-revision-then-ready** — sound architecture
-and layering, but as originally written it "produces a pilot dir that
-cannot run, because step 4 does not create the files every gate depends
-on." Its single highest-priority fix (authoring the verify surface in
-ticket 001 + a `verify-full` lifecycle dry-run) and every other
-must-change item are now folded into steps 4/6/7 and the design-forks
-section above:
-
-- **Architectural call (cloud authors directly) — confirmed right**, but
-  the original framing understated the cost: `/spec-plan`/`/contract-plan`
-  aren't just "local model drafts it," they're the only written record of
-  several gate-matched conventions (verbatim `## Commit` sections,
-  Go-slice staging rules, the scaffold safety check, the `STATUS:
-  FROZEN` marker). Fix, now in step 4: extract those into one shared
-  reference file the pi prompts and `goal-pilot` both cite, instead of
-  `goal-pilot` re-deriving or silently missing them.
-- **Halt policy — the single `--on-halt` flag stays** (matches the user's
-  explicit parameterization decision), but "auto-rescue" is now
-  halt-class-aware rather than monolithic — see step 7. Opus's specific
-  concern (an oracle its own author can silently amend mid-run is a
-  negotiable oracle, and with `--review-policy advisory` as the stated
-  default, the frozen-artifact-canon gate is the last independent check in
-  a `goal-pilot` run) is addressed by carving out class 2
-  (frozen-artifact-canon drift) as never-auto regardless of `--on-halt`,
-  not by reopening the flag itself.
-- **Evidence trail — real gap, now addressed**: step 6/7 add a
-  deterministic `logs/`+`EXECUTION_LOG.md` trail `goal-pilot` owns, so its
-  own interventions (not just `ticket_runner.py`'s) don't repeat the
-  013–016 reporting gap the parent plan documents.
-- **Verify-surface authorship + `verify-full` dry-run** — the biggest
-  functional hole, now in step 4.
-- **Tool-name error** (`ScheduleWakeup` doesn't exist) — fixed to `Monitor`
-  in step 6.
-- **Install-location error** (`PROJECT_SKILLS` vs. `PORTABLE_SKILLS` had
-  it backwards) — fixed in fork #3.
-- **Checkpoint calibration** (spec review is heavy, oracle review is
-  light, inverted from where the pilot's real risk sat; checkpoint 5 was
-  also self-report of Claude's own summary) — **not yet folded in**, flagged
-  below as still open.
-
-**Still open — not yet incorporated, needs another look before
-implementation:**
-- Opus's suggested third checkpoint (freeze-and-eyeball once ticket 001
-  gates green, before ten more tickets build on an unreviewed verify
-  surface) — real value, not yet reconciled with the user's
-  `--checkpoint=skip` default.
-- Checkpoint 5, when `--checkpoint=review` is used, should present the
-  self-check's actual `go vet`/`dart analyze` transcript (or a flagged
-  skip), not a Claude-written summary of it — same evidence-not-self-report
-  principle the parent plan applies everywhere else.
-- Minor items Opus flagged as nice-to-have: pilot-dir `git init` +
-  scaffold commit conventions spelled out explicitly in step 4 (partially
-  done above), `.ticket_runner.lock` contention surfaced distinctly from a
-  build halt (done, step 6).
+An Opus review of the earlier "Claude authors directly" draft is on
+record and was substantive — it correctly caught that draft's missing
+verify-surface authorship, its duplicated-conventions risk, its
+overly-blanket auto-rescue framing, and a couple of factual errors
+(a nonexistent tool reference, an inverted `install.sh` list). All of
+those specific findings are reflected in this rewrite (the duplication
+risk is now moot by construction, per "Architecture history" above; the
+rest carried forward as: verify-surface authorship in step 5b, halt-class-
+aware rescue in step 7, the evidence trail in step 6). **This rewritten,
+pi-native version has not itself been re-reviewed** — worth another Opus
+pass before implementation, specifically on step 7's halt-classification
+heuristics and whether the checkpoint-skip disclosure in step 5 is a
+strong enough safeguard for a step `/contract-plan`'s own design calls
+the highest-stakes in the pipeline.
