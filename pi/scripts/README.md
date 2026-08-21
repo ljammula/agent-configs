@@ -29,6 +29,76 @@ settlement-time backstop round (added 2026-08-09) even if the model never
 runs a broad verification command itself inside the session, so review
 coverage doesn't silently depend on the model happening to run one.
 
+## Why `workspace/` is its own git repo
+
+`ticket_runner.py`'s pilot dir holds two git repos, deliberately:
+
+```
+pilot/                     <- control repo
+  .gitignore               <- ignores workspace/ and .ticket_runner.lock
+  Makefile                 <- human entry point: make run / status / reports
+  spec/
+    contract.md
+    tickets/               <- 001-*.md ... NNN-*.md
+    acceptance/NNN/        <- CANONICAL acceptance tests (the oracle)
+  reports/ticket-NNN/      <- gate.json, build.log, archived BUILD_REPORT.md
+  workspace/               <- app repo, created by ensure_git_repo()
+    Makefile               <- the app's own verify / verify-full
+    spec/contract.md       <- staged copy
+    acceptance/            <- staged copies of slices <= current ticket
+                              (Go; Dart stages into app/test/)
+    ARCHITECTURE.md, PROGRESS.md, app source
+```
+
+The split is an adversarial boundary, not organization. Four things
+depend on it:
+
+1. **Oracle integrity needs two copies.** `stage()` copies canonical
+   acceptance tests from `spec/acceptance/NNN/` into the workspace
+   (`acceptance/` for Go, `app/test/` for Dart, per `STAGED_EXTENSIONS`);
+   `oracle_drift()` then compares them to catch the agent
+   editing its own tests to make them pass. With one copy there is
+   nothing to compare against and the check evaporates. Same shape for
+   `check_verify_surface_frozen()` / `save_verify_baseline()`.
+2. **The agent's cwd is `workspace/`**, so the ground truth is out of
+   reach. `stage()` only materializes slices `<= upto`, so on ticket 001
+   the agent cannot read ticket 007's acceptance test, the other tickets,
+   or its own gate records.
+3. **Two histories.** The runner derives its position purely from the
+   workspace log — `commit_sha_for()`, `committed_ticket_numbers()`, and
+   `prior_boundary_sha()` all expect a history of exactly
+   `ticket(NNN): <slug>` commits, with no control-repo commits or gate
+   records interleaved into the range the gate diffs.
+4. **The deliverable ships clean.** `workspace/` *is* the app; its history
+   is already what you would want to hand off.
+
+### Why not one repo at pilot level
+
+Viable, but it converts structural guarantees into discipline. Every diff
+consumer (`cross-model-review.ts`, `quality-gate.ts`, `artifact-guard.ts`)
+runs with `cwd=workspace` and would resolve to the pilot root, sweeping
+`reports/` into the diff — so each would need a `-- workspace/` pathspec
+forever, and a missed one fails silently. The model's `git add -A` (the
+reason `.pi-build-session/` and `BUILD_REPORT.md` are gitignored before
+the first turn) would reach `spec/acceptance/` canon, demoting "the agent
+cannot touch the oracle" from a fact to a gitignore that has to stay
+correct. And the app's history becomes entangled with the pilot's, so it
+can no longer be handed off without a `filter-repo` pass.
+
+### The nesting is a known tax
+
+The *split* is load-bearing; the *nesting* is not. Because `workspace/`
+starts as a plain subdirectory of the control repo, any git command run
+with `cwd=workspace` silently answers from the ancestor until
+`ensure_git_repo()` creates the real repo. That single fact produced the
+nested-repo bug in `ensure_git_repo()` and the foreign-base-sha bug in
+`prior_boundary_sha()`, and the guard against it now has to live in two
+files that must agree (`ensure_git_repo()` here, `has_own_git_repo()` in
+`ticket_runner.py`). A sibling layout (`pilot/` and `app/` as peers, each
+its own repo) would keep every guarantee above and remove that class of
+bug outright. Not worth migrating existing pilots for; worth doing if the
+pilot layout is ever cut fresh.
+
 ## Usage
 
 ```bash
