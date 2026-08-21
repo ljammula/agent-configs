@@ -374,6 +374,16 @@ and acceptance-test generation remain cloud-side per that plan's
 existing reasoning: a wrong ticket is cheap to eval against a known-good
 graph, a wrong test oracle silently corrupts every downstream verdict.
 
+`/scaffold-pilot <pilot-dir-path>` — creates a fresh `ticket_runner.py`
+pilot dir's skeleton (control-dir `spec/`, `.gitignore`, `Makefile`, an
+empty `workspace/`) matching the plan's `## Deliverables` layout exactly.
+Zero judgment calls by design: every file's content is a heredoc copied
+verbatim in the template rather than described for the model to
+reconstruct, specifically to avoid the failure mode a local model would
+otherwise hit reproducing `Makefile`'s literal-tab recipe lines from a
+prose description. Run before `/spec-plan`, which writes into the
+`spec/` this creates.
+
 `/goal` is not one of these: it's a real command registered by
 `goal-gate.ts` (see above), because a `/goal <condition>` needs persistent
 state across turns and a gate on stopping, neither of which a `.md` prompt

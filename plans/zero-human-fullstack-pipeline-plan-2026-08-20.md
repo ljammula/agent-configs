@@ -770,6 +770,20 @@ is the controlled input the pilot's claim depends on.
   sizing/ordering, there's no automated way to grade "was this
   interpretation right," so it stays human-reviewed every time rather
   than graduating to trusted-unattended the way `/tickets` alone might.
+- **`/scaffold-pilot <pilot-dir-path>` (2026-08-21).** A fresh pilot dir
+  was, until this, hand-assembled every time (this is literally how
+  `~/code/test-bed/budget-pilot/` came to exist). Deliberately zero
+  judgment: every file the template writes (`.gitignore`, `Makefile`) is
+  a heredoc copied verbatim rather than described for the model to
+  reconstruct from prose — specifically because `Makefile`'s recipe
+  lines need a literal tab character, which a "write a Makefile like
+  this" instruction risks losing or replacing with spaces in exactly the
+  way that silently breaks `make run`/`make status`. Verified end to end
+  in a throwaway directory (not just read for plausibility): the
+  extracted heredoc produces a byte-identical `Makefile` to the real
+  pilot's, and `make status` against the resulting empty scaffold
+  correctly reaches `ticket_runner.py` and fails only on "no tickets
+  found" — the expected state before `/spec-plan` runs.
 
 ## Explicitly out of scope
 
