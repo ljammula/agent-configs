@@ -620,6 +620,30 @@ corrected accounting below.
   resource on a given task, Sonnet-solo is currently the more efficient
   choice; this harness is the better choice when cloud-token spend is the
   binding constraint and some supervision is acceptable.
+- **Two of Fable's needle-mover findings implemented (2026-08-20).** Both
+  were general `ticket_runner.py` quality-of-life fixes, not pilot work,
+  so they don't conflict with "no second pilot":
+  1. `ticket_runner.py --amend-canon <workspace-file> --reason "..."` —
+     turns the archaeology ticket 010/012's rescues needed (grep the build
+     session's `.jsonl` transcript for the model's `edit` tool call,
+     hand-recover the diff, hand-update the frozen baseline's hash and
+     byte copy or the acceptance-oracle canon) into one confirmed command,
+     for both verify-surface files and staged acceptance slices. Does not
+     weaken the gate — it's the explicit, logged, human-invoked path for
+     accepting a genuine fix to a frozen artifact.
+  2. `--status`'s rescue count is no longer honor-system. It now also
+     derives a structural signal (`gate_revisit_count()`: how many real
+     gate-attempt records a ticket produced) and reports both — re-run
+     against the actual budget-pilot dir, corrected `--status` now reads
+     `rescued: 5 -- 1 tagged, 4 untagged gate-revisits` (003, 004, 005,
+     010 untagged; 012 tagged), which lines up exactly with this
+     document's hand-verified verdict above (4 content rescues + 1 infra
+     rescue) — a genuine cross-check that the new signal is sound, not
+     just plausible.
+  Both landed with unit tests (9 new, 63/63 passing) and were sanity-
+  checked against the real pilot dir: `--amend-canon` correctly no-ops on
+  both already-fixed files (verify-full.sh, the ticket-010 oracle) and
+  correctly applies+logs a real change in a throwaway copy.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
