@@ -349,7 +349,34 @@ def sonnet_invocation(prompt: str) -> list[str]:
 
 
 def ensure_git_repo(workspace: Path) -> None:
-	if sh(["git", "rev-parse", "--show-toplevel"], cwd=workspace).returncode != 0:
+	# Checking only the command's exit code is not enough: `git rev-parse
+	# --show-toplevel` also succeeds -- resolving to an ancestor directory --
+	# when `workspace` is merely a subdirectory of an already-git-tracked
+	# directory one level up. That's exactly ticket_runner.py's own pilot
+	# layout: `workspace/` starts as a plain subdirectory of the pilot dir's
+	# control repo, by design (see pi/prompts/spec-plan.md's scaffold step --
+	# the control repo's own .gitignore excludes `workspace/` precisely so it
+	# can get its own separate repo here). Comparing the resolved toplevel
+	# against `workspace` itself is what actually detects "workspace has no
+	# repo of its own yet"; a bare exit-code check leaves this always-false
+	# for every pilot ticket, and the model then has to work around the
+	# missing repo by force-committing past the control repo's .gitignore
+	# instead -- which breaks ticket_runner.py's own gate, since the commit's
+	# paths end up prefixed with `workspace/` where it expects bare paths.
+	toplevel = sh(["git", "rev-parse", "--show-toplevel"], cwd=workspace)
+	# `Path("").resolve()` is the *process* cwd, which would read as a match
+	# whenever this script happens to run from the workspace itself -- so an
+	# empty stdout has to disqualify the match rather than be compared.
+	has_own_repo = (
+		toplevel.returncode == 0
+		and bool(toplevel.stdout.strip())
+		and Path(toplevel.stdout.strip()).resolve() == workspace.resolve()
+	)
+	if not has_own_repo:
+		# Announced because --workspace is an arbitrary caller-supplied path:
+		# a standalone run pointed at a subdirectory of an existing project
+		# should not silently acquire a nested repo with no trace in the log.
+		print(f"no git repo of its own in {workspace} -- initializing one")
 		sh(["git", "init"], cwd=workspace)
 		gitignore = workspace / ".gitignore"
 		if not gitignore.exists():
