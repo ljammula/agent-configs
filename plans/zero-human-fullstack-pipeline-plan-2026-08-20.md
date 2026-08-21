@@ -594,6 +594,15 @@ corrected accounting below.
   decomposition) and standalone hardening of the retry-classifier were
   both judged premature — they add variance or produce no new evidence
   while implementation capability itself is still at n=1.
+- **User correction on Fable's two recommendations (2026-08-20):** the
+  reviewer route being unexercised all run is **intentional, not a gap**
+  — advisory-policy-with-no-working-reviewer was a deliberate choice for
+  this pilot, not an oversight to fix. Restoring/monitoring the reviewer
+  route is explicitly **not** being pursued. A second pilot run is also
+  **not wanted right now** — no further pilot-app work is planned off the
+  back of this review. This plan's active work ends at the verdict
+  above; Fable's oracle-self-check idea and second-pilot suggestion are
+  recorded for reference only, not queued as next steps.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
