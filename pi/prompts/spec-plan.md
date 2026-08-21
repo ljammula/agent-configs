@@ -52,11 +52,11 @@ cd "$2" && git init
 
 This is the **pilot dir's own** git repo. Do not run `git init` or
 commit anything inside `$2/workspace/` -- that gets its own separate
-repo later, when ticket 001 runs (per `new-project-scaffold.ts`'s nudge
-for a genuinely empty app repo). A pilot dir with a repo nested inside
-another repo is intentional, not a mistake -- the `.gitignore` written
-next is what keeps the pilot dir's repo from trying to track
-`workspace/`'s contents.
+repo later, on the first build round: `build_app.py`'s
+`ensure_git_repo()` creates it before the first agent turn, so the model
+never has to. A pilot dir with a repo nested inside another repo is
+intentional, not a mistake -- the `.gitignore` written next is what keeps
+the pilot dir's repo from trying to track `workspace/`'s contents.
 
 Run this exact command as a single `bash` call, copied verbatim,
 including the closing `EOF` line:
