@@ -770,20 +770,45 @@ is the controlled input the pilot's claim depends on.
   sizing/ordering, there's no automated way to grade "was this
   interpretation right," so it stays human-reviewed every time rather
   than graduating to trusted-unattended the way `/tickets` alone might.
-- **`/scaffold-pilot-dir <pilot-dir-path>` (2026-08-21).** A fresh pilot dir
-  was, until this, hand-assembled every time (this is literally how
-  `~/code/test-bed/budget-pilot/` came to exist). Deliberately zero
-  judgment: every file the template writes (`.gitignore`, `Makefile`) is
-  a heredoc copied verbatim rather than described for the model to
-  reconstruct from prose — specifically because `Makefile`'s recipe
-  lines need a literal tab character, which a "write a Makefile like
-  this" instruction risks losing or replacing with spaces in exactly the
-  way that silently breaks `make run`/`make status`. Verified end to end
-  in a throwaway directory (not just read for plausibility): the
-  extracted heredoc produces a byte-identical `Makefile` to the real
-  pilot's, and `make status` against the resulting empty scaffold
-  correctly reaches `ticket_runner.py` and fails only on "no tickets
-  found" — the expected state before `/spec-plan` runs.
+- **Scaffolding merged into `/spec-plan` itself (2026-08-21).** A
+  standalone `/scaffold-pilot-dir` command existed briefly (a fresh
+  pilot dir was, until then, hand-assembled every time — this is
+  literally how `~/code/test-bed/budget-pilot/` came to exist) but was
+  folded into `/spec-plan` as its step 0 once it became clear "start a
+  pilot from a rough idea" is one operation from the human's side of the
+  `/` command, not two separate invocations to remember and sequence by
+  hand. Deliberately zero judgment in that step: every file it writes
+  (`.gitignore`, `Makefile`) is a heredoc copied verbatim rather than
+  described for the model to reconstruct from prose — specifically
+  because `Makefile`'s recipe lines need a literal tab character, which
+  a "write a Makefile like this" instruction risks losing or replacing
+  with spaces in exactly the way that silently breaks `make
+  run`/`make status`. Verified end to end in a throwaway directory (not
+  just read for plausibility): the extracted heredoc produces a
+  byte-identical `Makefile` to the real pilot's, and `make status`
+  against the resulting empty scaffold correctly reaches
+  `ticket_runner.py` and fails only on "no tickets found" — the expected
+  state before drafting runs. **Codex review of the standalone
+  version's PR (#31) caught a real P1 before the merge landed:** the
+  original wrote its heredocs unconditionally, with the only guard
+  (workspace emptiness) checked *after* those writes already ran, so a
+  mistyped path or any pre-existing non-empty, non-pilot directory would
+  have had its `.gitignore`/`Makefile` silently overwritten. Fixed with
+  a three-way check before writing anything: already-scaffolded (has a
+  `Makefile`) → skip and proceed to drafting; doesn't exist or is empty
+  → safe to scaffold; exists, non-empty, no `Makefile` → refuse and stop,
+  since that shape means "not a pilot dir this command made."
+- **Full sequence documented (2026-08-21), per explicit user request
+  ("otherwise how will I know what all things & what sequence I should
+  follow").** `pi/README.md`'s Prompt templates section now carries a
+  table mapping every step of running a pilot — scaffold+draft, human
+  review, contract/test generation, `make run`/`status`/`reports`,
+  rescue — to what covers it, including calling out contract/test
+  generation as the one step still deliberately uncovered by any
+  template (see that section for the full reasoning, echoed from the
+  Fable review earlier in this document: it's the highest-stakes output,
+  and unlike ticket sizing there's no cheap way to check "was this test
+  right" before a real build hits it).
 
 ## Explicitly out of scope
 
