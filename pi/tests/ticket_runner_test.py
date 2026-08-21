@@ -604,6 +604,90 @@ class PrintStatusRescueAccountingTests(unittest.TestCase):
 		self.assertNotIn("[rescued", out)
 
 
+class StagedPairsTests(unittest.TestCase):
+	def test_same_basename_across_slices_does_not_collide(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_2 = pilot_dir / "spec" / "acceptance" / "002"
+			slice_1.mkdir(parents=True)
+			slice_2.mkdir(parents=True)
+			(slice_1 / "handler_test.go").write_text("package acceptance // 001\n")
+			(slice_2 / "handler_test.go").write_text("package acceptance // 002\n")
+
+			pairs = ticket_runner.staged_pairs(pilot_dir, workspace, upto=2)
+			staged_paths = sorted(str(staged.relative_to(workspace)) for _, staged in pairs)
+
+			self.assertEqual(
+				staged_paths,
+				["acceptance/001_handler_test.go", "acceptance/002_handler_test.go"],
+			)
+
+	def test_go_mod_and_sum_keep_their_literal_name(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_1.mkdir(parents=True)
+			(slice_1 / "go.mod").write_text("module app/acceptance\n")
+			(slice_1 / "go.sum").write_text("")
+
+			pairs = ticket_runner.staged_pairs(pilot_dir, workspace, upto=1)
+			staged_names = sorted(staged.name for _, staged in pairs)
+
+			self.assertEqual(staged_names, ["go.mod", "go.sum"])
+
+	def test_stage_removes_a_stale_pre_prefix_staged_file(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_1.mkdir(parents=True)
+			(slice_1 / "handler_test.go").write_text("package acceptance // canon\n")
+			(pilot_dir / "spec" / "contract.md").write_text("# contract\n")
+			# Simulate a workspace staged by the pre-fix ticket_runner.py, which
+			# wrote the bare basename with no ticket-number prefix.
+			stale = workspace / "acceptance" / "handler_test.go"
+			stale.parent.mkdir(parents=True)
+			stale.write_text("package acceptance // stale, pre-prefix copy\n")
+
+			ticket_runner.stage(pilot_dir, workspace, upto=1)
+
+			self.assertFalse(stale.exists())
+			self.assertEqual(
+				(workspace / "acceptance" / "001_handler_test.go").read_text(),
+				"package acceptance // canon\n",
+			)
+
+	def test_stage_writes_both_colliding_basenames_to_disk(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_2 = pilot_dir / "spec" / "acceptance" / "002"
+			slice_1.mkdir(parents=True)
+			slice_2.mkdir(parents=True)
+			(slice_1 / "handler_test.go").write_text("package acceptance // 001\n")
+			(slice_2 / "handler_test.go").write_text("package acceptance // 002\n")
+			(pilot_dir / "spec" / "contract.md").write_text("# contract\n")
+
+			ticket_runner.stage(pilot_dir, workspace, upto=2)
+
+			self.assertEqual(
+				(workspace / "acceptance" / "001_handler_test.go").read_text(),
+				"package acceptance // 001\n",
+			)
+			self.assertEqual(
+				(workspace / "acceptance" / "002_handler_test.go").read_text(),
+				"package acceptance // 002\n",
+			)
+
+
 class AmendCanonTests(unittest.TestCase):
 	def _pilot(self, directory):
 		pilot_dir = Path(directory)
@@ -674,7 +758,7 @@ class AmendCanonTests(unittest.TestCase):
 			canon_dir.mkdir(parents=True)
 			canon_file = canon_dir / "widget_test.dart"
 			canon_file.write_text("testWidgets('renders $X.YY', (t) async {})\n")
-			staged = workspace / "app" / "test" / "widget_test.dart"
+			staged = workspace / "app" / "test" / "005_widget_test.dart"
 			staged.parent.mkdir(parents=True)
 			staged.write_text("testWidgets(r'renders $X.YY', (t) async {})\n")
 			tickets = [ticket_runner.Ticket(5, "dashboard", Path("005-dashboard.md"))]

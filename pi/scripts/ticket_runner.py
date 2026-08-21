@@ -412,11 +412,22 @@ def prior_boundary_sha(workspace: Path, tickets: list[Ticket], ticket: Ticket) -
 	return None
 
 
+SHARED_MODULE_FILENAMES = {"go.mod", "go.sum"}
+
+
 def staged_pairs(pilot_dir: Path, workspace: Path, upto: int) -> list[tuple[Path, Path]]:
 	"""(canonical_path, staged_path) pairs for every slice activated up to
 	and including ticket `upto`. Only .go/.mod/.sum/.dart files are staged
 	-- MANIFEST.md and other slice documentation stays control-dir-only
-	(every slice names it identically, so staging it would collide)."""
+	(every slice names it identically, so staging it would collide).
+
+	Test files (.go/.dart) are staged under their ticket number
+	(`NNN_<name>`) so two slices that happen to pick the same ordinary
+	basename -- e.g. two `handler_test.go` -- don't overwrite each other
+	when flattened into one staged directory. `go.mod`/`go.sum` are the
+	one exception: they must keep their literal name to be a valid Go
+	module, and per /contract-plan's convention only the first slice
+	provides one."""
 	pairs = []
 	acceptance_dir = pilot_dir / "spec" / "acceptance"
 	if not acceptance_dir.exists():
@@ -430,12 +441,33 @@ def staged_pairs(pilot_dir: Path, workspace: Path, upto: int) -> list[tuple[Path
 			if not f.is_file() or f.suffix not in STAGED_EXTENSIONS:
 				continue
 			dest_root = STAGED_EXTENSIONS[f.suffix]
-			pairs.append((f, workspace / dest_root / f.name))
+			if f.name in SHARED_MODULE_FILENAMES:
+				dest_name = f.name
+			else:
+				dest_name = f"{slice_dir.name}_{f.name}"
+			pairs.append((f, workspace / dest_root / dest_name))
 	return pairs
 
 
 def stage(pilot_dir: Path, workspace: Path, upto: int) -> None:
-	for canon, staged in staged_pairs(pilot_dir, workspace, upto):
+	"""Materialize every active slice's staged files, then remove any
+	stale file of a staged extension in those same directories that this
+	call didn't just (re)write. Covers both a ticket dropping out of the
+	active window and a pilot started under the pre-NNN_-prefix staging
+	convention: its workspace can still hold a bare `acceptance/
+	handler_test.go` left over from before, which -- unremoved -- would
+	compile alongside the now-prefixed `acceptance/001_handler_test.go`
+	and duplicate every declaration in it."""
+	pairs = staged_pairs(pilot_dir, workspace, upto)
+	expected = {staged for _, staged in pairs}
+	for dest_root in set(STAGED_EXTENSIONS.values()):
+		dest_dir = workspace / dest_root
+		if not dest_dir.is_dir():
+			continue
+		for existing in dest_dir.iterdir():
+			if existing.is_file() and existing.suffix in STAGED_EXTENSIONS and existing not in expected:
+				existing.unlink()
+	for canon, staged in pairs:
 		staged.parent.mkdir(parents=True, exist_ok=True)
 		shutil.copyfile(canon, staged)
 	contract_dest = workspace / "spec" / "contract.md"

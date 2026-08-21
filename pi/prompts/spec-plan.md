@@ -10,6 +10,12 @@ to be precise. Your job is to make it precise, and to make every place
 you had to guess visible rather than silently baked into downstream
 tickets.
 
+**Resolve `$2` to a concrete path before running anything below:** if
+`$2` was not given, set it to `$(pwd)` -- do not let it stay empty and
+flow into the commands below as-is, which would target `/spec/tickets`,
+`/spec/acceptance`, and `/workspace` at the filesystem root instead of
+the current directory.
+
 ## 0. Scaffold the pilot dir, if it isn't one yet
 
 **Before writing anything, check `$2` in this order and pick exactly one
@@ -189,4 +195,10 @@ Read spec/spec.md's Assumptions & Interpretations section and approve or
 correct each line. Do not run ticket_runner.py against this output, and
 do not run /contract-plan, until that review has happened -- this step
 is allowed to guess; nothing downstream is.
+
+Once reviewed, freeze the spec by replacing spec/spec.md's first line --
+`STATUS: DRAFT -- pending human review of Assumptions & Interpretations`
+-- with `STATUS: FROZEN -- reviewed <date>`. /contract-plan checks for
+exactly this: it refuses to run against a spec whose first line still
+says DRAFT.
 ```
