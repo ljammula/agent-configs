@@ -402,9 +402,12 @@ to a syntax bug instead of a semantic one.
 own retry logic (2026-08-20).** The `ticket_runner.py` process driving
 ticket 011 died mid-attempt with no `BUILD_REPORT.md` and an uncommitted
 in-progress diff (`transactions.go` + `category_correction_test.go`) —
-most likely the wrapping shell/session that launched it ended, not a
-crash inside the script itself; no error was logged. No special recovery
-was needed: relaunching `make run` (`AI_STACK_HOST=kannas-mac-studio`)
+root cause confirmed as a **cmux crash** (the terminal multiplexer
+wrapping the launching shell/session died, taking the child process with
+it), not a crash inside `ticket_runner.py`/`build_app.py` itself and not
+the harness's own nohup/disown detachment behavior; no error was logged
+because the failure was one layer up the process tree. No special
+recovery was needed: relaunching `make run` (`AI_STACK_HOST=kannas-mac-studio`)
 found the stale `build-attempt-01.started.json` with no matching report,
 printed `previous build attempt ended without report evidence; retrying
 0/2 after 30s`, and ran a fresh `build_app.py` invocation as
@@ -421,6 +424,19 @@ survive the wrapper) but in this instance it *did* keep running
 detached — `ps aux` just failed to grep-match the process name. Confirm
 via `ps -p <pid>` on the PID actually reported by the shell, not a name
 grep, before concluding a background launch died.
+
+Follow-up: a long unattended run's process tree is only as durable as
+whatever terminal/multiplexer layer launched it (cmux, here) — same
+durability gap as the ticket-003 stale-process case, different trigger
+(an upstream tool crashing vs. a code change landing mid-run). The
+runner's own recovery already covers this (retry-on-missing-evidence,
+`git log`-derived position, no separate resume mode needed), so no code
+change is called for; the operating rule is the same one already on
+record for the ticket-003 case: on any long unattended pilot run, prefer
+a launch mechanism that survives its wrapper's own crash (this session's
+`run_in_background: true` Bash calls did; a plain foreground shell inside
+cmux did not), and don't assume "no error logged" means the failure was
+inside the pipeline's own code.
 
 **Ticket 012 halt — the model shipped a correct fix to a genuine bug in
 ticket 001's frozen `verify-full.sh`, but the frozen-surface gate
