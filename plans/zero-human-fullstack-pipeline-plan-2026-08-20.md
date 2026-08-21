@@ -632,15 +632,24 @@ corrected accounting below.
      weaken the gate — it's the explicit, logged, human-invoked path for
      accepting a genuine fix to a frozen artifact.
   2. `--status`'s rescue count is no longer honor-system. It now also
-     derives a structural signal (`gate_revisit_count()`: how many real
-     gate-attempt records a ticket produced) and reports both — re-run
-     against the actual budget-pilot dir, corrected `--status` now reads
-     `rescued: 5 -- 1 tagged, 4 untagged gate-revisits` (003, 004, 005,
-     010 untagged; 012 tagged), which lines up exactly with this
-     document's hand-verified verdict above (4 content rescues + 1 infra
-     rescue) — a genuine cross-check that the new signal is sound, not
-     just plausible.
-  Both landed with unit tests (9 new, 63/63 passing) and were sanity-
+     derives a structural signal and reports both. First cut
+     (`gate_revisit_count()`: how many real gate-attempt records a ticket
+     produced) had a real false-positive bug caught by Codex review of PR
+     #29: build_app.py's own bounded automatic retry (a transient marker
+     like a route outage) can legitimately archive more than one real
+     gate-attempt on the way to an automatic pass, with no human ever
+     involved, so a raw revisit count over-reports rescues. Fixed by
+     switching the signal to `halt_record_exists()`: PROGRESS.md's
+     runner-written HALT block is only ever appended on the
+     non-recoverable path (`append_halt_record()` is called exactly when
+     `retryable_build_state()` found no automatic-retry route), so it's
+     immune to that false positive by construction. Re-run against the
+     actual budget-pilot dir, corrected `--status` reads `rescued: 5 -- 1
+     tagged, 4 untagged halts` (003, 004, 005, 010 untagged; 012 tagged),
+     which lines up exactly with this document's hand-verified verdict
+     above (4 content rescues + 1 infra rescue) — a genuine cross-check
+     that the new signal is sound, not just plausible.
+  Both landed with unit tests (13 new, 67/67 passing) and were sanity-
   checked against the real pilot dir: `--amend-canon` correctly no-ops on
   both already-fixed files (verify-full.sh, the ticket-010 oracle) and
   correctly applies+logs a real change in a throwaway copy.

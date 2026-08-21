@@ -914,14 +914,14 @@ def run_ticket(
 
 def gate_revisit_count(pilot_dir: Path, ticket: Ticket) -> int:
 	"""How many times this ticket's gate produced a real (non-`.started`)
-	gate-attempt-*.json record. A ticket that gated clean on the first try
-	has exactly one; two or more means the gate failed and had to be
-	revisited at least once -- whether the fix was a human editing ticket
-	content (003, 004, 010, 012 in the 2026-08-20 budget-pilot) or a human
-	fixing infrastructure and letting the same content re-gate (005's
-	AI_STACK_HOST fix). A build-attempt crash-and-retry that never
-	produced a failing gate (e.g. ticket 011's cmux crash, recovered before
-	any report evidence existed) correctly does NOT count here."""
+	gate-attempt-*.json record. This is a raw diagnostic, not a rescue
+	signal: build_app.py's own bounded build-attempt retry (a transient
+	marker like a route outage or a stall-timeout) can legitimately
+	archive more than one real gate-attempt on its way to an automatic
+	pass, with no human ever involved (Codex review of PR #29 flagged
+	`print_status()`'s earlier use of this count as a false-positive
+	rescue proxy for exactly that reason). Use `halt_record_exists()` to
+	ask whether a ticket actually needed a human."""
 	reports = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
 	if not reports.exists():
 		return 0
@@ -929,6 +929,21 @@ def gate_revisit_count(pilot_dir: Path, ticket: Ticket) -> int:
 		1 for p in reports.glob("gate-attempt-*.json")
 		if not p.name.endswith(".started.json")
 	)
+
+
+def halt_record_exists(workspace: Path, ticket: Ticket) -> bool:
+	"""True if PROGRESS.md contains a runner-written HALT record for this
+	ticket -- append_halt_record() writes one only on the non-recoverable
+	path, i.e. only when retryable_build_state() found no automatic/
+	transient-retry route and the line genuinely stopped for a human.
+	Unlike a raw gate-attempt count, this structurally excludes tickets
+	that passed purely through build_app.py's bounded automatic retry
+	(each retried attempt can still archive a real, non-`.started`
+	gate-attempt-*.json -- see gate_revisit_count()'s docstring)."""
+	progress = workspace / "PROGRESS.md"
+	if not progress.exists():
+		return False
+	return f"HALT at ticket {ticket.nnn} (" in progress.read_text(errors="ignore")
 
 
 def print_status(
@@ -940,21 +955,22 @@ def print_status(
 	done_commits = committed_ticket_numbers(workspace)
 	# The `[rescued]` commit tag is honor-system -- nothing enforces an
 	# agent or human actually adds it (see the 2026-08-20 budget-pilot
-	# verdict: --status reported "rescued: 1" against a true count of 4).
-	# gate_revisit_count() is the structural counterpart: it doesn't know
-	# *why* a ticket needed a second look, but it can't be forgotten to
-	# tag, so report both and let a tag-less revisit stand out rather than
-	# silently undercounting.
+	# verdict: --status reported "rescued: 1" against a true count of 5).
+	# halt_record_exists() is the structural counterpart: it doesn't know
+	# *why* a ticket needed a human, but it can't be forgotten to tag (and,
+	# unlike a raw gate-attempt count, it doesn't fire on a ticket that
+	# passed purely through automatic retry), so report both and let an
+	# untagged halt stand out rather than silently undercounting.
 	tagged = {n for n, subject in done_commits.items() if "[rescued]" in subject}
-	revisited = {t.number for t in tickets if t.number in done_commits and gate_revisit_count(pilot_dir, t) > 1}
-	rescued = tagged | revisited
+	halted = {t.number for t in tickets if t.number in done_commits and halt_record_exists(workspace, t)}
+	rescued = tagged | halted
 	nxt, mode = next_ticket(tickets, pilot_dir, workspace, review_policy)
 	print(f"pilot dir: {pilot_dir}")
 	print(f"tickets total: {len(tickets)}")
 	print(
 		f"tickets committed: {len(done_commits)} "
 		f"(of which rescued: {len(rescued)} -- {len(tagged)} tagged, "
-		f"{len(revisited - tagged)} untagged gate-revisits)"
+		f"{len(halted - tagged)} untagged halts)"
 	)
 	if nxt is None:
 		print("next ticket: (none -- all tickets complete)")
@@ -966,7 +982,7 @@ def print_status(
 		marker = "x" if done else ("~" if has_commit else " ")
 		if has_commit and t.number in tagged:
 			rescue_tag = " [rescued]"
-		elif has_commit and t.number in revisited:
+		elif has_commit and t.number in halted:
 			rescue_tag = " [rescued: untagged]"
 		else:
 			rescue_tag = ""
