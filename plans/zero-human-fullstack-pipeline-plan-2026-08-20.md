@@ -743,6 +743,33 @@ is the controlled input the pilot's claim depends on.
   further specs decomposed locally and run through the pipeline with no
   halt attributable to graph quality before local decomposition becomes
   the default. Until then the compile step stays cloud.
+- **Scope widened by explicit user decision, 2026-08-21: `/spec-plan`, not
+  just `/tickets`.** The original design above kept disambiguation
+  cloud-side and had the local model only decompose an already-frozen,
+  unambiguous spec. Asked directly, the user chose to widen this:
+  `/spec-plan <rough-input-path>` (`pi/prompts/spec-plan.md` — named to
+  avoid colliding with `plan-mode/`'s pre-existing `/plan` command,
+  caught by Codex review of PR #30) now also drafts the spec
+  itself from a rough/vague input, resolving ambiguity locally rather
+  than refusing to. The reasoning against this (no cheap failing-test
+  signal for "was this interpretation correct," unlike ticket
+  sizing/ordering, which the adoption-bar eval above can check
+  automatically) was raised and the user chose to proceed anyway — this
+  is not a reversal of that reasoning, it's the same risk accepted with
+  a mitigation attached: every resolved ambiguity must land in the
+  drafted spec's own "Assumptions & Interpretations" section as a
+  separately reviewable line, never silently absorbed into ticket
+  content, and the template ends with a mandatory human-review banner —
+  the frozen-spec checkpoint (Phase 0's plan-mode-approval analog) still
+  gates `ticket_runner.py` seeing the output. Contract-writing and
+  acceptance-test generation are unchanged: still cloud-side, still the
+  highest-stakes output, still out of `/spec-plan`'s scope by design (the
+  template explicitly tells the model not to invent contract detail,
+  only to flag what the contract step needs to decide). No adoption bar
+  is proposed for the disambiguation half specifically — unlike ticket
+  sizing/ordering, there's no automated way to grade "was this
+  interpretation right," so it stays human-reviewed every time rather
+  than graduating to trusted-unattended the way `/tickets` alone might.
 
 ## Explicitly out of scope
 

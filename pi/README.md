@@ -352,6 +352,28 @@ matching skills. They spell out each step and demand pasted command output,
 because a small model that is told "run the gate" will report success without
 running anything.
 
+`/spec-plan <rough-input-path> [pilot-dir]` — the local half of the
+`zero-human-fullstack-pipeline` plan's Phase 5 (see
+`../plans/zero-human-fullstack-pipeline-plan-2026-08-20.md`): drafts a
+detailed `spec/spec.md` and `spec/tickets/NNN-*.md` from a rough,
+possibly-vague input. Named to avoid colliding with `plan-mode/`'s own
+`/plan` command (read-only exploration mode, see "Extensions" above) --
+two different registrations can't share a slash-command name. Unlike the
+other templates, this one is explicitly
+allowed to resolve ambiguity rather than refuse to guess — that's a
+deliberate scope widening past the plan's original decomposition-only
+design, made because it's the one place in the pipeline this can happen
+*visibly*: every resolved ambiguity must land in the spec's own
+"Assumptions & Interpretations" section as its own reviewable line,
+never silently absorbed into a ticket. It still stops short of writing
+API-contract detail or acceptance tests (those stay their own step) and
+ends every run with a mandatory human-review banner — the frozen-spec
+checkpoint (Phase 0's "analog of Claude Code's plan-mode approval")
+still applies before `ticket_runner.py` ever sees the output. Contract
+and acceptance-test generation remain cloud-side per that plan's
+existing reasoning: a wrong ticket is cheap to eval against a known-good
+graph, a wrong test oracle silently corrupts every downstream verdict.
+
 `/goal` is not one of these: it's a real command registered by
 `goal-gate.ts` (see above), because a `/goal <condition>` needs persistent
 state across turns and a gate on stopping, neither of which a `.md` prompt
