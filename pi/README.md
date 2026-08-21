@@ -374,7 +374,7 @@ and acceptance-test generation remain cloud-side per that plan's
 existing reasoning: a wrong ticket is cheap to eval against a known-good
 graph, a wrong test oracle silently corrupts every downstream verdict.
 
-`/scaffold-pilot <pilot-dir-path>` — creates a fresh `ticket_runner.py`
+`/scaffold-pilot-dir <pilot-dir-path>` — creates a fresh `ticket_runner.py`
 pilot dir's skeleton (control-dir `spec/`, `.gitignore`, `Makefile`, an
 empty `workspace/`) matching the plan's `## Deliverables` layout exactly.
 Zero judgment calls by design: every file's content is a heredoc copied

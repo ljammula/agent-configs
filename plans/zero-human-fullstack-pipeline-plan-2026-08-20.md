@@ -770,7 +770,7 @@ is the controlled input the pilot's claim depends on.
   sizing/ordering, there's no automated way to grade "was this
   interpretation right," so it stays human-reviewed every time rather
   than graduating to trusted-unattended the way `/tickets` alone might.
-- **`/scaffold-pilot <pilot-dir-path>` (2026-08-21).** A fresh pilot dir
+- **`/scaffold-pilot-dir <pilot-dir-path>` (2026-08-21).** A fresh pilot dir
   was, until this, hand-assembled every time (this is literally how
   `~/code/test-bed/budget-pilot/` came to exist). Deliberately zero
   judgment: every file the template writes (`.gitignore`, `Makefile`) is
