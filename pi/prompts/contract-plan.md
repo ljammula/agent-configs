@@ -84,13 +84,32 @@ it. Resolve every path from `$1` (default: current directory) rather
 than the shell's cwd, and start from a clean scratch dir each run --
 files left over from a previous draft or a different pilot in
 `/tmp/contract-check` would otherwise get vetted/built alongside this
-one and produce false failures (or worse, a false pass) -- e.g. `rm -rf
-/tmp/contract-check && mkdir -p /tmp/contract-check/acceptance && cp
-"$1"/spec/acceptance/*/*.go /tmp/contract-check/acceptance/ && cp
-"$1"/spec/acceptance/*/go.mod /tmp/contract-check/acceptance/
-2>/dev/null; cd /tmp/contract-check/acceptance && go vet ./... && go
-build ./...`. Fix anything that fails to compile, then re-run until
-clean.
+one and produce false failures (or worse, a false pass).
+
+Copy per-slice, not with a single flattening glob: two slices can
+legitimately pick the same ordinary basename (two `handler_test.go`), and
+`cp spec/acceptance/*/*.go` into one flat directory silently drops one of
+them -- the check then reports clean having never compiled the dropped
+file. Prefix every non-module file with its slice number, the same
+convention `ticket_runner.py` stages with at build time:
+
+```
+rm -rf /tmp/contract-check && mkdir -p /tmp/contract-check/acceptance
+for d in "$1"/spec/acceptance/*/; do
+  n=$(basename "$d")
+  for f in "$d"*.go "$d"go.mod "$d"go.sum; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    case "$b" in
+      go.mod|go.sum) cp "$f" /tmp/contract-check/acceptance/"$b" ;;
+      *) cp "$f" /tmp/contract-check/acceptance/"${n}_${b}" ;;
+    esac
+  done
+done
+cd /tmp/contract-check/acceptance && go vet ./... && go build ./...
+```
+
+Fix anything that fails to compile, then re-run until clean.
 
 **Dart**: this needs a real Flutter project context to resolve
 `package:flutter_test`/widget imports -- a bare `dart analyze` on an
@@ -98,15 +117,27 @@ isolated file will false-positive on unresolved imports that have
 nothing to do with the actual test. Use a separate scratch dir from the
 Go check above (`/tmp/contract-check-dart`), and remove it first if it
 already exists, for the same reason -- a prior draft's leftover test
-files would otherwise get analyzed alongside this one. If a scratch
-Flutter project is cheap to create in this environment (`rm -rf
-/tmp/contract-check-dart && flutter create /tmp/contract-check-dart
---project-name scratch`, copy each Dart slice's test file from
-`"$1"/spec/acceptance/*/` into `/tmp/contract-check-dart/test/`, run
-`flutter analyze`), do that and fix what it finds. If creating one is
-not practical here, say so explicitly
-in the report below rather than silently skipping the check -- an
-unflagged gap is worse than a flagged one.
+files would otherwise get analyzed alongside this one. Same basename
+collision risk as the Go check, and the same fix -- prefix each copied
+test file with its slice number:
+
+```
+rm -rf /tmp/contract-check-dart
+flutter create /tmp/contract-check-dart --project-name scratch
+for d in "$1"/spec/acceptance/*/; do
+  n=$(basename "$d")
+  for f in "$d"*.dart; do
+    [ -e "$f" ] || continue
+    cp "$f" /tmp/contract-check-dart/test/"${n}_$(basename "$f")"
+  done
+done
+cd /tmp/contract-check-dart && flutter analyze
+```
+
+If a scratch Flutter project is cheap to create in this environment, do
+that and fix what it finds. If creating one is not practical here, say so
+explicitly in the report below rather than silently skipping the check --
+an unflagged gap is worse than a flagged one.
 
 ## 4. Report
 
