@@ -116,6 +116,31 @@ class ResolveSpecInputTests(unittest.TestCase):
 			self.assertEqual(resolved.read_text(), "first idea")
 
 
+class SessionRootTests(unittest.TestCase):
+	def test_session_root_is_a_sibling_not_written_inside_pilot_dir(self):
+		# Reproduced live: `pi --session-dir` creates its directory as soon as
+		# the session starts, before the model's first turn -- i.e. before
+		# /spec-plan's own step-0 "is $2 empty" scaffold check ever runs. A
+		# session dir placed *inside* a fresh, not-yet-scaffolded pilot_dir
+		# makes that check see "exists, non-empty, no Makefile" and correctly
+		# refuse to scaffold -- on every single fresh pilot_dir, not just an
+		# edge case. Same hazard class as resolve_spec_input()'s scratch file
+		# (Codex review of PR #37); the session root must land outside
+		# pilot_dir the same way.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d) / "pilot"
+			root = goal_pilot.goal_pilot_session_root(pilot_dir)
+			self.assertFalse(root.is_relative_to(pilot_dir))
+			self.assertFalse(pilot_dir.exists() and any(pilot_dir.iterdir()))
+
+	def test_session_root_is_stable_across_calls(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d) / "pilot"
+			first = goal_pilot.goal_pilot_session_root(pilot_dir)
+			second = goal_pilot.goal_pilot_session_root(pilot_dir)
+			self.assertEqual(first, second)
+
+
 class ClassifyHaltTests(unittest.TestCase):
 	def test_unknown_when_no_gate_recorded(self):
 		with tempfile.TemporaryDirectory() as d:
