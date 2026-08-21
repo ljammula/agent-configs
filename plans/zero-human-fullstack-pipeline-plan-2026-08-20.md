@@ -620,6 +620,98 @@ corrected accounting below.
   resource on a given task, Sonnet-solo is currently the more efficient
   choice; this harness is the better choice when cloud-token spend is the
   binding constraint and some supervision is acceptable.
+- **Two of Fable's needle-mover findings implemented (2026-08-20).** Both
+  were general `ticket_runner.py` quality-of-life fixes, not pilot work,
+  so they don't conflict with "no second pilot":
+  1. `ticket_runner.py --amend-canon <workspace-file> --reason "..."` —
+     turns the archaeology ticket 010/012's rescues needed (grep the build
+     session's `.jsonl` transcript for the model's `edit` tool call,
+     hand-recover the diff, hand-update the frozen baseline's hash and
+     byte copy or the acceptance-oracle canon) into one confirmed command,
+     for both verify-surface files and staged acceptance slices. Does not
+     weaken the gate — it's the explicit, logged, human-invoked path for
+     accepting a genuine fix to a frozen artifact.
+  2. `--status`'s rescue count is no longer honor-system. It now also
+     derives a structural signal and reports both. First cut
+     (`gate_revisit_count()`: how many real gate-attempt records a ticket
+     produced) had a real false-positive bug caught by Codex review of PR
+     #29: build_app.py's own bounded automatic retry (a transient marker
+     like a route outage) can legitimately archive more than one real
+     gate-attempt on the way to an automatic pass, with no human ever
+     involved, so a raw revisit count over-reports rescues. Fixed by
+     switching the signal to `halt_record_exists()`: PROGRESS.md's
+     runner-written HALT block is only ever appended on the
+     non-recoverable path (`append_halt_record()` is called exactly when
+     `retryable_build_state()` found no automatic-retry route), so it's
+     immune to that false positive by construction. Re-run against the
+     actual budget-pilot dir, corrected `--status` reads `rescued: 5 -- 1
+     tagged, 4 untagged halts` (003, 004, 005, 010 untagged; 012 tagged),
+     which lines up exactly with this document's hand-verified verdict
+     above (4 content rescues + 1 infra rescue) — a genuine cross-check
+     that the new signal is sound, not just plausible.
+  Both landed with unit tests (13 new, 67/67 passing) and were sanity-
+  checked against the real pilot dir: `--amend-canon` correctly no-ops on
+  both already-fixed files (verify-full.sh, the ticket-010 oracle) and
+  correctly applies+logs a real change in a throwaway copy.
+- **Bottom line, stated plainly (2026-08-20):** given a cloud-compiled
+  spec, contract, failing-first acceptance suite, and ticket
+  decomposition, Qwen3.8-27B-8bit through this harness executed 8/12
+  tickets (67%) completely unassisted, zero cloud tokens on
+  implementation — real endpoints, real screens, real tests. Of the 4
+  that didn't: 3 were bugs in the *cloud-written* scaffolding or
+  infrastructure, not the local model failing to code; only 1 (004) was
+  a genuine local-model capability miss. That one has a specific,
+  reproducible shape worth remembering as the actual finding, not the
+  75%/67% aggregate: every ticket the model completed unassisted was
+  **incremental** (extend an existing skeleton against a pre-pinned
+  contract, pre-pinned class names, pre-pinned test Keys to bend to);
+  the one it failed outright was the one **blank-page** ticket in the
+  run (create N new files from nothing). So the validated claim is
+  narrower and more useful than "the local model can execute a cloud
+  plan": it's "cloud plans, local executes the incremental majority of
+  the plan, harness gates the seam" — with a human still on call (six
+  interventions in one day) and the blank-page edge still unhandled
+  locally. Not yet tested: whether this ratio holds on a spec without
+  the cloud compiler's scaffolding advantages, or with a plan whose
+  tickets are more blank-page-shaped by nature.
+- **Counterfactual: what the same spec, same model, no harness would
+  have produced (2026-08-21).** Not speculation — this is what the
+  evidence already on record in this document implies would have
+  happened with the gates removed:
+  - **It would very likely have finished and reported success while
+    shipping broken code**, not failed outright. The founding evidence
+    for this whole harness design is the lru-cache case (`## Why this
+    shape`, point 3): the independent reviewer flagged a real bug
+    *twice* and the model shipped it anyway both times — only a hidden
+    test it couldn't negotiate with actually stopped it. Strip the
+    harness out and self-report is the only signal left, and self-report
+    means nothing.
+  - **Three known-shape bugs would have shipped invisibly** instead of
+    getting caught, because this pilot's own runs hit near-identical
+    shapes and only the harness's specific tiers caught them: a
+    silently-forced in-memory DB passing every unit test with no real
+    restart exercised (near-identical to ticket 012's real
+    restart-persistence bug, only caught because `verify-full` boots the
+    actual server and restarts it for real); a wire-format mismatch
+    invisible to round-trip decode (AGENTS.md gotcha #4, the exact class
+    the black-box HTTP contract tests exist to catch); and ticket 004's
+    blank-page failure specifically — the model would have produced
+    *something* and reported it done, with no failing test forcing a
+    retry and no human finding out short of clicking through the app.
+  - **Genuinely unknown, not just undocumented**: whether the model even
+    holds up across one continuous session sized for a whole app. The
+    proven envelope going into this pilot was ≤75-minute, single-feature
+    fixtures (`## Why this shape`, point 2) — a whole app is 30–100x
+    that, and a monolithic run on a 96K context window degrading or
+    losing track over hours was never validated. Decomposing into
+    fresh-session tickets with git-commit checkpoints was a deliberate
+    hedge against this; without it, a crash (like the cmux crash that
+    hit ticket 011 here) loses undifferentiated context instead of
+    resuming from the last ticket's commit.
+  - Net: not "probably would have failed outright" — plausibly would
+    have *finished*, produced something that looks like a working app,
+    and been wrong in at least the three specific ways already on
+    record, with no mechanism to tell you which parts.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 

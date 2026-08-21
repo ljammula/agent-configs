@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import signal
 import subprocess
@@ -458,6 +460,261 @@ class TicketRunnerRetryTests(unittest.TestCase):
 				],
 			}))
 			self.assertEqual(self.next_mode(root, root / "workspace", "commit-sha"), "regate")
+
+
+class GateRevisitCountTests(unittest.TestCase):
+	def setUp(self):
+		self.ticket = ticket_runner.Ticket(4, "onboarding-screen", Path("004-onboarding-screen.md"))
+
+	def test_zero_when_no_reports_dir_exists(self):
+		with tempfile.TemporaryDirectory() as directory:
+			self.assertEqual(ticket_runner.gate_revisit_count(Path(directory), self.ticket), 0)
+
+	def test_one_real_gate_attempt_is_not_a_revisit(self):
+		with tempfile.TemporaryDirectory() as directory:
+			reports = Path(directory) / "reports" / "ticket-004"
+			reports.mkdir(parents=True)
+			(reports / "gate-attempt-01.json").write_text("{}")
+			(reports / "gate-attempt-01.started.json").write_text("{}")
+			self.assertEqual(ticket_runner.gate_revisit_count(Path(directory), self.ticket), 1)
+
+	def test_started_markers_never_count_as_real_attempts(self):
+		# A crashed build-attempt (e.g. the ticket-011 cmux crash) leaves only
+		# a .started.json marker behind with no completed .json evidence --
+		# that must not be mistaken for a failed-then-revisited gate.
+		with tempfile.TemporaryDirectory() as directory:
+			reports = Path(directory) / "reports" / "ticket-004"
+			reports.mkdir(parents=True)
+			(reports / "gate-attempt-01.started.json").write_text("{}")
+			self.assertEqual(ticket_runner.gate_revisit_count(Path(directory), self.ticket), 0)
+
+	def test_multiple_real_gate_attempts_count_as_revisits(self):
+		with tempfile.TemporaryDirectory() as directory:
+			reports = Path(directory) / "reports" / "ticket-004"
+			reports.mkdir(parents=True)
+			for n in (1, 2, 3):
+				(reports / f"gate-attempt-0{n}.json").write_text("{}")
+				(reports / f"gate-attempt-0{n}.started.json").write_text("{}")
+			self.assertEqual(ticket_runner.gate_revisit_count(Path(directory), self.ticket), 3)
+
+
+class HaltRecordExistsTests(unittest.TestCase):
+	def setUp(self):
+		self.ticket = ticket_runner.Ticket(12, "persistence-and-hardening", Path("012-x.md"))
+
+	def test_false_when_no_progress_md_exists(self):
+		with tempfile.TemporaryDirectory() as directory:
+			self.assertFalse(ticket_runner.halt_record_exists(Path(directory), self.ticket))
+
+	def test_true_when_a_halt_record_for_this_ticket_is_present(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			(workspace / "PROGRESS.md").write_text(
+				"\n\n## [runner-written] HALT at ticket 012 (2026-08-21T03:56:21+00:00)\n\n"
+				"ticket_runner.py stopped the line here. Gate failures:\n- verify-surface frozen\n"
+			)
+			self.assertTrue(ticket_runner.halt_record_exists(workspace, self.ticket))
+
+	def test_false_for_a_different_ticket_s_halt_record(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			(workspace / "PROGRESS.md").write_text(
+				"\n\n## [runner-written] HALT at ticket 010 (2026-08-21T03:01:42+00:00)\n\n..."
+			)
+			self.assertFalse(ticket_runner.halt_record_exists(workspace, self.ticket))
+
+
+class PrintStatusRescueAccountingTests(unittest.TestCase):
+	def setUp(self):
+		self.tickets = [
+			ticket_runner.Ticket(1, "a", Path("001-a.md")),
+			ticket_runner.Ticket(2, "b", Path("002-b.md")),
+		]
+
+	def run_status(self, pilot_dir, done_commits, halted_tickets):
+		with (
+			mock.patch.object(ticket_runner, "committed_ticket_numbers", return_value=done_commits),
+			mock.patch.object(ticket_runner, "ticket_done", return_value=True),
+			mock.patch.object(ticket_runner, "next_ticket", return_value=(None, "build")),
+			mock.patch.object(
+				ticket_runner, "halt_record_exists",
+				side_effect=lambda _workspace, t: t.number in halted_tickets,
+			),
+		):
+			buf = io.StringIO()
+			with contextlib.redirect_stdout(buf):
+				ticket_runner.print_status(pilot_dir, self.tickets, pilot_dir / "workspace")
+			return buf.getvalue()
+
+	def test_tagged_rescue_is_counted_and_labeled(self):
+		with tempfile.TemporaryDirectory() as directory:
+			out = self.run_status(
+				Path(directory),
+				done_commits={1: "ticket(001): a", 2: "ticket(002): b [rescued]"},
+				halted_tickets=set(),
+			)
+		self.assertIn("rescued: 1 -- 1 tagged, 0 untagged halts", out)
+		self.assertIn("[x] 002-b [rescued]", out)
+		self.assertNotIn("[x] 001-a [rescued]", out)
+
+	def test_untagged_halt_is_still_counted_as_a_rescue(self):
+		# This is the accuracy fix: a ticket that genuinely halted (a real,
+		# non-recoverable gate failure, e.g. an infra fix or a human
+		# forgetting the commit-message tag) no longer disappears from the
+		# rescue count just because nobody remembered to write "[rescued]"
+		# in the commit subject.
+		with tempfile.TemporaryDirectory() as directory:
+			out = self.run_status(
+				Path(directory),
+				done_commits={1: "ticket(001): a", 2: "ticket(002): b"},
+				halted_tickets={2},
+			)
+		self.assertIn("rescued: 1 -- 0 tagged, 1 untagged halts", out)
+		self.assertIn("[x] 002-b [rescued: untagged]", out)
+
+	def test_clean_tickets_report_zero_rescued(self):
+		with tempfile.TemporaryDirectory() as directory:
+			out = self.run_status(
+				Path(directory),
+				done_commits={1: "ticket(001): a", 2: "ticket(002): b"},
+				halted_tickets=set(),
+			)
+		self.assertIn("rescued: 0 -- 0 tagged, 0 untagged halts", out)
+
+	def test_automatic_retry_with_multiple_real_gate_attempts_is_not_a_false_rescue(self):
+		# Regression test for the Codex P2 on PR #29: a ticket that passes
+		# purely through build_app.py's bounded automatic retry (e.g. a
+		# transient route outage archives a real, failing gate-attempt-*.json
+		# before the retry succeeds) must NOT be reported as rescued just
+		# because more than one real gate-attempt exists -- only a genuine
+		# non-recoverable halt (halt_record_exists()) counts.
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			reports = pilot_dir / "reports" / "ticket-002"
+			reports.mkdir(parents=True)
+			(reports / "gate-attempt-01.json").write_text("{}")
+			(reports / "gate-attempt-02.json").write_text("{}")
+			self.assertEqual(ticket_runner.gate_revisit_count(pilot_dir, self.tickets[1]), 2)
+			out = self.run_status(
+				pilot_dir,
+				done_commits={1: "ticket(001): a", 2: "ticket(002): b"},
+				halted_tickets=set(),
+			)
+		self.assertIn("rescued: 0 -- 0 tagged, 0 untagged halts", out)
+		self.assertNotIn("[rescued", out)
+
+
+class AmendCanonTests(unittest.TestCase):
+	def _pilot(self, directory):
+		pilot_dir = Path(directory)
+		workspace = pilot_dir / "workspace"
+		workspace.mkdir(parents=True)
+		return pilot_dir, workspace
+
+	def test_rejects_a_target_outside_the_workspace(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			outside = Path(directory) / "elsewhere.sh"
+			outside.write_text("echo hi\n")
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, [], outside, "because", True)
+			self.assertEqual(rc, 1)
+
+	def test_rejects_a_file_that_is_not_a_recognized_frozen_artifact(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			target = workspace / "backend" / "main.go"
+			target.parent.mkdir(parents=True)
+			target.write_text("package main\n")
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, [], target, "because", True)
+			self.assertEqual(rc, 1)
+
+	def test_requires_a_reason(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			baseline_dir = pilot_dir / "reports" / "ticket-001" / "verify-baseline"
+			baseline_dir.mkdir(parents=True)
+			(baseline_dir / "scripts__verify-full.sh").write_text("old\n")
+			ticket_runner.verify_baseline_json(pilot_dir).write_text(json.dumps({"scripts/verify-full.sh": "x"}))
+			target = workspace / "scripts" / "verify-full.sh"
+			target.parent.mkdir(parents=True)
+			target.write_text("new\n")
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, [], target, "", True)
+			self.assertEqual(rc, 1)
+
+	def test_amends_a_verify_surface_file_and_updates_the_baseline_hash(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			baseline_dir = pilot_dir / "reports" / "ticket-001" / "verify-baseline"
+			baseline_dir.mkdir(parents=True)
+			(baseline_dir / "scripts__verify-full.sh").write_text("old content\n")
+			ticket_runner.verify_baseline_json(pilot_dir).write_text(
+				json.dumps({"scripts/verify-full.sh": ticket_runner.sha256_of(baseline_dir / "scripts__verify-full.sh")})
+			)
+			target = workspace / "scripts" / "verify-full.sh"
+			target.parent.mkdir(parents=True)
+			target.write_text("new content, fixed the restart hang\n")
+
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, [], target, "fixed a real WaitDelay hang", True)
+
+			self.assertEqual(rc, 0)
+			self.assertEqual(
+				(baseline_dir / "scripts__verify-full.sh").read_text(),
+				"new content, fixed the restart hang\n",
+			)
+			ok, detail = ticket_runner.check_verify_surface_frozen(pilot_dir, workspace)
+			self.assertTrue(ok, detail)
+			log = (pilot_dir / ticket_runner.AMEND_CANON_LOG).read_text()
+			self.assertIn("scripts/verify-full.sh", log)
+			self.assertIn("fixed a real WaitDelay hang", log)
+
+	def test_amends_a_staged_acceptance_oracle(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			canon_dir = pilot_dir / "spec" / "acceptance" / "005"
+			canon_dir.mkdir(parents=True)
+			canon_file = canon_dir / "widget_test.dart"
+			canon_file.write_text("testWidgets('renders $X.YY', (t) async {})\n")
+			staged = workspace / "app" / "test" / "widget_test.dart"
+			staged.parent.mkdir(parents=True)
+			staged.write_text("testWidgets(r'renders $X.YY', (t) async {})\n")
+			tickets = [ticket_runner.Ticket(5, "dashboard", Path("005-dashboard.md"))]
+
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, tickets, staged, "canon had a real Dart interpolation bug", True)
+
+			self.assertEqual(rc, 0)
+			self.assertEqual(canon_file.read_text(), staged.read_text())
+			drift = ticket_runner.oracle_drift(pilot_dir, workspace, 5)
+			self.assertEqual(drift, [])
+
+	def test_declining_the_confirmation_leaves_canon_unchanged(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			baseline_dir = pilot_dir / "reports" / "ticket-001" / "verify-baseline"
+			baseline_dir.mkdir(parents=True)
+			(baseline_dir / "scripts__verify-full.sh").write_text("old\n")
+			ticket_runner.verify_baseline_json(pilot_dir).write_text(json.dumps({"scripts/verify-full.sh": "x"}))
+			target = workspace / "scripts" / "verify-full.sh"
+			target.parent.mkdir(parents=True)
+			target.write_text("new\n")
+			with mock.patch("builtins.input", return_value="n"):
+				rc = ticket_runner.amend_canon(pilot_dir, workspace, [], target, "because", False)
+			self.assertEqual(rc, 1)
+			self.assertEqual((baseline_dir / "scripts__verify-full.sh").read_text(), "old\n")
+
+	def test_noop_when_workspace_already_matches_canon(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir, workspace = self._pilot(directory)
+			baseline_dir = pilot_dir / "reports" / "ticket-001" / "verify-baseline"
+			baseline_dir.mkdir(parents=True)
+			(baseline_dir / "scripts__verify-full.sh").write_text("same\n")
+			ticket_runner.verify_baseline_json(pilot_dir).write_text(json.dumps({"scripts/verify-full.sh": "x"}))
+			target = workspace / "scripts" / "verify-full.sh"
+			target.parent.mkdir(parents=True)
+			target.write_text("same\n")
+			rc = ticket_runner.amend_canon(pilot_dir, workspace, [], target, "because", True)
+			self.assertEqual(rc, 0)
+			log_path = pilot_dir / ticket_runner.AMEND_CANON_LOG
+			self.assertFalse(log_path.exists())
 
 
 if __name__ == "__main__":

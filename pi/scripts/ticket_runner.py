@@ -48,6 +48,20 @@ it -- no flag or special invocation needed. Rescue is always a
 human-invoked, out-of-band step; this script has no escalation path of
 its own (Phase 3 of the plan).
 
+The `[rescued]` tag is honor-system, not enforced (a 2026-08-20 pilot run
+found `--status` undercounting real rescues because of it). `--status`
+also reports `gate_revisit_count()` -- a structural signal, derived from
+how many real gate-attempt records a ticket produced, that catches a
+rescue whether or not anyone remembered to tag the commit, including
+infra-only rescues (fixing a stale model route, say) that never touch
+ticket content at all. Use `--amend-canon <workspace-file> --reason
+"..."` when a rescue's actual fix is a legitimate correction to a frozen
+verify-surface script or staged acceptance oracle (the gate is right to
+reject an agent-authored change to either without review, but the
+correction still needs a sanctioned way to become the new canon instead
+of hand-editing `reports/ticket-001/verify-baseline` and
+`spec/acceptance/NNN/` directly).
+
 Usage:
     python3 ticket_runner.py --pilot-dir /path/to/pilot [--status]
         [--review-policy advisory|required|degraded]
@@ -61,6 +75,7 @@ for a release-hardening run that requires clean independent review.
 from __future__ import annotations
 
 import argparse
+import difflib
 import fcntl
 import hashlib
 import json
@@ -486,6 +501,108 @@ def check_verify_surface_frozen(pilot_dir: Path, workspace: Path) -> tuple[bool,
 	return True, "unchanged since ticket 001"
 
 
+AMEND_CANON_LOG = "AMEND_CANON_LOG.md"
+
+
+def amend_canon(
+	pilot_dir: Path,
+	workspace: Path,
+	tickets: list[Ticket],
+	target: Path,
+	reason: str,
+	auto_yes: bool,
+) -> int:
+	"""Human-invoked rescue: accept the workspace's current version of a
+	frozen file (a verify-surface script or a staged acceptance oracle) as
+	the new canon.
+
+	The verify-surface-frozen and oracle-integrity gates are right to
+	distrust any agent-authored change to these files without review --
+	but when the change turns out to be a genuine fix to a bug in the
+	canonical artifact itself (not the app), accepting it was, before this
+	command existed, pure archaeology: grep the build session's .jsonl
+	transcript for the agent's edit tool call, hand-recover the diff,
+	hand-update reports/ticket-001/verify-baseline's hash and byte copy or
+	the spec/acceptance/NNN/ canonical file. That's exactly what tickets
+	010 and 012 of the 2026-08-20 budget-pilot needed by hand. This is the
+	explicit, logged, human-invoked escape hatch that design always
+	intended to need -- it does not weaken the gate itself, which still
+	refuses any agent-authored drift it hasn't been told about here.
+	"""
+	target = target.resolve()
+	try:
+		rel = target.relative_to(workspace.resolve())
+	except ValueError:
+		print(f"amend-canon target must be a path inside the workspace: {target}", file=sys.stderr)
+		return 1
+	rel_str = str(rel)
+
+	if rel_str in VERIFY_SURFACE_FILES:
+		kind = "verify-surface"
+		canon_path = verify_baseline_dir(pilot_dir) / rel_str.replace("/", "__")
+	else:
+		kind = "acceptance-oracle"
+		upto = max((t.number for t in tickets), default=0)
+		canon_path = next(
+			(canon for canon, staged in staged_pairs(pilot_dir, workspace, upto) if staged.resolve() == target),
+			None,
+		)
+		if canon_path is None:
+			print(
+				f"{rel_str} is not a recognized frozen file (not one of {VERIFY_SURFACE_FILES} "
+				"and not a staged acceptance slice) -- nothing to amend",
+				file=sys.stderr,
+			)
+			return 1
+
+	if not target.exists():
+		print(f"workspace file does not exist: {target}", file=sys.stderr)
+		return 1
+	if not reason.strip():
+		print("--reason is required: explain why the workspace version is the correct canon", file=sys.stderr)
+		return 1
+
+	new_bytes = target.read_bytes()
+	old_bytes = canon_path.read_bytes() if canon_path.exists() else b""
+	if new_bytes == old_bytes:
+		print(f"{rel_str}: workspace already matches canon, nothing to amend")
+		return 0
+
+	diff = "".join(difflib.unified_diff(
+		old_bytes.decode(errors="replace").splitlines(keepends=True),
+		new_bytes.decode(errors="replace").splitlines(keepends=True),
+		fromfile=f"canon/{rel_str}", tofile=f"workspace/{rel_str}",
+	))
+	print(f"=== amend-canon: {kind} :: {rel_str} ===")
+	print(diff or "(binary or non-text change -- no line diff to show)")
+	if not auto_yes:
+		answer = input(f"Accept this as the new canonical {rel_str}? [y/N] ").strip().lower()
+		if answer != "y":
+			print("aborted, canon unchanged")
+			return 1
+
+	canon_path.parent.mkdir(parents=True, exist_ok=True)
+	canon_path.write_bytes(new_bytes)
+	if kind == "verify-surface":
+		baseline_json = verify_baseline_json(pilot_dir)
+		data = json.loads(baseline_json.read_text()) if baseline_json.exists() else {}
+		data[rel_str] = sha256_of(target)
+		baseline_json.write_text(json.dumps(data, indent=2))
+
+	stamp = datetime.now(timezone.utc).isoformat()
+	log_path = pilot_dir / AMEND_CANON_LOG
+	existing = log_path.read_text(errors="ignore") if log_path.exists() else ""
+	block = (
+		f"\n\n## {rel_str} ({kind}) -- {stamp}\n\n"
+		f"Reason: {reason}\n\n"
+		f"- old sha256: {hashlib.sha256(old_bytes).hexdigest() if old_bytes else '(none)'}\n"
+		f"- new sha256: {hashlib.sha256(new_bytes).hexdigest()}\n"
+	)
+	log_path.write_text(existing + block)
+	print(f"canon updated: {rel_str} -- logged to {log_path}")
+	return 0
+
+
 def run_make(workspace: Path, target: str, timeout: float) -> tuple[bool, str]:
 	try:
 		result = sh(["make", target], cwd=workspace, timeout=timeout)
@@ -795,6 +912,40 @@ def run_ticket(
 	return passed
 
 
+def gate_revisit_count(pilot_dir: Path, ticket: Ticket) -> int:
+	"""How many times this ticket's gate produced a real (non-`.started`)
+	gate-attempt-*.json record. This is a raw diagnostic, not a rescue
+	signal: build_app.py's own bounded build-attempt retry (a transient
+	marker like a route outage or a stall-timeout) can legitimately
+	archive more than one real gate-attempt on its way to an automatic
+	pass, with no human ever involved (Codex review of PR #29 flagged
+	`print_status()`'s earlier use of this count as a false-positive
+	rescue proxy for exactly that reason). Use `halt_record_exists()` to
+	ask whether a ticket actually needed a human."""
+	reports = pilot_dir / "reports" / f"ticket-{ticket.nnn}"
+	if not reports.exists():
+		return 0
+	return sum(
+		1 for p in reports.glob("gate-attempt-*.json")
+		if not p.name.endswith(".started.json")
+	)
+
+
+def halt_record_exists(workspace: Path, ticket: Ticket) -> bool:
+	"""True if PROGRESS.md contains a runner-written HALT record for this
+	ticket -- append_halt_record() writes one only on the non-recoverable
+	path, i.e. only when retryable_build_state() found no automatic/
+	transient-retry route and the line genuinely stopped for a human.
+	Unlike a raw gate-attempt count, this structurally excludes tickets
+	that passed purely through build_app.py's bounded automatic retry
+	(each retried attempt can still archive a real, non-`.started`
+	gate-attempt-*.json -- see gate_revisit_count()'s docstring)."""
+	progress = workspace / "PROGRESS.md"
+	if not progress.exists():
+		return False
+	return f"HALT at ticket {ticket.nnn} (" in progress.read_text(errors="ignore")
+
+
 def print_status(
 	pilot_dir: Path,
 	tickets: list[Ticket],
@@ -802,11 +953,25 @@ def print_status(
 	review_policy: str = DEFAULT_REVIEW_POLICY,
 ) -> None:
 	done_commits = committed_ticket_numbers(workspace)
-	rescued = sum(1 for subject in done_commits.values() if "[rescued]" in subject)
+	# The `[rescued]` commit tag is honor-system -- nothing enforces an
+	# agent or human actually adds it (see the 2026-08-20 budget-pilot
+	# verdict: --status reported "rescued: 1" against a true count of 5).
+	# halt_record_exists() is the structural counterpart: it doesn't know
+	# *why* a ticket needed a human, but it can't be forgotten to tag (and,
+	# unlike a raw gate-attempt count, it doesn't fire on a ticket that
+	# passed purely through automatic retry), so report both and let an
+	# untagged halt stand out rather than silently undercounting.
+	tagged = {n for n, subject in done_commits.items() if "[rescued]" in subject}
+	halted = {t.number for t in tickets if t.number in done_commits and halt_record_exists(workspace, t)}
+	rescued = tagged | halted
 	nxt, mode = next_ticket(tickets, pilot_dir, workspace, review_policy)
 	print(f"pilot dir: {pilot_dir}")
 	print(f"tickets total: {len(tickets)}")
-	print(f"tickets committed: {len(done_commits)} (of which rescued: {rescued})")
+	print(
+		f"tickets committed: {len(done_commits)} "
+		f"(of which rescued: {len(rescued)} -- {len(tagged)} tagged, "
+		f"{len(halted - tagged)} untagged halts)"
+	)
 	if nxt is None:
 		print("next ticket: (none -- all tickets complete)")
 	else:
@@ -815,7 +980,12 @@ def print_status(
 		done = ticket_done(pilot_dir, workspace, t, review_policy)
 		has_commit = t.number in done_commits
 		marker = "x" if done else ("~" if has_commit else " ")
-		rescue_tag = " [rescued]" if has_commit and "[rescued]" in done_commits[t.number] else ""
+		if has_commit and t.number in tagged:
+			rescue_tag = " [rescued]"
+		elif has_commit and t.number in halted:
+			rescue_tag = " [rescued: untagged]"
+		else:
+			rescue_tag = ""
 		print(f"  [{marker}] {t.nnn}-{t.slug}{rescue_tag}")
 	print("  ('x' = done -- commit + passing gate; '~' = commit exists but gate not passing yet)")
 	report_dir = pilot_dir / "reports"
@@ -830,6 +1000,18 @@ def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--pilot-dir", required=True, type=Path)
 	parser.add_argument("--status", action="store_true", help="Read-only position report; runs nothing.")
+	parser.add_argument(
+		"--amend-canon",
+		type=Path,
+		metavar="WORKSPACE_FILE",
+		help=(
+			"Human rescue: accept a workspace file's current content as the new canon "
+			"(a verify-surface script or a staged acceptance oracle), after showing the "
+			"diff and requiring confirmation. Requires --reason; use --yes for non-interactive use."
+		),
+	)
+	parser.add_argument("--reason", default="", help="Required with --amend-canon: why the workspace version is correct.")
+	parser.add_argument("--yes", action="store_true", help="Skip the --amend-canon confirmation prompt.")
 	parser.add_argument(
 		"--review-policy",
 		choices=("advisory", "required", "degraded"),
@@ -849,6 +1031,20 @@ def main() -> int:
 	if args.status:
 		print_status(pilot_dir, tickets, workspace, args.review_policy)
 		return 0
+
+	if args.amend_canon:
+		lock_path = pilot_dir / ".ticket_runner.lock"
+		lock_handle = lock_path.open("w")
+		try:
+			fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+		except OSError:
+			print(
+				f"another ticket_runner.py is already running against {pilot_dir} "
+				f"(lock held on {lock_path}); refusing to race it",
+				file=sys.stderr,
+			)
+			return 1
+		return amend_canon(pilot_dir, workspace, tickets, args.amend_canon, args.reason, args.yes)
 
 	lock_path = pilot_dir / ".ticket_runner.lock"
 	lock_handle = lock_path.open("w")
