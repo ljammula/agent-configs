@@ -640,6 +640,29 @@ class StagedPairsTests(unittest.TestCase):
 
 			self.assertEqual(staged_names, ["go.mod", "go.sum"])
 
+	def test_stage_removes_a_stale_pre_prefix_staged_file(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_1.mkdir(parents=True)
+			(slice_1 / "handler_test.go").write_text("package acceptance // canon\n")
+			(pilot_dir / "spec" / "contract.md").write_text("# contract\n")
+			# Simulate a workspace staged by the pre-fix ticket_runner.py, which
+			# wrote the bare basename with no ticket-number prefix.
+			stale = workspace / "acceptance" / "handler_test.go"
+			stale.parent.mkdir(parents=True)
+			stale.write_text("package acceptance // stale, pre-prefix copy\n")
+
+			ticket_runner.stage(pilot_dir, workspace, upto=1)
+
+			self.assertFalse(stale.exists())
+			self.assertEqual(
+				(workspace / "acceptance" / "001_handler_test.go").read_text(),
+				"package acceptance // canon\n",
+			)
+
 	def test_stage_writes_both_colliding_basenames_to_disk(self):
 		with tempfile.TemporaryDirectory() as directory:
 			pilot_dir = Path(directory)

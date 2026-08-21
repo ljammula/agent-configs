@@ -7,6 +7,12 @@ Draft `spec/contract.md` and `spec/acceptance/NNN/*` for the pilot dir
 at `$1` (default: current directory), from the already-frozen
 `spec/spec.md` and `spec/tickets/NNN-*.md`.
 
+**Resolve `$1` to a concrete path before running anything below:** if
+`$1` was not given, set it to `$(pwd)` -- do not let it stay empty and
+flow into the self-check commands below as-is, which would expand
+`"$1"/spec/acceptance/*/*.go` to a root-relative glob that matches
+nothing instead of the current directory's acceptance slices.
+
 **This is the highest-stakes step in the whole pipeline, and this
 template only does half of it.** A wrong contract or test oracle doesn't
 fail loudly -- it silently certifies broken app code as correct later,
