@@ -80,20 +80,31 @@ asserts the *right* behavior. Run it for real and paste the actual
 output; do not report this step done without having run it.
 
 **Go**: assemble everything staged so far into a scratch module and vet
-it -- e.g. `mkdir -p /tmp/contract-check/acceptance && cp
-spec/acceptance/*/*.go /tmp/contract-check/acceptance/ && cp
-spec/acceptance/*/go.mod /tmp/contract-check/acceptance/ 2>/dev/null;
-cd /tmp/contract-check/acceptance && go vet ./... && go build ./...`.
-Fix anything that fails to compile, then re-run until clean.
+it. Resolve every path from `$1` (default: current directory) rather
+than the shell's cwd, and start from a clean scratch dir each run --
+files left over from a previous draft or a different pilot in
+`/tmp/contract-check` would otherwise get vetted/built alongside this
+one and produce false failures (or worse, a false pass) -- e.g. `rm -rf
+/tmp/contract-check && mkdir -p /tmp/contract-check/acceptance && cp
+"$1"/spec/acceptance/*/*.go /tmp/contract-check/acceptance/ && cp
+"$1"/spec/acceptance/*/go.mod /tmp/contract-check/acceptance/
+2>/dev/null; cd /tmp/contract-check/acceptance && go vet ./... && go
+build ./...`. Fix anything that fails to compile, then re-run until
+clean.
 
 **Dart**: this needs a real Flutter project context to resolve
 `package:flutter_test`/widget imports -- a bare `dart analyze` on an
 isolated file will false-positive on unresolved imports that have
-nothing to do with the actual test. If a scratch Flutter project is
-cheap to create in this environment (`flutter create /tmp/contract-check
---project-name scratch`, copy each Dart slice's test file into
-`/tmp/contract-check/test/`, run `flutter analyze`), do that and fix
-what it finds. If creating one is not practical here, say so explicitly
+nothing to do with the actual test. Use a separate scratch dir from the
+Go check above (`/tmp/contract-check-dart`), and remove it first if it
+already exists, for the same reason -- a prior draft's leftover test
+files would otherwise get analyzed alongside this one. If a scratch
+Flutter project is cheap to create in this environment (`rm -rf
+/tmp/contract-check-dart && flutter create /tmp/contract-check-dart
+--project-name scratch`, copy each Dart slice's test file from
+`"$1"/spec/acceptance/*/` into `/tmp/contract-check-dart/test/`, run
+`flutter analyze`), do that and fix what it finds. If creating one is
+not practical here, say so explicitly
 in the report below rather than silently skipping the check -- an
 unflagged gap is worse than a flagged one.
 
