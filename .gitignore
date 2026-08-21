@@ -15,3 +15,10 @@ models_cache.json
 
 # Local/machine-specific settings
 settings.local.json
+
+# Eval battery run outputs -- working scratch from local harness
+# validation runs, not meant to be committed by default. Doesn't affect
+# already-tracked historical snapshots (e.g. battery-results/2026-08-19-*),
+# only keeps new run output out of `git status` -- `git add -f` still works
+# for a snapshot deliberately kept as a historical record.
+pi/evals/battery-results/
