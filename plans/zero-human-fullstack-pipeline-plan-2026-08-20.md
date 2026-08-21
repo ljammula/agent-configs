@@ -496,40 +496,58 @@ commit contents specifically, not a design problem.
 
 **All 12 tickets committed, gate-passed, pilot complete.** `ticket_runner.py
 --status`: `tickets committed: 12 (of which rescued: 1)`, `last gate
-outcome (012): PASS`, `next ticket: (none -- all tickets complete)`.
+outcome (012): PASS`, `next ticket: (none -- all tickets complete)`. The
+`rescued: 1` figure is honor-system (it only counts commits carrying the
+literal `[rescued]` tag) and undercounts the true rescue rate — see the
+corrected accounting below.
 
-- **11/12 tickets fully automated, no rescue**: 001, 002, 005–009, 011
-  gated clean on the first automated attempt; 003 and 004 needed
-  human rescue for reasons already on record above (003: stale
-  runner process predating a merged fix; 004: genuine round-budget
-  exhaustion on the onboarding screen — the one ticket where the local
-  model made no forward progress across all 3 rounds); 010 needed a
-  1-character fix to a buggy canonical oracle, not the app.
-- **Ticket 012 (the last ticket) also needed rescue** — see the ticket-012
-  entries above for the full mechanism: `build_app.py` reported
-  `SUCCEEDED` with a real, working fix to `scripts/verify-full.sh`'s
-  restart-persistence wiring (a genuine bug in ticket 001's frozen
-  baseline script, not the app — the restarted server inherited `go
-  test`'s stdout pipe and hung the outer wait with `WaitDelay expired`),
-  but never committed, and the verify-surface-frozen gate correctly
-  refused the agent-authored fix pending human review. Re-applied by
-  hand, verified independently (`make verify-full` green, restart
-  confirmed with a real stop/start cycle, `TestRestartPersistence`
-  confirmed not skipped), frozen baseline updated to match, committed
-  `ticket(012): persistence and hardening [rescued]`, then re-gated
-  clean.
-- **This is exactly the measurement the pilot was built to produce, not
-  an ambiguous one.** Per Phase 3, rescue is a separate, explicit,
-  post-verdict step that doesn't change what got recorded: 3 of 12
-  tickets (003, 004, 012) needed a human hand — one infra/process gap,
-  one genuine local-model implementation gap, one genuine bug in the
-  cloud-compiled acceptance harness itself (mirroring ticket 010's
-  canonical-oracle bug) — and the other 9 ran the local model unassisted
-  end to end, including every screen and every backend endpoint in the
-  spec. Zero cloud tokens were spent on *implementation* at any point
-  (`--sonnet-fallback` was never used; every round was `pi-local`/Qwen);
-  the rescues were a human directly editing files and re-running the
-  deterministic gate, exactly as Phase 3 specifies.
+- **8/12 tickets gated clean on the first automated attempt, no human
+  action of any kind**: 001, 002, 005, 006, 007, 008, 009, 011. (011's
+  first *attempt* crashed on a cmux failure unrelated to the model or the
+  code — see above — but the ticket itself needed no human edit, only a
+  process relaunch that the runner's own retry logic absorbed
+  automatically, so it counts as unassisted.)
+- **4/12 tickets required a human hand to advance the line**: 003 (stale
+  runner process predating a merged fix — infra, not model or oracle),
+  004 (genuine round-budget exhaustion — the one ticket where the local
+  model made zero forward progress in 3 rounds, and notably the one
+  "create N files from nothing" ticket in the run; every clean ticket was
+  incremental against an existing skeleton), 010 (1-character fix to a
+  genuine bug in the canonical Dart oracle — the model's own fix was
+  correct but the frozen-oracle gate, correctly, wouldn't accept an
+  agent-modified oracle without review), 012 (working fix to a genuine
+  bug in the canonical `verify-full.sh` — same shape as 010, applied to
+  the verify harness instead of a test file). Two more tickets (005, and
+  arguably 001's first attempt) needed a human *infra* fix
+  (`AI_STACK_HOST` LAN-hostname staleness) to keep running at all, though
+  neither required touching ticket content.
+- **The independent-review layer was effectively absent for the entire
+  run, and this needs to be said plainly rather than left implicit.**
+  `ticket_runner.py` defaults to `--review-policy advisory`, and of 12
+  tickets only 2 got a decisive reviewer verdict (001's second round,
+  and 011 — both clean). Every other ticket "SUCCEEDED" on canonical
+  verification alone: `request-failed` across 005–010 consecutively (the
+  reviewer route was down for roughly 2.5 hours with nothing surfacing
+  it — the exact silent-infra-outage failure class the plan already
+  fixed for the *primary* model route via `agent_turn_errors()`, just not
+  yet for the reviewer route), `no-review-verdict` on 003/004/012,
+  `empty-diff` on 002. What the pilot actually measured is *oracle +
+  deterministic gates with no working review layer*, which is a
+  different (and arguably still meaningful, but distinct) claim from
+  what "review at 15/15 planted-bug catches" in Phase 0's evidence base
+  implies for this run specifically.
+- **Corrected framing**: as a measurement of local-model implementation
+  capability against a pre-written oracle, 8/12 (67%) unassisted is the
+  honest number — not the "9/12" and "11/12" figures that appeared in
+  earlier drafts of this section, which were inconsistent with each
+  other and undercounted rescues (010's human-edited-oracle halt wasn't
+  in either count). As evidence for a *zero-human* pipeline, the run was
+  babysat: six distinct human interventions across one day (003, 004,
+  010, 012 rescues; the `AI_STACK_HOST` fix; the cmux-crash relaunch).
+  "Zero cloud tokens spent on implementation" does hold exactly as
+  stated — every round was local (`pi-local`/Qwen), `--sonnet-fallback`
+  was never invoked, and every rescue was a human editing files directly
+  rather than cloud tokens doing the work.
 - **Reading on the keep-or-abandon question**: the pipeline's mid-layer
   (diff-hash-bound verification, oracle-integrity, verify-surface
   freezing, attempt-retry vs. stop-the-line separation) worked exactly
@@ -537,11 +555,45 @@ outcome (012): PASS`, `next ticket: (none -- all tickets complete)`.
   012) where the gate correctly caught something and the something
   turned out to be a genuine bug in the human-authored harness rather
   than tampering — that distinction mattered and the design held up
-  under it. The local model completed 9/12 tickets fully unassisted and
-  made zero forward progress on exactly 1/12 (ticket 004) inside its
-  round budget. That 75% unassisted rate on a real, previously-unseen
-  spec (the model never saw the reference `personal-budget-simplifier`
-  implementation) is the number this whole pilot exists to produce.
+  under it. But both of those bugs were trivially discoverable
+  *pre-freeze* (a `flutter analyze` pass per Dart oracle slice would have
+  caught 010's interpolation bug; a dry-run of the restart lifecycle
+  against a stub server would have caught 012's stdout-inheritance hang
+  — `EXECUTION_LOG.md` even flagged `verify-full.sh` as "the riskiest
+  untested surface" before the run started, and it then shipped untested
+  and cost exactly the predicted halt). On a 30–100-ticket app this class
+  of unvalidated-oracle bug scales linearly into human rescues and
+  pollutes the capability measurement — an oracle self-check step
+  belongs in Phase 1, not left to the pilot to discover live.
+- **External sanity check (2026-08-20, Fable review)**: an independent
+  cloud-model review of this pilot — reading the raw `gate.json`/
+  `BUILD_REPORT.md` evidence rather than trusting this document's prose,
+  and re-running `make verify` in the workspace directly — confirmed the
+  app and gate evidence are genuine, confirmed stop-the-line fired
+  correctly in all 6 halt cases, and independently surfaced both the
+  review-layer gap and the 9/12-vs-11/12 inconsistency above (this
+  section has been corrected to match). Rated the harness+ticket_runner
+  design 7/10 (docked for the silent review-layer gap, honor-system
+  rescue accounting, and heuristic accretion in the build-attempt retry
+  classifier at `ticket_runner.py`'s `retryable_build_state`/
+  `next_build_attempt`) and rated de-risking of "local-model-driven full
+  app builds" as a strategy 4.5/10 — meaningfully advanced by this
+  pilot, far from proven, because this spec gave the model unusual
+  scaffolding advantages (the cloud-compiled ticket 001 pre-pinned Dart
+  class names, widget Keys, and embedded the verify shell scripts
+  verbatim) and n=1 on a favorable spec doesn't establish generalization.
+  Recommended next step: a second pilot on a genuinely unseen spec (the
+  plan's own Temporal-worker suggestion fits, since the oracle-writer
+  hasn't already debugged that domain), including 2-3 "create a
+  subsystem from nothing" tickets to re-test the one shape that beat the
+  model this run (004), run only after two cheap prep fixes: an oracle
+  self-check in Phase 1 (compile/analyze every slice, dry-run the
+  verify-full server lifecycle) and restoring/monitoring the reviewer
+  route so the second pilot's rescue rate is attributable to the model,
+  not to noise this pilot's rescues were mostly made of. Phase 5 (local
+  decomposition) and standalone hardening of the retry-classifier were
+  both judged premature — they add variance or produce no new evidence
+  while implementation capability itself is still at n=1.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
