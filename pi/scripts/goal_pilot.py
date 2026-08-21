@@ -243,7 +243,16 @@ def run_pi_prompt(pilot_dir: Path, prompt: str, *, session_dir: Path, timeout_s:
 	# way build_app.py's own run_build() does, rather than assuming the
 	# caller's shell already exported one.
 	os.environ.setdefault("AI_STACK_HOST", "127.0.0.1")
-	returncode, stdout, stderr, timed_out = ticket_runner.invoke_build_app(command, timeout_s)
+	# `pi` has no --cwd flag: its bash tool operates directly on this
+	# process's own working directory, which subprocess.Popen otherwise
+	# inherits from whatever directory goal_pilot.py itself happened to be
+	# launched from -- silently the caller's own dev checkout, not the pilot
+	# dir, if goal_pilot.py was run from inside one (reproduced live: the
+	# model's bash exploration during a /contract-plan self-check wandered
+	# into agent-configs' own unrelated test output instead of staying
+	# scoped to the pilot). Pin it explicitly instead of trusting the
+	# caller's shell to already be in the right place.
+	returncode, stdout, stderr, timed_out = ticket_runner.invoke_build_app(command, timeout_s, cwd=pilot_dir)
 	errored, total = build_app.agent_turn_errors(stdout)
 	# `pi` exits 0 and can still leave a real artifact (e.g. a resumed
 	# /contract-plan run's already-partial contract.md) on disk even when
