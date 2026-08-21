@@ -603,6 +603,23 @@ corrected accounting below.
   back of this review. This plan's active work ends at the verdict
   above; Fable's oracle-self-check idea and second-pilot suggestion are
   recorded for reference only, not queued as next steps.
+- **What this pilot rates the harness against, and against what it
+  doesn't (2026-08-20):** the pilot was never a measurement of the local
+  model against Sonnet on raw capability — Sonnet would very likely have
+  done all 12 tickets unassisted, including the one blank-page ticket
+  (004) the local model failed 3/3 rounds on, and probably wouldn't have
+  needed the two frozen-harness bugs (010, 012) pointed out to it either.
+  What it rates is the *harness's* ability to substitute verification
+  rigor for model capability: 8/12 tickets, zero cloud implementation
+  tokens, with the gate correctly catching every place the model went
+  wrong plus two places the human-authored harness itself was wrong.
+  That's a real, if partial and n=1, win on "how much local grinding can
+  a strict gate extract from a cheap model" — but the cost side is real
+  too: six human interventions in one day of wall-clock is a token-cost
+  win, not an attention-cost win. If engineer attention is the scarcer
+  resource on a given task, Sonnet-solo is currently the more efficient
+  choice; this harness is the better choice when cloud-token spend is the
+  binding constraint and some supervision is acceptable.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 

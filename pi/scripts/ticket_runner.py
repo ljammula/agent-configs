@@ -97,6 +97,16 @@ TRANSIENT_BUILD_MARKERS = (
 	"stall-timeout",
 	"review unavailable (request-failed)",
 	"review unavailable (no-review-verdict)",
+	# build_app.py's own outage short-circuit (agent_turn_errors()/
+	# round_blockers() in build_app.py): every assistant turn in the round
+	# errored out because the model route itself was unreachable, so no
+	# implementation work was ever attempted. Without this marker,
+	# retryable_build_state() treats an outage report exactly like a real
+	# implementation failure and halts for human intervention instead of
+	# using the bounded build-attempt retry this class of failure is meant
+	# for (observed live: budget-pilot ticket 005, 2026-08-20 -- Codex
+	# review of PR #28 flagged this gap).
+	"model route unreachable",
 )
 # The Makefile and verify scripts are agent-writable but gate-trusted --
 # nothing byte-checks them the way oracle_drift() byte-checks acceptance

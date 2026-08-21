@@ -538,6 +538,18 @@ def run_build(
 		if verify_command is None:
 			result.stopped_reason = "no canonical verification command resolvable"
 			break
+		errored, total = turn_errors
+		if total and errored == total:
+			# The model route was unreachable for every assistant turn this
+			# round -- no code was ever produced for the agent to act on, so
+			# further rounds against the same dead route would just repeat
+			# this outcome and burn the rest of the round budget for nothing
+			# (observed live: budget-pilot ticket 005 burned all 3 rounds this
+			# way before the outage was noticed). Stop immediately instead of
+			# looping to max_rounds; ticket_runner.py's own build-attempt
+			# retry is the layer that should recover once the route is back.
+			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
+			break
 		if not blockers:
 			result.succeeded = True
 			if reviewer.outcome == "clean":
