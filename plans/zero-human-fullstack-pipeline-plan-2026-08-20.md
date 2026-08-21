@@ -398,6 +398,30 @@ matching the model's fix exactly) and re-staged it into the workspace;
 the Phase 1 P2 spec-contradiction fix already on record above, applied
 to a syntax bug instead of a semantic one.
 
+**Ticket 011 halt/resume — crashed mid-round, recovered by the runner's
+own retry logic (2026-08-20).** The `ticket_runner.py` process driving
+ticket 011 died mid-attempt with no `BUILD_REPORT.md` and an uncommitted
+in-progress diff (`transactions.go` + `category_correction_test.go`) —
+most likely the wrapping shell/session that launched it ended, not a
+crash inside the script itself; no error was logged. No special recovery
+was needed: relaunching `make run` (`AI_STACK_HOST=kannas-mac-studio`)
+found the stale `build-attempt-01.started.json` with no matching report,
+printed `previous build attempt ended without report evidence; retrying
+0/2 after 30s`, and ran a fresh `build_app.py` invocation as
+build-attempt-02. That attempt succeeded outright — `ticket(011): category
+correction endpoint` (`d1567af`), full gate green (verify, verify-full,
+oracle integrity, verify-surface frozen, BUILD_REPORT SUCCEEDED, commit +
+state files all `ok`), no rescue. This is the attempt-retry mechanism
+(Phase 2 gate, `af46d6b`-era `write_once`/lock work) operating exactly as
+designed against a plain process-loss case, distinct from the
+infra-outage halts above. One operational note for future long runs:
+launching via `nohup ... &; disown` from an agent shell was initially
+assumed dead (per the ticket-004-era note that this pattern doesn't
+survive the wrapper) but in this instance it *did* keep running
+detached — `ps aux` just failed to grep-match the process name. Confirm
+via `ps -p <pid>` on the PID actually reported by the shell, not a name
+grep, before concluding a background launch died.
+
 Also corrected in passing: the ticket 004 rescue (above) deliberately
 left `app/test/onboarding_screen_test.dart` and `acceptance/` out of
 that commit, reasoning from ticket 003's precedent — but ticket 003
