@@ -352,12 +352,62 @@ runner or an agent rescue can fix; recovery is restoring LAN
 reachability, then relying on `ticket_runner.py`'s own per-ticket
 build-attempt budget (3 separate `build_app.py` invocations, not just
 3 rounds within one) to retry ticket 005 with no runner changes needed.
-Follow-up worth doing (not yet implemented): have `build_app.py`
-distinguish an all-turns-errored round (zero total tokens, every
-assistant message `stopReason: error`) from a genuine
-verification-failed round, so a route outage doesn't silently consume
-real round budget indistinguishably from the model actually trying and
-failing.
+Follow-up: implemented in `agent-configs` `ad6b507` — `build_app.py` now
+has `agent_turn_errors()` and a distinct `model route unreachable (N/N
+assistant turns errored)` blocker, surfaced per round in
+`BUILD_REPORT.md`. Round-budget accounting is unchanged by design (this
+makes the failure class legible, it doesn't grant free retries).
+
+**Root cause of the unreachability, and the actual fix (2026-08-20).**
+`AI_STACK_HOST=kannasmacstudio.lan` had gone stale — `curl`/`nc`/`ping`
+all failed with "no route to host" against it, but the box was reachable
+the whole time via Tailscale MagicDNS at `kannas-mac-studio` (no `.lan`
+suffix), confirmed with `curl http://kannas-mac-studio:8080/v1/models`
+returning the model list. `~/.zshenv` already defaults `AI_STACK_HOST` to
+`kannas-mac-studio`; the stale `.lan` value only won because it was
+already exported earlier in the session. Resumed with
+`AI_STACK_HOST=kannas-mac-studio make run` and the pipeline continued
+through tickets 005-009 with no further rescues needed. Saved to
+Claude's cross-session memory (`ai-stack-host-hostname.md`) so a future
+session tries this fallback before concluding the box itself is down.
+This correction belongs in `~/.claude/CLAUDE.md` too (it currently
+documents `kannasmacstudio.lan` as *the* host) but that file is the
+user's, not this repo's, to edit.
+
+**Ticket 010 halt — oracle-integrity gate caught real drift, but the
+drift was a correct fix to a buggy canonical oracle (2026-08-20).**
+`build_app.py` reported `SUCCEEDED` and the ticket committed, but the
+runner's own re-gate failed on `oracle integrity`: the committed
+`app/test/dashboard_screen_test.dart` differed from
+`spec/acceptance/010/`'s canonical copy by one character — the model
+added an `r` prefix to `testWidgets('renders exact $X.YY ...', ...)`,
+turning it into a raw string. Checked why: the *canonical* oracle (Phase
+1's cloud-compiled acceptance suite) has a genuine bug — `$X` inside a
+non-raw Dart string literal is interpolation syntax, and `X` isn't a
+defined identifier, so `dart analyze` on the unmodified canonical file
+fails with `Undefined name 'X'`. The model's one-character edit was
+required for the file to compile at all; it wasn't gaming the test's
+assertions. The gate is working exactly as designed here — it doesn't
+(and shouldn't) distinguish "malicious tampering" from "correct fix to a
+broken oracle," any drift fails identically — but it also means the
+pilot's own frozen acceptance suite was never actually validated
+end-to-end before being frozen. Fixed the canonical file directly
+(`spec/acceptance/010/dashboard_screen_test.dart`, added the `r` prefix,
+matching the model's fix exactly) and re-staged it into the workspace;
+`make verify-full` now green. This is the same class of correction as
+the Phase 1 P2 spec-contradiction fix already on record above, applied
+to a syntax bug instead of a semantic one.
+
+Also corrected in passing: the ticket 004 rescue (above) deliberately
+left `app/test/onboarding_screen_test.dart` and `acceptance/` out of
+that commit, reasoning from ticket 003's precedent — but ticket 003
+predated any staged acceptance suite entirely, so that precedent didn't
+actually generalize. Every ticket since (005 onward) commits its staged
+oracle files normally (`acceptance/summary_test.go` in ticket 009,
+`app/test/connect_account_screen_test.dart` in ticket 006, etc.), and
+ticket 005's commit picked up `onboarding_screen_test.dart` again on its
+own, so no gap remains — just a benign inconsistency in ticket 004's
+commit contents specifically, not a design problem.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
