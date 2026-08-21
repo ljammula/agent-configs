@@ -154,6 +154,59 @@ python3 pi/scripts/build_app.py \
   includes exhausted corrective rounds, timeouts, unavailable required
   review, and an unresolvable canonical command.
 
+## `goal_pilot.py` — outermost loop: idea in, app out
+
+One invocation drives the entire pipeline end to end, using the local
+model for every judgment step: `/spec-plan` (draft spec + tickets) → a
+human checkpoint (spec freeze, never skippable) → `/contract-plan`
+(contract + acceptance suite) → another checkpoint → `ticket_runner.py`'s
+build loop → halt/rescue handling → a verdict report. See
+`plans/goal-pilot-skill-plan-2026-08-21.md` for the full design and its
+reasoning; summary here is deliberately thin so the two don't drift.
+
+```bash
+python3 pi/scripts/goal_pilot.py \
+  --spec-input /path/to/rough-idea.md \
+  --pilot-dir ~/code/pilots/my-app \
+  [--checkpoint review|skip]       # default: skip
+  [--on-halt report|auto-rescue]   # default: auto-rescue
+  [--review-policy advisory|required|degraded]  # default: advisory
+```
+
+- `--spec-input` accepts either an existing file path or literal rough-
+  input text (written to a scratch file inside the pilot dir on first use,
+  then reused as-is on every resume).
+- `--checkpoint=review` pauses after `/contract-plan` and shows its self-
+  check output verbatim, asking you to bring the draft to a separate cloud
+  session for review-and-correct before proceeding (per `/contract-plan`'s
+  own required, human-triggered design) — `skip` proceeds on the local
+  self-check alone, logging that decision into `EXECUTION_LOG.md`
+  unconditionally either way. The spec-freeze checkpoint and the
+  post-ticket-001 checkpoint are outside this flag and are never
+  skippable.
+- `--on-halt` governs three halt classes differently, not uniformly:
+  infra halts (a dead model route, a recoverable crashed process) auto-
+  retry under `auto-rescue`; frozen-artifact-canon drift (a correct fix to
+  a genuine bug in a frozen verify-surface file or acceptance oracle)
+  *never* auto-applies regardless of `--on-halt` and always routes through
+  `ticket_runner.py --amend-canon` after a human decision; a genuine
+  implementation gap gets exactly one bounded, unconditionally-local
+  widened retry (`build_app.py --max-rounds 6 --timeout-minutes 90
+  --thinking xhigh`) under `auto-rescue`, never a cloud escalation.
+- Resume is disk-state-driven, same idempotent pattern as everything else
+  in this pipeline: re-invoking `goal_pilot.py` against an existing pilot
+  dir picks up wherever `spec/spec.md`'s `STATUS:` line, the
+  `spec/.compile-complete` marker, and `ticket_runner.py`'s own
+  `git log`-derived position say to.
+- `ticket_runner.py --stop-after-ticket N` (added alongside `goal_pilot.py`)
+  is the one narrow exception to that script's own "no gate-logic
+  changes" rule -- additive control flow so `goal_pilot.py` can honor the
+  post-ticket-001 checkpoint without SIGTERM-ing a running build.
+- Every rescue `goal_pilot.py` performs — auto or human-approved — is
+  logged unconditionally to `EXECUTION_LOG.md` and `.goal-pilot/
+  rescues.jsonl`, and the final `VERDICT.md` states the rescued count by
+  class. Zero cloud tokens are spent on implementation at any point.
+
 ## Current validation status and remaining gaps
 
 - Verification resolution is no longer duplicated in Python:
@@ -176,3 +229,9 @@ python3 pi/scripts/build_app.py \
   corrective policy and Sonnet fallback remain source/integration-tested,
   not live battery evidence; `--containment` and non-Go full builds remain
   unexercised.
+- `goal_pilot.py` is unit-tested (halt classification, checkpoint/resume
+  markers, the ticket-1-phase/remainder halt-loop sharing) but has not yet
+  had a real end-to-end pilot run driven through it start to finish —
+  unlike `build_app.py`/`ticket_runner.py`, which the 2026-08-20
+  `budget-pilot` run exercised live across all 12+4 tickets. Treat it as
+  implemented-and-tested, not yet field-proven.

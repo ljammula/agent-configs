@@ -1075,6 +1075,20 @@ def main() -> int:
 		default=DEFAULT_REVIEW_POLICY,
 		help="Pass the review policy to build_app.py; advisory is the default, required is intended for release-hardening runs.",
 	)
+	parser.add_argument(
+		"--stop-after-ticket",
+		type=int,
+		default=None,
+		metavar="N",
+		help=(
+			"Return (exit 0) as soon as ticket N's gate settles -- pass or fail -- instead of "
+			"continuing to ticket N+1 in the same process. Added for goal_pilot.py "
+			"(plans/goal-pilot-skill-plan-2026-08-21.md step 5b), which needs to pause for a "
+			"human checkpoint right after ticket 001 without SIGTERM-ing a running build. Purely "
+			"additive control flow around the main loop -- does not change what any gate checks, "
+			"and a plain `make run`/no-flag invocation behaves exactly as before."
+		),
+	)
 	args = parser.parse_args()
 
 	pilot_dir = args.pilot_dir.resolve()
@@ -1156,6 +1170,9 @@ def main() -> int:
 			if mode in ("build", "retry", "policy") and retryable_build_state(pilot_dir, workspace, t):
 				continue
 			return 1
+		if args.stop_after_ticket is not None and t.number == args.stop_after_ticket:
+			print(f"\nstopping after ticket {t.nnn} as requested (--stop-after-ticket {args.stop_after_ticket}); gate passed.")
+			return 0
 
 
 if __name__ == "__main__":
