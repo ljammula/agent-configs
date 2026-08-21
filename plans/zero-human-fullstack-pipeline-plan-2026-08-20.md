@@ -644,6 +644,27 @@ corrected accounting below.
   checked against the real pilot dir: `--amend-canon` correctly no-ops on
   both already-fixed files (verify-full.sh, the ticket-010 oracle) and
   correctly applies+logs a real change in a throwaway copy.
+- **Bottom line, stated plainly (2026-08-20):** given a cloud-compiled
+  spec, contract, failing-first acceptance suite, and ticket
+  decomposition, Qwen3.8-27B-8bit through this harness executed 8/12
+  tickets (67%) completely unassisted, zero cloud tokens on
+  implementation — real endpoints, real screens, real tests. Of the 4
+  that didn't: 3 were bugs in the *cloud-written* scaffolding or
+  infrastructure, not the local model failing to code; only 1 (004) was
+  a genuine local-model capability miss. That one has a specific,
+  reproducible shape worth remembering as the actual finding, not the
+  75%/67% aggregate: every ticket the model completed unassisted was
+  **incremental** (extend an existing skeleton against a pre-pinned
+  contract, pre-pinned class names, pre-pinned test Keys to bend to);
+  the one it failed outright was the one **blank-page** ticket in the
+  run (create N new files from nothing). So the validated claim is
+  narrower and more useful than "the local model can execute a cloud
+  plan": it's "cloud plans, local executes the incremental majority of
+  the plan, harness gates the seam" — with a human still on call (six
+  interventions in one day) and the blank-page edge still unhandled
+  locally. Not yet tested: whether this ratio holds on a spec without
+  the cloud compiler's scaffolding advantages, or with a plan whose
+  tickets are more blank-page-shaped by nature.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
