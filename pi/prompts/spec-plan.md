@@ -187,6 +187,6 @@ Then this exact banner, and stop:
 HUMAN REVIEW REQUIRED before this is a frozen spec.
 Read spec/spec.md's Assumptions & Interpretations section and approve or
 correct each line. Do not run ticket_runner.py against this output, and
-do not proceed to contract/test generation, until that review has
-happened -- this step is allowed to guess; nothing downstream is.
+do not run /contract-plan, until that review has happened -- this step
+is allowed to guess; nothing downstream is.
 ```

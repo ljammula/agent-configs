@@ -392,26 +392,44 @@ registrations can't share a slash-command name.
 |---|---|
 | Scaffold dir + draft spec + tickets | `/spec-plan <rough-input> <pilot-dir>` |
 | Review Assumptions & Interpretations | human, no tooling |
-| Contract + acceptance-test generation | **cloud/human, informal — no template yet** (see below) |
+| Contract + acceptance-test generation | `/contract-plan <pilot-dir>` **drafts locally**, then **cloud review is a required, separate, human-triggered step** — see below |
 | Run the pipeline | `make run` (control-dir Makefile, wraps `ticket_runner.py`) |
 | Check position | `make status` |
 | Rescue a halted ticket | human + `build_app.py` by hand, or `ticket_runner.py --amend-canon` for a frozen-artifact bug |
 | List archived evidence | `make reports` |
 | Judge the final verdict | human reads `PROGRESS.md`/`reports/`, no tooling |
 
-Contract and acceptance-test generation is the one step with no local
-tooling, and that's deliberate, not an oversight: it's the highest-stakes
-output in the pipeline — a wrong contract or test oracle doesn't fail
-loudly, it silently certifies broken app code as correct, and unlike
-ticket sizing there's no cheap way to check "was this test actually
-right" before a real build hits it. Two of the one real pilot's five
-human interventions (tickets 010 and 012) were bugs in exactly this kind
-of output, caught only because the local model happened to hit them
-mid-build. `/spec-plan`'s "surface every guess for review" mitigation
-doesn't transfer cleanly here — a wrong business-rule assumption reads
-as a sentence a human can approve or reject; a wrong JSON field casing or
-a broken string-interpolation in a generated test doesn't announce
-itself on read, it needs to actually compile or run to be caught.
+Contract and acceptance-test generation is the highest-stakes output in
+the pipeline — a wrong contract or test oracle doesn't fail loudly, it
+silently certifies broken app code as correct, and unlike ticket sizing
+there's no cheap way to check "was this test actually right" before a
+real build hits it. Two of the one real pilot's five human interventions
+(tickets 010 and 012) were bugs in exactly this kind of output, caught
+only because the local model happened to hit them mid-build.
+
+`/contract-plan <pilot-dir>` handles only the half of this that's safe to
+automate: a local draft plus a **mechanical self-check** (assemble every
+staged Go acceptance slice into a scratch module and `go vet`/`go build`
+it; best-effort the same for Dart via a scratch Flutter project, since a
+bare `dart analyze` on an isolated file false-positives on unresolved
+`package:flutter_test` imports). Verified against the real pilot's
+acceptance suite, not just read for plausibility: the assembled-module
+check passes clean on the real (already-fixed) files, and correctly
+fails with a real type error (`go vet: cannot use "not-an-int" ... as int
+value`) when one is deliberately injected. This catches syntax-class bugs
+a review pass can miss on a read-through (ticket 010's unescaped `$` in a
+Dart string literal, a Go type error) — but says nothing about whether a
+test asserts the *right* behavior. `/spec-plan`'s "surface every guess
+for review" mitigation doesn't transfer to that half: a wrong
+business-rule assumption reads as a sentence a human can approve or
+reject; a wrong JSON field casing doesn't announce itself on read, it
+needs to actually run to be caught, and no amount of local self-checking
+substitutes for a second, more capable set of eyes on *meaning*. That
+half stays a manual, human-triggered step — bring the draft to a cloud
+session (Claude Code or equivalent) for review and correction before
+treating it as frozen. `/contract-plan` ends every run with a banner
+saying exactly that, and must never claim or imply cloud review happened
+when it didn't.
 
 `/goal` is not one of these: it's a real command registered by
 `goal-gate.ts` (see above), because a `/goal <condition>` needs persistent

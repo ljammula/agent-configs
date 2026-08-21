@@ -803,12 +803,59 @@ is the controlled input the pilot's claim depends on.
   follow").** `pi/README.md`'s Prompt templates section now carries a
   table mapping every step of running a pilot — scaffold+draft, human
   review, contract/test generation, `make run`/`status`/`reports`,
-  rescue — to what covers it, including calling out contract/test
-  generation as the one step still deliberately uncovered by any
-  template (see that section for the full reasoning, echoed from the
-  Fable review earlier in this document: it's the highest-stakes output,
-  and unlike ticket sizing there's no cheap way to check "was this test
-  right" before a real build hits it).
+  rescue — to what covers it.
+- **`/contract-plan <pilot-dir>` (2026-08-21) — the drafting half of
+  contract + acceptance-test generation, deliberately not the whole
+  thing.** Reasoning against automating this step at all was raised
+  directly (highest-stakes output, no cheap way to check "was this test
+  right," ticket 010/012 were both bugs in exactly this class of
+  output); the user's counter was that a **local draft + mandatory
+  mechanical self-check, followed by a required, separate,
+  human-triggered cloud review-and-correct pass**, resolves the actual
+  objection rather than working around it: (1) it restores independence
+  between the oracle and whatever later implements against it, since a
+  different, more capable actor corrects the draft before any local
+  model ever builds against it -- the same independence the lru-cache
+  finding shows collapses when the model grading the work is the model
+  that produced it; (2) it puts the judgment-heavy correction work on
+  the model class that's actually good at blank-page generative tasks
+  (this exact task shape is what beat the local model outright on ticket
+  004), rather than asking a mechanical check or an unaided human to
+  catch everything local got wrong; (3) it doesn't violate the
+  pipeline's zero-cloud-tokens claim, since that was always scoped to
+  *implementation* -- Phase 1 already allowed cloud one-shot calls for
+  contract/test generation, this just lets local take the first pass
+  instead of cloud generating from scratch. An automated `claude -p`
+  orchestration (mirroring `build_app.py`'s existing `sonnet_invocation`
+  escalation mechanism) was considered and explicitly rejected by the
+  user: **cloud review-and-correction is a manual, human-triggered
+  step**, not something `/contract-plan` or any script invokes on its
+  own -- a human brings the draft to a cloud session themselves.
+  `/contract-plan` therefore only builds the local-draft-plus-self-check
+  half and ends every run with a banner that must never claim or imply
+  the cloud review happened.
+  - **Self-check, verified for real, not just designed on paper**: Go
+    acceptance slices are assembled into a scratch module (only the
+    first Go slice carries `go.mod`, matching how `staged_pairs()`
+    already stages them into one shared `workspace/acceptance/`) and
+    `go vet`/`go build` run against it. Confirmed against the real
+    pilot's `spec/acceptance/*/*.go`: passes clean on the actual
+    (already-fixed) files, and correctly fails with a real type error
+    when one is deliberately injected (`go vet: cannot use "not-an-int"
+    ... as int value`) -- a genuine gate, not a check that trivially
+    passes. Dart is necessarily best-effort: a bare `dart analyze` on an
+    isolated file false-positives on unresolved
+    `package:flutter_test`/widget imports with no real Flutter project
+    context (which doesn't exist yet at contract-compile time, before
+    ticket 001 runs `flutter create`), so the template asks for a
+    scratch Flutter project if creating one is practical, and an
+    explicit flagged skip in the report if not -- an unflagged gap being
+    worse than a flagged one.
+  - No adoption bar toward trusted-unattended is proposed here either,
+    same as `/spec-plan`'s disambiguation half: the self-check only
+    catches syntax-class bugs (exactly ticket 010's and 012's classes),
+    says nothing about semantic correctness, and the cloud-review half
+    that actually covers semantics stays human-triggered every time.
 
 ## Explicitly out of scope
 
