@@ -1,11 +1,43 @@
 # Trim local-harness prompt bloat — plan
 
-**Date:** 2026-08-21. **Status: plan only — nothing below is built yet.**
+**Date:** 2026-08-21.
 **Trigger:** the calculator-pilot validation run this session hit
 `/contract-plan`'s `context_length_budget_exceeded` twice (fixed same day,
 `a86a980`, on `feat/goal-pilot-implementation`) — one instance of a class
 of problem this plan addresses systemically rather than one template at a
 time.
+
+## Status
+
+✅ **Done (PR #38, merged into `plan/harness-prompt-bloat-trim`):**
+Phase 1 (stop double-paying for `karpathy-guidelines` on pi) and Phase 2
+(prompt-template diet on `spec-plan.md`/`contract-plan.md`) — see their
+sections below for what was actually built, corrected after Codex review
+to match what the code really does. Both were live-validated end to end
+by running a full calculator-app pilot (single "add two numbers" scope)
+through `goal_pilot.py` against the real local harness: `/spec-plan` and
+`/contract-plan` each stayed under 10K first-turn prompt tokens (well
+inside the 49,152 budget), and the resulting app built, gated green, and
+`make verify-full` passed against a live server
+(`{"sum":3.75}`) — no quality regression from either trim.
+
+Two bugs in `goal_pilot.py` itself were found and fixed along the way
+(not in the original phases below, discovered because the live
+validation run actually exercised the full pipeline):
+1. `run_pi_prompt()`'s `pi --session-dir` was placed *inside* the pilot
+   dir, which `pi` populates before the model's first turn — silently
+   poisoning `/spec-plan`'s own step-0 "is this dir empty" scaffold check
+   on every fresh pilot dir. Fixed via `goal_pilot_session_root()`, a
+   pilot-dir sibling (same placement `resolve_spec_input()`'s scratch
+   file already used for the identical hazard).
+2. `invoke_build_app()` launched `pi` with no explicit `cwd=`, so it
+   silently inherited whatever directory `goal_pilot.py` was launched
+   from instead of the pilot dir — reproduced live when the model's bash
+   exploration during a `/contract-plan` self-check wandered into
+   `agent-configs`' own unrelated test output. Fixed by pinning
+   `cwd=pilot_dir` explicitly.
+
+⬜ **Not started:** Phases 0, 3, 4, 5 below.
 
 ## Why this matters, in numbers already on record
 
@@ -76,7 +108,7 @@ Already fixed and out of scope for new work here: the 8 stack skills
 
 ## Phases
 
-### Phase 0 — Re-measure the real current baseline
+### Phase 0 — Re-measure the real current baseline ⬜ not started
 
 The ~7,036-token figure predates `stack-skill-overlay.ts`; using it to
 plan further cuts risks optimizing against a stale number. Cheapest
@@ -90,11 +122,10 @@ relative terms (cut X, saves ~Y%) so it doesn't depend on getting this
 exact number first, but Phase 5's regression guard does need a real
 number to set its threshold against.
 
-### Phase 1 — Stop double-paying for `karpathy-guidelines` on pi
+### Phase 1 — Stop double-paying for `karpathy-guidelines` on pi ✅ DONE (PR #38)
 
-**Status: implemented, PR #38.** The mechanism this section originally
-described was wrong (Codex review of PR #38 caught it) — corrected here
-rather than left stale:
+The mechanism this section originally described was wrong (Codex review
+of PR #38 caught it) — corrected here rather than left stale:
 
 `karpathy-guardrail.ts` does **not** append the skill's full 2,922-byte
 `SKILL.md` unconditionally; it appends a short, inline ~415-byte (~104
@@ -120,10 +151,10 @@ claim resting on the ~730-token figure this section originally cited —
 that figure conflated the skill's full byte size with what was actually
 being paid twice.
 
-### Phase 2 — Prompt-template diet: split human rationale from model instructions
+### Phase 2 — Prompt-template diet: split human rationale from model instructions ✅ DONE (PR #38)
 
-**Status: implemented, PR #38**, with one correction to the approach
-originally proposed here (Codex review of PR #38 caught it):
+One correction to the approach originally proposed here (Codex review of
+PR #38 caught it):
 
 `/spec-plan` and `/contract-plan` currently mix two audiences in one
 file: instructions the model must follow, and rationale/history explaining
@@ -170,7 +201,7 @@ decomposition at 9,390 first-turn prompt tokens; the trimmed
 suite at 8,537 first-turn tokens (~26,351 peak) — both far under the
 49,152-token budget, no quality regression observed.
 
-### Phase 3 — Ban the "read a whole reference file/dir" instruction pattern
+### Phase 3 — Ban the "read a whole reference file/dir" instruction pattern ⬜ not started
 
 Today's bug was one instance of a class: a template telling the model to
 read an *unbounded* external artifact (a sibling pilot's entire
@@ -196,7 +227,13 @@ Audit scope: `spec-plan.md`, `contract-plan.md` (already fixed),
 `docwriter.md`, `l10n.md`, `wire.md`, `review.md`, `before-done.md` — six
 more templates to check, likely cheap since most are short (756 B–1.2 KB).
 
-### Phase 4 — Headless-invocation budget headroom check
+### Phase 4 — Headless-invocation budget headroom check ⬜ not started
+
+(A related, narrower piece of this landed already: `goal_pilot.py`'s two
+bugs described in the Status section above are exactly the kind of
+silent-headless-failure risk this phase targets, though neither is the
+`context_length_budget_exceeded` detection this phase specifically asks
+for.)
 
 `goal_pilot.py` invokes both large templates headlessly, with **no human
 present to notice a silent `context_length_budget_exceeded`** — exactly
@@ -212,7 +249,7 @@ item, cheap, and independent of whether Phases 1–3 land — it makes the
 loud instead of silent, which is the actual risk this whole plan exists
 to reduce, not just today's specific instance.
 
-### Phase 5 — Regression guard: a token-budget check in CI/tests
+### Phase 5 — Regression guard: a token-budget check in CI/tests ⬜ not started
 
 The concrete, mechanical follow-up to today's bug: nothing currently
 stops a future template edit from reintroducing an unbounded read or
@@ -234,17 +271,23 @@ just growing past a safe fraction of the real budget. Add a test
 
 ## Prioritization
 
-Phase 4 first — cheapest, independent of the others, and directly closes
-the "silent failure in an unattended `goal_pilot.py` run" risk that
-matters most given `goal_pilot.py` is meant to run headless. Phase 3
-(audit + convention) next — cheap, prevents recurrence of exactly today's
-bug shape. Phase 0 (re-measure) before Phase 5 (regression guard), since
-the guard needs a real number. Phases 1–2 (system-prompt/template diet)
-are the highest-value, highest-risk items — real token savings but need
-live before/after comparisons to confirm no quality regression, so they
-follow this repo's existing adoption-bar convention (a live trial before
-"adopted" language, not a size-count alone) rather than landing on byte
-count as sufficient evidence.
+Original ordering (written before any phase landed): Phase 4 first —
+cheapest, independent of the others, and directly closes the "silent
+failure in an unattended `goal_pilot.py` run" risk that matters most
+given `goal_pilot.py` is meant to run headless. Phase 3 (audit +
+convention) next — cheap, prevents recurrence of exactly today's bug
+shape. Phase 0 (re-measure) before Phase 5 (regression guard), since the
+guard needs a real number. Phases 1–2 (system-prompt/template diet) were
+called the highest-value, highest-risk items — real token savings but
+needing live before/after comparisons to confirm no quality regression.
+
+**What actually happened**: Phases 1–2 landed first instead, on an
+explicit "only make significant token-saving changes" steer — direct
+instruction overrides a written default ordering. They still cleared the
+adoption-bar convention this section calls for: a live trial (the
+calculator-app pilot through `goal_pilot.py`), not byte count alone.
+Phases 0, 3, 4, 5 remain unstarted in their original order and reasoning
+above.
 
 ## Explicitly out of scope
 
@@ -262,12 +305,20 @@ count as sufficient evidence.
 
 ## Open questions for whoever picks this up
 
-- Whether Phase 1's `karpathy-guidelines` relevance-matching concern is
-  still accurate on the current model/pi version, or was true only for
-  an earlier one — worth a quick live check before assuming option 2
-  (shrink instead of gate) is necessary.
+- ~~Whether Phase 1's `karpathy-guidelines` relevance-matching concern is
+  still accurate...~~ Resolved: moot. The actual fix (excluding the skill
+  from `install.sh`'s pi-specific global link list) never depended on
+  `resources_discover` relevance-matching at all — see Phase 1 above.
 - Whether Phase 2's rationale/instruction split is worth doing as a
   source-file convention (two files per template) or just a stripped
-  runtime copy generated from one authored file — the latter avoids
-  drift between "what's authored" and "what's sent," at the cost of a
-  small build step.
+  runtime copy generated from one authored file — still open. The
+  implemented fix (PR #38) took neither: it deleted rationale outright
+  from the one authored file, which is simplest but means any future
+  edit to `spec-plan.md`/`contract-plan.md` has no separate rationale
+  copy to consult — worth deciding before Phase 3's audit touches the
+  same six templates.
+- Whether the two `goal_pilot.py` bugs fixed opportunistically during
+  Phase 1–2's live validation (session-dir placement, `cwd` inheritance)
+  warrant a broader audit of `run_pi_prompt()`/`invoke_build_app()` for
+  other assumed-but-unverified environment state, or whether those two
+  were the only instances of the pattern.
