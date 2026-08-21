@@ -352,11 +352,14 @@ matching skills. They spell out each step and demand pasted command output,
 because a small model that is told "run the gate" will report success without
 running anything.
 
-`/plan <rough-input-path> [pilot-dir]` — the local half of the
+`/spec-plan <rough-input-path> [pilot-dir]` — the local half of the
 `zero-human-fullstack-pipeline` plan's Phase 5 (see
 `../plans/zero-human-fullstack-pipeline-plan-2026-08-20.md`): drafts a
 detailed `spec/spec.md` and `spec/tickets/NNN-*.md` from a rough,
-possibly-vague input. Unlike the other templates, this one is explicitly
+possibly-vague input. Named to avoid colliding with `plan-mode/`'s own
+`/plan` command (read-only exploration mode, see "Extensions" above) --
+two different registrations can't share a slash-command name. Unlike the
+other templates, this one is explicitly
 allowed to resolve ambiguity rather than refuse to guess — that's a
 deliberate scope widening past the plan's original decomposition-only
 design, made because it's the one place in the pipeline this can happen

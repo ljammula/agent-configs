@@ -743,11 +743,13 @@ is the controlled input the pilot's claim depends on.
   further specs decomposed locally and run through the pipeline with no
   halt attributable to graph quality before local decomposition becomes
   the default. Until then the compile step stays cloud.
-- **Scope widened by explicit user decision, 2026-08-21: `/plan`, not
+- **Scope widened by explicit user decision, 2026-08-21: `/spec-plan`, not
   just `/tickets`.** The original design above kept disambiguation
   cloud-side and had the local model only decompose an already-frozen,
-  unambiguous spec. Asked directly, the user chose to widen this: `/plan
-  <rough-input-path>` (`pi/prompts/plan.md`) now also drafts the spec
+  unambiguous spec. Asked directly, the user chose to widen this:
+  `/spec-plan <rough-input-path>` (`pi/prompts/spec-plan.md` — named to
+  avoid colliding with `plan-mode/`'s pre-existing `/plan` command,
+  caught by Codex review of PR #30) now also drafts the spec
   itself from a rough/vague input, resolving ambiguity locally rather
   than refusing to. The reasoning against this (no cheap failing-test
   signal for "was this interpretation correct," unlike ticket
@@ -761,7 +763,7 @@ is the controlled input the pilot's claim depends on.
   the frozen-spec checkpoint (Phase 0's plan-mode-approval analog) still
   gates `ticket_runner.py` seeing the output. Contract-writing and
   acceptance-test generation are unchanged: still cloud-side, still the
-  highest-stakes output, still out of `/plan`'s scope by design (the
+  highest-stakes output, still out of `/spec-plan`'s scope by design (the
   template explicitly tells the model not to invent contract detail,
   only to flag what the contract step needs to decide). No adoption bar
   is proposed for the disambiguation half specifically — unlike ticket

@@ -45,12 +45,36 @@ Put a status line at the very top of the file:
 
 Decompose `spec/spec.md` into ordered tickets, tracer-bullet style:
 walking skeleton first (schema -> domain -> one endpoint -> one screen
-wired end to end), then breadth. Each ticket: goal, files in scope, its
-own "Required changes" list in build_app.py-spec format, sized to a
-single feature (the proven envelope is a ~75-minute unit; if a ticket
-looks bigger than that, split it). Do not reference acceptance-test file
-names -- none exist yet; that stays the contract/test-generation step's
-job, same as it always has been in this pipeline.
+wired end to end), then breadth. Sized to a single feature (the proven
+envelope is a ~75-minute unit; if a ticket looks bigger than that, split
+it). Do not reference acceptance-test file names -- none exist yet; that
+stays the contract/test-generation step's job, same as it always has
+been in this pipeline.
+
+**Every ticket file must contain all five of these sections, in this
+order, matching the template every hand-written ticket in this pipeline
+already uses** -- `ticket_runner.py` passes the ticket file to
+`build_app.py` as the model's entire spec, and its gate deterministically
+rejects a ticket that skips any of this (`commit_and_state_files_ok()`
+requires the commit to touch both state files and match the exact
+`ticket(NNN):` prefix; a ticket that never says so gives the model no way
+to know):
+
+1. **Context line** (every ticket after 001): "This is an existing repo.
+   Read `ARCHITECTURE.md`, `PROGRESS.md`, and `spec/contract.md` before
+   changing anything, and preserve all existing functionality and
+   passing tests -- this is an extension, not a rewrite."
+2. **`## Goal`** -- one paragraph.
+3. **`## Required changes`** -- a numbered list, files in scope, ending
+   with the line: "Update `ARCHITECTURE.md` and append a `PROGRESS.md`
+   entry before finishing." (verbatim -- this is the state-file update
+   the gate checks for).
+4. **`## Verification`** -- at minimum: "`make verify` must pass" and
+   "Confirm `make verify-full` still passes."
+5. **`## Commit`** -- "Commit once both pass. Commit message must be
+   exactly: `ticket(NNN): <slug>`" with the ticket's actual number and
+   slug filled in -- this exact string is what
+   `commit_and_state_files_ok()` matches against.
 
 ## 3. Report
 
