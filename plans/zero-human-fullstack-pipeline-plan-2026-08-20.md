@@ -244,6 +244,121 @@ This is a validation-infrastructure observation, not an application or
 acceptance-test failure; the recovery procedure is to restore model-route
 health, rerun the ticket builder, and then re-run the deterministic gate.
 
+**Ticket 003 halt — stale process running pre-fix code (2026-08-20).**
+`ticket_runner.py` was launched at 14:58, before PR #25 (merged 15:30:47,
+`b6e4a99`) landed the `--review-base-sha` fix for the reviewer's diff-scope
+bug. Ticket 003's `build_app.py` invocation (started 15:02:40, same OS
+process for its full ~45 min run) never picked up the fix, so its reviewer
+saw only each round's own diff instead of the whole ticket: rounds 1–2 hit
+`unavailable (no-review-verdict)`, round 3 got a real verdict but flagged
+the diff as missing the HTTP router/server implementation that had, in
+fact, already been committed in round 1 (`a6d49fb`, real `api.go` with
+CORS + the account endpoints, not a stub). Round budget exhausted, gate
+failed, `ticket_runner.py` correctly halted per Phase 3 policy and required
+a human rescue — that part worked as designed.
+
+The gap: nothing surfaced that the running process was ~45 minutes stale
+relative to a fix that had already merged. Diagnosing it required manually
+cross-referencing PR merge time against per-round log timestamps rather
+than the pilot reporting it directly. Follow-up (not yet implemented, low
+risk/low effort, do before or during the next long unattended run):
+- Have `ticket_runner.py` log the `agent-configs` git SHA (or at least
+  `pi/scripts/*.py` mtimes) it's running under at process start, into
+  `EXECUTION_LOG.md` or the gate evidence, so a stale-process halt like
+  this one is diagnosable from the pilot's own records instead of log
+  archaeology.
+- Operating rule for any long unattended pilot run: restart
+  `ticket_runner.py` after any `agent-configs` change lands, rather than
+  leaving a process running across a code change — `make run` starts a
+  fresh Python process each invocation, so this is a discipline gap, not
+  a code one.
+- Explicitly **not** recommended: teaching `ticket_runner.py` to
+  auto-retry a flagged/exhausted ticket just because the code changed
+  mid-run. That would blur the line between infra flakiness (retryable)
+  and a genuine reviewer-flagged failure (stop-the-line by design) that
+  the recent retry-bounding fixes (`e569c83`, `84a1d72`) exist to keep
+  separate.
+
+Rescue: `build_app.py` re-invoked by hand for ticket 003 with
+`--review-base-sha 1e4d51d` (ticket 002's commit) now that the fix is
+present, picking up the existing commit/uncommitted work as-is (`build_app.py`
+never resets the workspace) rather than redoing it.
+
+**`ticket_runner.py` concurrency bug found and fixed (2026-08-20).** Two
+`ticket_runner.py` processes ended up running against the same pilot dir
+at once (one launch's process outlived its wrapping shell — `nohup` +
+`disown` inside a sandboxed backgrounded command doesn't survive the
+wrapper exiting, contrary to expectation; a bare `run_in_background`
+invocation of `make run` does). Both computed the same
+`build_attempt=1` for ticket 004 and raced to write
+`reports/ticket-004/build-attempt-01.log`; the loser crashed with an
+uncaught `FileExistsError` (`write_once` uses exclusive-create by
+design — that's correct evidence-integrity behavior, not the bug). The
+winner's `BUILD_REPORT.md` was genuine, so no false evidence resulted,
+but a crashed runner process is still a bug. Fixed in `agent-configs`
+`af44d6b`: a non-blocking `flock` on `.ticket_runner.lock` in the pilot
+dir, acquired after the `--status` early-return so read-only checks
+stay lock-free; a losing second process now exits 1 with a clear
+message instead of crashing mid-write.
+
+**Ticket 004 halt — genuine implementation gap, human-rescued
+(2026-08-20).** All 3 rounds hit `make verify` red with identical Dart
+analyzer errors against the pre-staged oracle `test/onboarding_screen_test.dart`
+(`undefined_function 'OnboardingScreen'`,
+`non_type_as_type_argument` for `MonthlySummary`/`ImportResult`/etc.) —
+the model's rounds never created the `lib/` files that test imports.
+Across all 3 rounds `git status` showed no new `lib/` files at all —
+the model made no forward progress on this ticket's actual scope.
+Rescued by hand: implemented
+`lib/models/models.dart`, `lib/api/budget_api_client.dart`
+(`BudgetApiClient`/`HttpBudgetApiClient` on `package:http`, which
+already sat in the local pub cache, so no network fetch was needed),
+`lib/utils/money.dart`, `lib/screens/onboarding_screen.dart`, wired
+`lib/main.dart`'s launch gate, and replaced the `flutter create`
+counter scaffold test (which no longer compiled once `MyApp` required a
+client) with a real launch-flow smoke test. `make verify` /
+`make verify-full` both green; committed as `ticket(004): onboarding
+screen`. Re-gating found one more gap in the rescue procedure itself:
+a hand-implemented rescue that never re-invokes `build_app.py` leaves
+the stale `DID NOT SUCCEED` `BUILD_REPORT.md` in place, and the gate's
+"`BUILD_REPORT.md` SUCCEEDED" check (correctly) still fails on it —
+`make verify`/`make verify-full` passing isn't sufficient, matching
+ticket 003's precedent exactly. Fix is procedural, not code: after a
+hand-rescue, re-invoke `build_app.py` itself (same `--review-base-sha`
+the runner used) against the now-passing workspace so it produces a
+fresh, genuine `SUCCEEDED` report — confirmed side-effect-free here (the
+agent's single round made no code changes beyond appending the runner's
+own halt-record note it's instructed to preserve).
+
+**Ticket 005 halt — local model route unreachable mid-run
+(2026-08-20).** All 3 rounds of the automated attempt produced zero
+code changes; the session transcript
+(`.pi-build-session/2026-08-21T00-43-02...jsonl`) shows every one of
+the 12 assistant turns across all 3 rounds returned `"stopReason":
+"error", "errorMessage": "Connection error.", totalTokens: 0` — the
+model was never actually reached. `pi`'s CLI process still exits 0 in
+this case (it isn't a crash or a client-side timeout), so
+`build_app.py`'s `pi_failed` check (`timed_out or pi_returncode != 0`)
+doesn't catch it, and the round budget burns against an outage instead
+of surfacing it distinctly from a real implementation failure — same
+failure class as the first ticket-001 observation above, just not
+caught by the stall-timeout this time. Confirmed root cause live:
+`curl http://kannasmacstudio.lan:8080/v1/models` → `no route to host`
+while general internet egress from the same shell worked fine and DNS
+resolved the hostname correctly — the ai-stack Mac Studio was
+unreachable on the LAN, not a DNS or sandbox-network-policy issue.
+This is a physical/environmental condition outside what either the
+runner or an agent rescue can fix; recovery is restoring LAN
+reachability, then relying on `ticket_runner.py`'s own per-ticket
+build-attempt budget (3 separate `build_app.py` invocations, not just
+3 rounds within one) to retry ticket 005 with no runner changes needed.
+Follow-up worth doing (not yet implemented): have `build_app.py`
+distinguish an all-turns-errored round (zero total tokens, every
+assistant message `stopReason: error`) from a genuine
+verification-failed round, so a route outage doesn't silently consume
+real round budget indistinguishably from the model actually trying and
+failing.
+
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
 Goal: move step "compile the spec" from cloud to the local model, making
