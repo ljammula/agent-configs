@@ -61,6 +61,7 @@ for a release-hardening run that requires clean independent review.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -838,6 +839,18 @@ def main() -> int:
 	if args.status:
 		print_status(pilot_dir, tickets, workspace, args.review_policy)
 		return 0
+
+	lock_path = pilot_dir / ".ticket_runner.lock"
+	lock_handle = lock_path.open("w")
+	try:
+		fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+	except OSError:
+		print(
+			f"another ticket_runner.py is already running against {pilot_dir} "
+			f"(lock held on {lock_path}); refusing to race it",
+			file=sys.stderr,
+		)
+		return 1
 
 	while True:
 		t, mode = next_ticket(tickets, pilot_dir, workspace, args.review_policy)
