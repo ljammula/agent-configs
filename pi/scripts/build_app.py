@@ -364,8 +364,19 @@ def ensure_git_repo(workspace: Path) -> None:
 	# instead -- which breaks ticket_runner.py's own gate, since the commit's
 	# paths end up prefixed with `workspace/` where it expects bare paths.
 	toplevel = sh(["git", "rev-parse", "--show-toplevel"], cwd=workspace)
-	has_own_repo = toplevel.returncode == 0 and Path(toplevel.stdout.strip()).resolve() == workspace.resolve()
+	# `Path("").resolve()` is the *process* cwd, which would read as a match
+	# whenever this script happens to run from the workspace itself -- so an
+	# empty stdout has to disqualify the match rather than be compared.
+	has_own_repo = (
+		toplevel.returncode == 0
+		and bool(toplevel.stdout.strip())
+		and Path(toplevel.stdout.strip()).resolve() == workspace.resolve()
+	)
 	if not has_own_repo:
+		# Announced because --workspace is an arbitrary caller-supplied path:
+		# a standalone run pointed at a subdirectory of an existing project
+		# should not silently acquire a nested repo with no trace in the log.
+		print(f"no git repo of its own in {workspace} -- initializing one")
 		sh(["git", "init"], cwd=workspace)
 		gitignore = workspace / ".gitignore"
 		if not gitignore.exists():

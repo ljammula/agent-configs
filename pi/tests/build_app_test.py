@@ -396,6 +396,32 @@ class BuildAppTests(unittest.TestCase):
 		self.assertEqual([round.agent for round in result.rounds], ["pi-local", "claude-sonnet-5"])
 
 
+def init_repo_with_commit(path: Path) -> str:
+	"""git init + one commit, returning its sha. Signing and hooks are
+	forced off locally: a developer's global commit.gpgsign or core.hooksPath
+	would otherwise fail these commits on their machine but not in CI."""
+	run = lambda *args: subprocess.run(["git", *args], cwd=path, check=True, capture_output=True)
+	run("init")
+	run("config", "user.email", "test@test")
+	run("config", "user.name", "test")
+	run("config", "commit.gpgsign", "false")
+	run("config", "core.hooksPath", "/dev/null")
+	(path / "seed.txt").write_text("seed\n")
+	run("add", "seed.txt")
+	run("commit", "-m", "init")
+	head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, text=True, capture_output=True)
+	return head.stdout.strip()
+
+
+def toplevel_of(path: Path) -> Path:
+	result = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=path, text=True, capture_output=True)
+	return Path(result.stdout.strip()).resolve()
+
+
+def head_of(path: Path) -> str:
+	return subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, text=True, capture_output=True).stdout.strip()
+
+
 class EnsureGitRepoTests(unittest.TestCase):
 	"""Uses real git subprocesses, not mocks -- the bug this guards against
 	(a bare exit-code check treating an ancestor's repo as this directory's
@@ -406,44 +432,91 @@ class EnsureGitRepoTests(unittest.TestCase):
 			workspace = Path(directory) / "work"
 			workspace.mkdir()
 			build_app.ensure_git_repo(workspace)
-			toplevel = subprocess.run(
-				["git", "rev-parse", "--show-toplevel"], cwd=workspace, text=True, capture_output=True
-			)
-			self.assertEqual(Path(toplevel.stdout.strip()).resolve(), workspace.resolve())
+			self.assertEqual(toplevel_of(workspace), workspace.resolve())
 
 	def test_inits_a_repo_when_workspace_is_only_inside_an_ancestor_repo(self):
 		"""The ticket_runner.py pilot layout: workspace/ starts as a plain
 		subdirectory of the pilot dir's own control repo."""
 		with tempfile.TemporaryDirectory() as directory:
 			pilot_dir = Path(directory)
-			subprocess.run(["git", "init"], cwd=pilot_dir, check=True, capture_output=True)
-			subprocess.run(["git", "config", "user.email", "test@test"], cwd=pilot_dir, check=True, capture_output=True)
-			subprocess.run(["git", "config", "user.name", "test"], cwd=pilot_dir, check=True, capture_output=True)
-			(pilot_dir / "README.md").write_text("pilot\n")
-			subprocess.run(["git", "add", "README.md"], cwd=pilot_dir, check=True, capture_output=True)
-			subprocess.run(["git", "commit", "-m", "init"], cwd=pilot_dir, check=True, capture_output=True)
+			init_repo_with_commit(pilot_dir)
 			workspace = pilot_dir / "workspace"
 			workspace.mkdir()
 
 			build_app.ensure_git_repo(workspace)
 
-			toplevel = subprocess.run(
-				["git", "rev-parse", "--show-toplevel"], cwd=workspace, text=True, capture_output=True
-			)
-			self.assertEqual(Path(toplevel.stdout.strip()).resolve(), workspace.resolve())
+			self.assertEqual(toplevel_of(workspace), workspace.resolve())
+
+	# `git init` over an existing repo is idempotent -- it preserves HEAD,
+	# the index and every ref -- so "did the repo survive?" cannot detect a
+	# wrongly-taken init branch. The one side effect that *is* observable is
+	# the scaffold .gitignore the init branch seeds: node_modules/dist/build
+	# appear only when ensure_git_repo believed it was making a new repo.
+	# These two tests therefore start from a repo with no .gitignore at all
+	# and assert that seed never lands.
+	SCAFFOLD_MARKER = "node_modules/"
 
 	def test_leaves_an_existing_workspace_repo_alone(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory) / "work"
 			workspace.mkdir()
-			subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+			before = init_repo_with_commit(workspace)
+
+			build_app.ensure_git_repo(workspace)
+
+			self.assertEqual(head_of(workspace), before)
+			self.assertNotIn(self.SCAFFOLD_MARKER, (workspace / ".gitignore").read_text())
+
+	def test_leaves_an_existing_workspace_repo_alone_inside_an_ancestor_repo(self):
+		"""The steady state for every ticket after the first: the workspace
+		has its own repo *and* still sits inside the control repo."""
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			init_repo_with_commit(pilot_dir)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir()
+			init_repo_with_commit(workspace)
+
+			build_app.ensure_git_repo(workspace)
+
+			self.assertNotIn(self.SCAFFOLD_MARKER, (workspace / ".gitignore").read_text())
+
+	def test_does_not_reinit_when_reached_through_a_symlinked_path(self):
+		"""Guards the .resolve() on both sides of the comparison: git reports
+		--show-toplevel physically, so without it a workspace reached via a
+		symlinked parent compares unequal to itself and takes the init branch."""
+		with tempfile.TemporaryDirectory() as directory:
+			real = Path(directory) / "real"
+			(real / "work").mkdir(parents=True)
+			init_repo_with_commit(real / "work")
+			link = Path(directory) / "link"
+			link.symlink_to(real, target_is_directory=True)
+
+			build_app.ensure_git_repo(link / "work")
+
+			self.assertNotIn(self.SCAFFOLD_MARKER, (real / "work" / ".gitignore").read_text())
+
+	def test_seeds_a_scaffold_gitignore_only_when_it_actually_inits(self):
+		"""The positive half of the assertion the three tests above make
+		negatively -- without this, they would all pass against a marker that
+		ensure_git_repo had simply stopped writing."""
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "work"
+			workspace.mkdir()
+
+			build_app.ensure_git_repo(workspace)
+
+			self.assertIn(self.SCAFFOLD_MARKER, (workspace / ".gitignore").read_text())
+
+	def test_preserves_an_existing_gitignore_instead_of_truncating_it(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "work"
+			workspace.mkdir()
+			init_repo_with_commit(workspace)
 			(workspace / ".gitignore").write_text("custom/\n")
 
 			build_app.ensure_git_repo(workspace)
 
-			# The custom line survives; ensure_git_repo only appends its own
-			# bookkeeping entries (unconditionally, regardless of whether it
-			# had to git-init), never truncates an existing .gitignore.
 			self.assertIn("custom/", (workspace / ".gitignore").read_text())
 
 

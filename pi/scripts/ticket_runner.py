@@ -142,6 +142,18 @@ def git(workspace: Path, *args: str, timeout: float = 30) -> subprocess.Complete
 	return sh(["git", *args], cwd=workspace, timeout=timeout)
 
 
+def has_own_git_repo(workspace: Path) -> bool:
+	"""True only when `workspace` is itself a repo root, not merely a
+	directory inside an ancestor's repo. Every git command run with
+	cwd=workspace silently answers from the pilot dir's control repo until
+	build_app.py's ensure_git_repo() gives the workspace a repo of its own,
+	so any sha read before that point belongs to the wrong history."""
+	toplevel = git(workspace, "rev-parse", "--show-toplevel")
+	if toplevel.returncode != 0 or not toplevel.stdout.strip():
+		return False
+	return Path(toplevel.stdout.strip()).resolve() == workspace.resolve()
+
+
 @dataclass
 class Ticket:
 	number: int
@@ -400,7 +412,20 @@ def prior_boundary_sha(workspace: Path, tickets: list[Ticket], ticket: Ticket) -
 	(ticket 1, or every earlier ticket was somehow never committed).
 	Deliberately NOT "current HEAD before invoking build_app.py" -- that
 	was wrong for regate mode, where HEAD already includes this ticket's
-	commit before the gate even starts."""
+	commit before the gate even starts.
+
+	None until the workspace has a repo of its own. This runs before
+	build_app.py -- and therefore before ensure_git_repo() -- so on ticket 1
+	of a fresh pilot every git read here still resolves to the pilot dir's
+	control repo. Returning that repo's root commit would hand build_app.py
+	a --review-base-sha that does not exist in the workspace repo it is
+	about to create, which fails commit_and_state_files_ok()'s diff as a
+	non-retryable gate failure and leaves cross-model-review.ts diffing
+	against an unresolvable base (it treats the non-zero exit as "nothing to
+	review"). None is already the supported "caller doesn't know the
+	boundary" answer for both."""
+	if not has_own_git_repo(workspace):
+		return None
 	idx = tickets.index(ticket)
 	for prior in reversed(tickets[:idx]):
 		sha = commit_sha_for(workspace, prior.number)

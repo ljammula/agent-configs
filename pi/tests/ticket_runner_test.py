@@ -688,6 +688,53 @@ class StagedPairsTests(unittest.TestCase):
 			)
 
 
+class PriorBoundaryShaTests(unittest.TestCase):
+	"""Real git, no mocks: the bug guarded here is git's own traversal into
+	an ancestor repo when the workspace has no repo of its own yet."""
+
+	def _init(self, path):
+		run = lambda *args: subprocess.run(["git", *args], cwd=path, check=True, capture_output=True)
+		run("init")
+		run("config", "user.email", "test@test")
+		run("config", "user.name", "test")
+		run("config", "commit.gpgsign", "false")
+		run("config", "core.hooksPath", "/dev/null")
+		(path / "seed.txt").write_text("seed\n")
+		run("add", "seed.txt")
+		run("commit", "-m", "chore: scaffold pilot dir")
+		head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, text=True, capture_output=True)
+		return head.stdout.strip()
+
+	def test_returns_none_before_the_workspace_has_a_repo_of_its_own(self):
+		"""Ticket 1 of a fresh pilot. Returning the control repo's root
+		commit here hands build_app.py a --review-base-sha that will not
+		exist in the workspace repo ensure_git_repo() is about to create."""
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			control_root = self._init(pilot_dir)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir()
+			ticket = ticket_runner.Ticket(1, "scaffold", Path("001-scaffold.md"))
+
+			sha = ticket_runner.prior_boundary_sha(workspace, [ticket], ticket)
+
+			self.assertIsNone(sha)
+			self.assertNotEqual(sha, control_root)
+
+	def test_returns_the_workspace_root_commit_once_it_has_its_own_repo(self):
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			self._init(pilot_dir)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir()
+			workspace_root = self._init(workspace)
+			ticket = ticket_runner.Ticket(1, "scaffold", Path("001-scaffold.md"))
+
+			sha = ticket_runner.prior_boundary_sha(workspace, [ticket], ticket)
+
+			self.assertEqual(sha, workspace_root)
+
+
 class AmendCanonTests(unittest.TestCase):
 	def _pilot(self, directory):
 		pilot_dir = Path(directory)
