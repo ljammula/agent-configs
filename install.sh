@@ -25,6 +25,16 @@ PI_ONLY_PORTABLE_SKILLS=(tdd diagnosing-bugs resolving-merge-conflicts grill)
 # canonical list this script un-links on upgrade from machines still holding
 # the old global symlinks.
 PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgres-change kafka-processing temporal-go gcp-deploy)
+# karpathy-guidelines is in PORTABLE_SKILLS above for Claude/Codex, whose
+# Skill tool is the only enforcement mechanism they have for it. Pi has no
+# Skill tool -- karpathy-guardrail.ts's before_agent_start hook already
+# appends the guidance unconditionally every session instead -- so linking
+# the skill into ~/.pi/agent/skills/ as well is pure redundant tax: its
+# name+description get advertised for pi's own relevance-matching on top of
+# the guardrail's already-unconditional coverage, for guidance the session
+# already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
+# same pattern as PI_STACK_SKILLS's global-unlink list above.
+PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 
@@ -112,8 +122,8 @@ link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.codex/skills/wiring-verify"
 # repo would mean pi editing tracked files behind your back. See pi/README.md
 # for the settings this machine expects.
 link "$REPO_ROOT/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
-unlink_managed_skills "$HOME/.pi/agent/skills" "$REPO_ROOT/pi/skills" "${PROJECT_SKILLS[@]}" "${PI_STACK_SKILLS[@]}"
-link_skills "$REPO_ROOT/pi/skills" "$HOME/.pi/agent/skills" "${PORTABLE_SKILLS[@]}" "${PI_ONLY_PORTABLE_SKILLS[@]}"
+unlink_managed_skills "$HOME/.pi/agent/skills" "$REPO_ROOT/pi/skills" "${PROJECT_SKILLS[@]}" "${PI_STACK_SKILLS[@]}" karpathy-guidelines
+link_skills "$REPO_ROOT/pi/skills" "$HOME/.pi/agent/skills" "${PI_PORTABLE_SKILLS[@]}" "${PI_ONLY_PORTABLE_SKILLS[@]}"
 link "$REPO_ROOT/pi/skills/before-done" "$HOME/.pi/agent/skills/before-done"
 link "$REPO_ROOT/pi/skills/wiring-verify" "$HOME/.pi/agent/skills/wiring-verify"
 for f in "$REPO_ROOT"/pi/extensions/*.ts; do

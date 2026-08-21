@@ -243,7 +243,16 @@ def run_pi_prompt(pilot_dir: Path, prompt: str, *, session_dir: Path, timeout_s:
 	# way build_app.py's own run_build() does, rather than assuming the
 	# caller's shell already exported one.
 	os.environ.setdefault("AI_STACK_HOST", "127.0.0.1")
-	returncode, stdout, stderr, timed_out = ticket_runner.invoke_build_app(command, timeout_s)
+	# `pi` has no --cwd flag: its bash tool operates directly on this
+	# process's own working directory, which subprocess.Popen otherwise
+	# inherits from whatever directory goal_pilot.py itself happened to be
+	# launched from -- silently the caller's own dev checkout, not the pilot
+	# dir, if goal_pilot.py was run from inside one (reproduced live: the
+	# model's bash exploration during a /contract-plan self-check wandered
+	# into agent-configs' own unrelated test output instead of staying
+	# scoped to the pilot). Pin it explicitly instead of trusting the
+	# caller's shell to already be in the right place.
+	returncode, stdout, stderr, timed_out = ticket_runner.invoke_build_app(command, timeout_s, cwd=pilot_dir)
 	errored, total = build_app.agent_turn_errors(stdout)
 	# `pi` exits 0 and can still leave a real artifact (e.g. a resumed
 	# /contract-plan run's already-partial contract.md) on disk even when
@@ -271,6 +280,16 @@ def run_pi_prompt(pilot_dir: Path, prompt: str, *, session_dir: Path, timeout_s:
 # --------------------------------------------------------------------------
 
 
+def goal_pilot_session_root(pilot_dir: Path) -> Path:
+	"""Sibling of `pilot_dir`, not a path inside it -- see step2_draft_spec()'s
+	comment for why: `pi --session-dir` creates its directory before the
+	model's first turn, which would otherwise poison /spec-plan's own
+	step-0 "is this dir empty" scaffold check on every fresh pilot_dir."""
+	root = pilot_dir.parent / f".{pilot_dir.name}.goal-pilot-sessions"
+	root.mkdir(parents=True, exist_ok=True)
+	return root
+
+
 def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 	"""If `raw` is an existing file, use it as-is. Otherwise treat it as
 	literal rough-input text and write it to a scratch file -- /spec-plan's
@@ -295,7 +314,17 @@ def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 
 def step2_draft_spec(pilot_dir: Path, spec_input: Path) -> bool:
 	print(f"\n=== step 2: drafting spec + tickets via /spec-plan ({spec_input}) ===")
-	session_dir = pilot_dir / ".goal-pilot" / "pi-spec-plan-session"
+	# Deliberately a `pilot_dir` *sibling*, not something written inside it
+	# (same reasoning as resolve_spec_input()'s scratch file above): `pi
+	# --session-dir` creates this directory as soon as the session starts,
+	# before the model's first turn -- i.e. before /spec-plan's own step-0
+	# scaffold check ever runs. On a fresh, not-yet-scaffolded pilot_dir,
+	# that check sees "$2 exists, is non-empty, has no Makefile" and
+	# correctly refuses to scaffold, every single time, on account of a
+	# directory this script itself just created (reproduced live: two
+	# separate fresh-pilot-dir runs, same refusal, same evidence in
+	# logs/spec-plan-output.jsonl -- not a model failure).
+	session_dir = goal_pilot_session_root(pilot_dir) / "pi-spec-plan-session"
 	prompt = f"/spec-plan {spec_input} {pilot_dir}"
 	ok, stdout, diagnostics = run_pi_prompt(pilot_dir, prompt, session_dir=session_dir, timeout_s=SPEC_PLAN_TIMEOUT_S)
 	(logs_dir(pilot_dir) / "spec-plan-output.jsonl").write_text(stdout)
@@ -362,7 +391,11 @@ def staged_ticket_count(pilot_dir: Path) -> int:
 
 def step4_compile(pilot_dir: Path) -> bool:
 	print("\n=== step 4: compiling contract + acceptance suite via /contract-plan ===")
-	session_dir = pilot_dir / ".goal-pilot" / "pi-contract-plan-session"
+	# Same sibling-not-inside placement as step2_draft_spec() -- pilot_dir is
+	# already scaffolded by this point (Makefile exists), so /contract-plan's
+	# own preconditions don't hit the same hazard step2 does, but there is no
+	# reason for this one to risk it either.
+	session_dir = goal_pilot_session_root(pilot_dir) / "pi-contract-plan-session"
 	prompt = f"/contract-plan {pilot_dir}"
 	ok, stdout, diagnostics = run_pi_prompt(pilot_dir, prompt, session_dir=session_dir, timeout_s=CONTRACT_PLAN_TIMEOUT_S)
 	(logs_dir(pilot_dir) / "contract-plan-output.jsonl").write_text(stdout)

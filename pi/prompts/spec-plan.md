@@ -29,13 +29,10 @@ branch -- do not proceed past this check on a guess:**
 - **`$2` does not exist, or exists and is completely empty** -> safe.
   Run the commands below.
 - **`$2` exists, is non-empty, and has no `Makefile`** -> **stop and do
-  not run anything below.** This is not a pilot dir this command
-  created -- writing into it risks silently overwriting an unrelated
-  project's own `.gitignore`/`Makefile` (e.g. a mistyped path). Report
-  exactly this and end the turn: "`$2` already exists, is non-empty, and
-  has no `Makefile` -- refusing to scaffold into it. Point `$2` at an
-  empty or new path, or confirm by hand that overwriting it is
-  intended."
+  not run anything below.** Report exactly this and end the turn: "`$2`
+  already exists, is non-empty, and has no `Makefile` -- refusing to
+  scaffold into it. Point `$2` at an empty or new path, or confirm by
+  hand that overwriting it is intended."
 
 Nothing in the "safe" branch below is a judgment call: run every command
 exactly as written, do not retype or reformat any of it, and report each
@@ -51,12 +48,9 @@ cd "$2" && git init
 ```
 
 This is the **pilot dir's own** git repo. Do not run `git init` or
-commit anything inside `$2/workspace/` -- that gets its own separate
-repo later, on the first build round: `build_app.py`'s
-`ensure_git_repo()` creates it before the first agent turn, so the model
-never has to. A pilot dir with a repo nested inside another repo is
-intentional, not a mistake -- the `.gitignore` written next is what keeps
-the pilot dir's repo from trying to track `workspace/`'s contents.
+commit anything inside `$2/workspace/` -- `build_app.py` creates that
+repo separately on the first build round. The `.gitignore` written next
+keeps the pilot dir's repo from tracking `workspace/`'s contents.
 
 Run this exact command as a single `bash` call, copied verbatim,
 including the closing `EOF` line:
@@ -153,13 +147,8 @@ stays the contract/test-generation step's job, same as it always has
 been in this pipeline.
 
 **Every ticket file must contain all five of these sections, in this
-order, matching the template every hand-written ticket in this pipeline
-already uses** -- `ticket_runner.py` passes the ticket file to
-`build_app.py` as the model's entire spec, and its gate deterministically
-rejects a ticket that skips any of this (`commit_and_state_files_ok()`
-requires the commit to touch both state files and match the exact
-`ticket(NNN):` prefix; a ticket that never says so gives the model no way
-to know):
+order** -- `ticket_runner.py`'s gate deterministically rejects any
+ticket missing one:
 
 1. **Context line** (every ticket after 001): "This is an existing repo.
    Read `ARCHITECTURE.md`, `PROGRESS.md`, and `spec/contract.md` before

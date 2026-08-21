@@ -729,12 +729,23 @@ def commit_and_state_files_ok(workspace: Path, ticket: Ticket, base_sha: str | N
 	return True, f"commit {commit_sha[:12]} ok"
 
 
-def invoke_build_app(build_cmd: list[str], timeout: float) -> tuple[int, str, str, bool]:
+def invoke_build_app(build_cmd: list[str], timeout: float, *, cwd: Path | None = None) -> tuple[int, str, str, bool]:
 	"""Returns (returncode, stdout, stderr, timed_out). A timeout is
 	reported as a failed invocation, never an uncaught exception that
-	would crash the runner with no gate archived and no halt recorded."""
+	would crash the runner with no gate archived and no halt recorded.
+
+	`cwd` defaults to None (inherit the caller's own process cwd), which is
+	fine for the build_app.py/ticket_runner.py invocations this function was
+	written for -- they take --workspace as an explicit argument and never
+	rely on ambient cwd internally. It is not fine for a bare `pi` invocation
+	(goal_pilot.py's run_pi_prompt()): `pi` has no --cwd flag, so its bash
+	tool operates directly on whatever directory this process happened to
+	start from -- silently the caller's own dev checkout if goal_pilot.py was
+	launched from inside it, not the pilot dir. goal_pilot.py passes `cwd`
+	explicitly for exactly that reason."""
 	process = subprocess.Popen(
 		build_cmd,
+		cwd=cwd,
 		text=True,
 		stdout=subprocess.PIPE,
 		stderr=subprocess.PIPE,
