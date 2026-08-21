@@ -145,6 +145,19 @@ mechanical self-check (`go vet`/`go build` against a scratch module for
 Go; best-effort `dart analyze` against a scratch Flutter project for
 Dart, with an explicit flagged skip if that's not practical yet).
 
+**Completion marker, not just file existence (Codex review, PR #36):** a
+crash mid-`/contract-plan` — after `contract.md` and some acceptance
+slices are written but before the self-check finishes — must not read
+back as "step 4 done" on resume. `goal_pilot.py` writes its own
+`spec/.compile-complete` marker (timestamp + a count of tickets that have
+a staged acceptance slice) only after the self-check itself has run and
+its output been captured, and step 9's resume checks for *that* marker,
+not merely `contract.md`'s presence, before treating step 4/5 as finished
+and advancing to 5b/6. On resume without the marker, `goal_pilot.py`
+re-runs `/contract-plan` from the top rather than guessing which slices
+are complete — `/contract-plan` regenerating an already-correct file is
+harmless; skipping ahead on an unverified partial compile is not.
+
 **Known residual gap, inherited from `/contract-plan` as-is, not fixed by
 `goal_pilot.py`:** the self-check doesn't dry-run the `verify-full`
 server-restart lifecycle, so a bug shaped like ticket 012's (a
@@ -288,10 +301,13 @@ rescues stay local, just at widened settings).
 Re-invoking `goal_pilot.py` against an existing pilot dir picks up from
 disk state, the same idempotent pattern `/spec-plan` already uses for its
 own scaffold step: `spec/spec.md`'s `STATUS:` line says whether to resume
-at step 2/3 or skip to step 4; `spec/contract.md`'s presence plus step 5's
-recorded confirmation says whether to skip to step 5b/6; `git log` in the
-workspace (already how `ticket_runner.py` derives its own position) says
-where the build loop is. No separate resume mode or extra state file
+at step 2/3 or skip to step 4; `spec/.compile-complete` (step 4's
+completion marker, written only after the self-check finishes — not mere
+`spec/contract.md` existence, which a mid-compile crash can also produce)
+plus step 5's recorded confirmation says whether to skip to step 5b/6;
+`git log` in the workspace (already how `ticket_runner.py` derives its own
+position) says where the build loop is. No separate resume mode or extra
+state file
 needed beyond what each step already writes.
 
 ## Open items — not yet resolved, flagged rather than assumed
