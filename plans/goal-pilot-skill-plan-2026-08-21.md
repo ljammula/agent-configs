@@ -81,8 +81,10 @@ Implementation stays exactly where the pilot proved it: **local, via
 `goal_pilot.py` never modifies `build_app.py`/`ticket_runner.py` gate
 logic and never adds a cloud-escalation path.
 
-## Invocation (user decision, 2026-08-21: both policy forks are explicit
-per-invocation parameters, each with a stated default)
+## Invocation
+
+**User decision, 2026-08-21: both policy forks are explicit per-invocation
+parameters, each with a stated default.**
 
 ```
 python3 pi/scripts/goal_pilot.py --spec-input <path> --pilot-dir <dir>
@@ -190,36 +192,83 @@ claim or imply cloud review happened — that design doesn't change.
   independently reviewed, rather than leaving that discoverable only by
   reading `/contract-plan`'s banner text after the fact.
 
-### 5b. Checkpoint — after ticket 001 gates green (always on, not covered
-by `--checkpoint`)
+### 5b. Checkpoint — after ticket 001 gates green (always on, not covered by `--checkpoint`)
 
-Once ticket 001 passes its gate — the workspace verify surface
-(`Makefile`, `scripts/verify.sh`, `scripts/verify-full.sh`, embedded
-verbatim by `/spec-plan`'s ticket-001 template the same way the real
-pilot's `001-workspace-scaffold.md` does) is now frozen via
-`ticket_runner.py`'s `VERIFY_SURFACE_FILES`, and the app has booted for
-the first time — `goal_pilot.py` stops unconditionally and shows the
-user `make verify-full`'s real output. This is the one checkpoint that
-lands *after* code exists rather than only before, specifically because
-tickets 010 and 012 were bugs in exactly this frozen surface that no
-pre-run review could have caught (they only failed once the model
-actually exercised them). Cheap — one pause, roughly 20–60 minutes into a
-run that otherwise takes most of a day — and it's the last moment a human
-can catch a bad verify surface before ten more tickets build on top of
-it; after this point it's immutable except through `--amend-canon` (step
-7, class 2).
+**Corrected premise (cloud review of PR #36, `bug_001`): `/spec-plan`
+does not currently embed the verify surface verbatim.** The earlier draft
+of this step claimed ticket 001's `Makefile`/`scripts/verify.sh`/
+`scripts/verify-full.sh` come from a verbatim embed in `/spec-plan`'s
+ticket-001 template, "the same way the real pilot's
+`001-workspace-scaffold.md` does." Checked directly against
+`pi/prompts/spec-plan.md`: Section 0 only writes the *pilot dir's own
+control-dir* `Makefile` (its own inline comment says as much — distinct
+from `workspace/Makefile`, "which the agent owns and which holds
+verify/verify-full"); Section 2 is one generic ticket template with no
+ticket-001-specific embed. The parent plan's own verdict
+(`zero-human-fullstack-pipeline-plan-2026-08-20.md`, "External sanity
+check") already says this verbatim embed was a **cloud-compiled**
+scaffolding advantage specific to the original pilot, not something
+`/spec-plan` reproduces. So under `goal_pilot.py` as currently scoped, the
+local model *authors* the verify surface from scratch in ticket 001, the
+same as any other ticket's code — `freeze_verify_baseline` then freezes
+whatever it wrote, good or bad, with no pre-pinned template to compare
+against.
+
+**This makes 5b more important, not less, and changes its framing:**
+it's not a sanity check on a known-good pre-pinned surface — it's the
+**first** review of a surface the model just wrote unsupervised. Kept
+unconditional and non-skippable for exactly that reason. Two follow-ups
+this implies, tracked here rather than silently absorbed:
+- A small, separate follow-up PR against `/spec-plan` to add a verbatim
+  verify-surface embed to its ticket-001 template (matches this plan's
+  own "one place, not duplicated" reasoning — belongs in the prompt, not
+  in `goal_pilot.py`). Not a blocker for `goal_pilot.py` v1; once it
+  lands, 5b's review gets easier (comparing against a known template)
+  without changing the checkpoint's mechanics.
+- Until then, `goal_pilot.py`'s prompt at this checkpoint should say
+  plainly that the surface is model-authored and being reviewed for the
+  first time, not imply it was pre-vetted.
+
+Once ticket 001 passes its gate — the workspace verify surface is now
+frozen via `ticket_runner.py`'s `VERIFY_SURFACE_FILES`, and the app has
+booted for the first time — `goal_pilot.py` stops and shows the user
+`make verify-full`'s real output. This is the one checkpoint that lands
+*after* code exists rather than only before, specifically because tickets
+010 and 012 were bugs in exactly this class of surface. Cheap — one
+pause, roughly 20–60 minutes into a run that otherwise takes most of a
+day — and it's the last moment a human can catch a bad surface before ten
+more tickets build on top of it; after this point it's immutable except
+through `--amend-canon` (step 7, class 2).
+
+**Mechanism gap (cloud review, `bug_004`): `ticket_runner.py` has no way
+to stop between ticket 001 and ticket 002.** Its `main()` loop runs every
+ticket in one process until completion or a gate halt — there's no
+`--stop-after-ticket` flag, and a plain SIGTERM against a subprocess whose
+own `build_app.py` child starts a new session risks orphaning that child
+or racing its evidence writes. Fix: this plan's one deliberate, narrow
+exception to "no changes to `ticket_runner.py`" (see that section below)
+is a new `--stop-after-ticket N` flag — additive control flow, not gate
+logic. `goal_pilot.py` invokes `ticket_runner.py --stop-after-ticket 1`
+for the first call (returns after ticket 001's gate settles, success or
+halt), runs the 5b checkpoint, then invokes `ticket_runner.py` again with
+no stop flag for the remainder — `ticket_runner.py` already derives its
+position from `git log`, so the second invocation resumes correctly with
+no new resume logic needed.
 
 ### 6. Run the build loop
 
 `goal_pilot.py` invokes `ticket_runner.py --pilot-dir <dir>
---review-policy advisory` as a subprocess, redirecting its output to a
-deterministic log (`logs/run-<UTC-timestamp>.log`) and indexing it in an
-`EXECUTION_LOG.md` `goal_pilot.py` maintains alongside `PROGRESS.md`. This
-is a plain CLI script the user runs (foreground, `nohup`, `tmux`,
-whatever they'd already use to run a long process) — no host-harness
-concepts (background-task notifications, tool-specific monitoring) apply
-here, since nothing about this step depends on being invoked from inside
-a Claude Code session.
+--review-policy advisory` as a subprocess **twice**: first with
+`--stop-after-ticket 1` (returns once ticket 001's gate settles, so step
+5b can run), then again with no stop flag once 5b clears, to run the
+remaining tickets to completion or a halt. Both invocations redirect
+output to a deterministic log (`logs/run-<UTC-timestamp>.log`), indexed
+in an `EXECUTION_LOG.md` `goal_pilot.py` maintains alongside
+`PROGRESS.md`. This is a plain CLI script the user runs (foreground,
+`nohup`, `tmux`, whatever they'd already use to run a long process) — no
+host-harness concepts (background-task notifications, tool-specific
+monitoring) apply here, since nothing about this step depends on being
+invoked from inside a Claude Code session.
 
 **Explicit, stated choice, not inherited silently:** `--review-policy
 advisory` is the default because the actual pilot ran with an
@@ -332,6 +381,11 @@ needed beyond what each step already writes.
 - No changes to `build_app.py`'s or `ticket_runner.py`'s gate logic, or
   the parent plan's Phase 3 no-cloud-escalation-during-implementation
   rule — it holds unconditionally here too (step 7 class 3 stays local).
+  **One narrow, deliberate exception (cloud review of PR #36):**
+  `ticket_runner.py` gains a `--stop-after-ticket N` flag so
+  `goal_pilot.py` can honor step 5b's unconditional stop after ticket 001
+  without SIGTERM-ing a running subprocess. Additive control flow around
+  the existing `while True` loop, not a change to what any gate checks.
 - No new pi extensions.
 - Doesn't replace `/spec-plan`/`/contract-plan` — `goal_pilot.py` drives
   them, it doesn't reimplement what they do.
