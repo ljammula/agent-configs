@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -87,17 +88,29 @@ class ResolveSpecInputTests(unittest.TestCase):
 
 	def test_literal_text_written_to_scratch_file(self):
 		with tempfile.TemporaryDirectory() as d:
-			pilot_dir = Path(d)
+			pilot_dir = Path(d) / "pilot"
 			resolved = goal_pilot.resolve_spec_input("a rough idea, not a path", pilot_dir)
 			self.assertTrue(resolved.exists())
 			self.assertEqual(resolved.read_text(), "a rough idea, not a path")
+
+	def test_scratch_file_is_a_sibling_not_written_inside_pilot_dir(self):
+		# Codex review of PR #37: /spec-plan's own step-0 scaffold check
+		# refuses to run against any existing, non-empty directory with no
+		# Makefile yet. Writing the scratch file *inside* an unscaffolded
+		# pilot_dir would make every fresh run using literal --spec-input
+		# text immediately unscaffoldable. It must land outside pilot_dir.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d) / "pilot"
+			resolved = goal_pilot.resolve_spec_input("a rough idea, not a path", pilot_dir)
+			self.assertFalse(resolved.is_relative_to(pilot_dir))
+			self.assertFalse(pilot_dir.exists() and any(pilot_dir.iterdir()))
 
 	def test_literal_text_is_not_rewritten_on_a_second_call(self):
 		# Resume must keep reusing the same frozen input, not overwrite it
 		# with whatever --spec-input happens to be passed on the resume
 		# invocation.
 		with tempfile.TemporaryDirectory() as d:
-			pilot_dir = Path(d)
+			pilot_dir = Path(d) / "pilot"
 			goal_pilot.resolve_spec_input("first idea", pilot_dir)
 			resolved = goal_pilot.resolve_spec_input("second, different idea", pilot_dir)
 			self.assertEqual(resolved.read_text(), "first idea")
@@ -195,6 +208,108 @@ class ImplementationGapRescueBoundTests(unittest.TestCase):
 			goal_pilot.append_rescue_record(pilot_dir, {"ticket": ticket.nnn, "class": "implementation-gap", "action": "widened local retry"})
 			result = goal_pilot.handle_implementation_gap_halt(pilot_dir, pilot_dir / "workspace", [ticket], ticket, "advisory", "auto-rescue")
 			self.assertFalse(result)
+
+
+def pi_output_with_turn_errors(errored: int, total: int) -> str:
+	events = []
+	for i in range(total):
+		events.append({
+			"type": "entry_appended",
+			"entry": {"type": "message", "message": {"role": "assistant", "stopReason": "error" if i < errored else "end_turn"}},
+		})
+	return "\n".join(json.dumps(e) for e in events)
+
+
+class RunPiPromptFullyErroredTests(unittest.TestCase):
+	"""Regression coverage for Codex review of PR #37: `pi` exits 0 even
+	when the model route was unreachable for an entire invocation (every
+	assistant turn's stopReason is "error"), and a resumed /contract-plan
+	run can leave a stale, already-partial contract.md on disk from a
+	previous attempt -- without this check, step4_compile() would accept
+	that stale artifact as if a real self-check had just run."""
+
+	def test_ok_false_when_every_turn_errored(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			with mock.patch.object(
+				goal_pilot.ticket_runner, "invoke_build_app",
+				return_value=(0, pi_output_with_turn_errors(3, 3), "", False),
+			):
+				ok, _stdout, diagnostics = goal_pilot.run_pi_prompt(pilot_dir, "/contract-plan .", session_dir=pilot_dir / "s", timeout_s=60)
+			self.assertFalse(ok)
+			self.assertTrue(diagnostics["fully_errored"])
+
+	def test_ok_true_when_some_turns_succeeded(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			with mock.patch.object(
+				goal_pilot.ticket_runner, "invoke_build_app",
+				return_value=(0, pi_output_with_turn_errors(1, 3), "", False),
+			):
+				ok, _stdout, diagnostics = goal_pilot.run_pi_prompt(pilot_dir, "/contract-plan .", session_dir=pilot_dir / "s", timeout_s=60)
+			self.assertTrue(ok)
+			self.assertFalse(diagnostics["fully_errored"])
+
+	def test_ok_true_when_no_assistant_turns_recorded_at_all(self):
+		# total == 0 must not be treated as "0/0 errored, i.e. fully
+		# errored" -- that would misclassify an invocation whose output
+		# simply doesn't parse as pi JSONL (e.g. a real, clean success).
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			with mock.patch.object(
+				goal_pilot.ticket_runner, "invoke_build_app",
+				return_value=(0, "not pi jsonl output at all", "", False),
+			):
+				ok, _stdout, diagnostics = goal_pilot.run_pi_prompt(pilot_dir, "/contract-plan .", session_dir=pilot_dir / "s", timeout_s=60)
+			self.assertTrue(ok)
+			self.assertFalse(diagnostics["fully_errored"])
+
+
+class CanonDriftRecoveryTests(unittest.TestCase):
+	"""Real git, no mocks: the bug guarded here is that
+	ticket_runner.run_ticket() already restores the canonical copy over a
+	drifted file before returning failure, so reading the workspace file
+	directly at halt time always finds it already matching canon."""
+
+	def _init_workspace_with_ticket_commit(self, workspace: Path, rel_path: str, committed_content: str) -> None:
+		run = lambda *args: subprocess.run(["git", *args], cwd=workspace, check=True, capture_output=True)
+		workspace.mkdir(parents=True, exist_ok=True)
+		run("init")
+		run("config", "user.email", "test@test")
+		run("config", "user.name", "test")
+		run("config", "commit.gpgsign", "false")
+		run("config", "core.hooksPath", "/dev/null")
+		target = workspace / rel_path
+		target.parent.mkdir(parents=True, exist_ok=True)
+		target.write_text(committed_content)
+		run("add", "-A")
+		run("commit", "-m", "ticket(002): drifted fix")
+
+	def test_recovers_committed_content_even_after_workspace_was_restored_to_canon(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			workspace = pilot_dir / "workspace"
+			rel = "acceptance/002_handler_test.go"
+			self._init_workspace_with_ticket_commit(workspace, rel, "package acceptance // model's fix\n")
+			# Simulate run_ticket()'s post-halt restore: the on-disk file no
+			# longer matches what the model actually committed.
+			(workspace / rel).write_text("package acceptance // canonical original\n")
+			ticket = make_ticket(2, "handler")
+
+			recovered = goal_pilot.recover_drifted_content(workspace, ticket, workspace / rel)
+
+			self.assertEqual(recovered, "package acceptance // model's fix\n")
+
+	def test_returns_none_when_ticket_has_no_commit_yet(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			workspace = pilot_dir / "workspace"
+			self._init_workspace_with_ticket_commit(workspace, "acceptance/x_test.go", "content\n")
+			ticket = make_ticket(9, "not-committed")
+
+			recovered = goal_pilot.recover_drifted_content(workspace, ticket, workspace / "acceptance/x_test.go")
+
+			self.assertIsNone(recovered)
 
 
 class RescueLogTests(unittest.TestCase):
@@ -348,6 +463,45 @@ class BuildLoopUntilSettledTests(unittest.TestCase):
 					stop_after_ticket=1, non_interactive=False, infra_attempts={},
 				)
 			runner.assert_called_once_with(pilot_dir, "advisory", stop_after_ticket=1)
+
+
+class MainScaffoldOrderingTests(unittest.TestCase):
+	"""Regression coverage for Codex review of PR #37: on a fresh,
+	not-yet-scaffolded pilot_dir, goal_pilot.py must not write anything
+	into it before /spec-plan's own step-0 scaffold-safety check runs --
+	that check refuses any existing, non-empty directory with no Makefile
+	yet, so an EXECUTION_LOG.md written first would make every fresh run
+	immediately unscaffoldable."""
+
+	def test_nothing_written_into_a_fresh_pilot_dir_before_spec_plan_runs(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d) / "pilot"  # deliberately does not exist yet
+
+			def fake_step2(pilot_dir_arg, spec_input):
+				# Simulate what /spec-plan's own step 0 does: scaffold the
+				# dir for real, including writing a Makefile -- and assert
+				# nothing was written into it before this ran.
+				self.assertFalse(pilot_dir_arg.exists() and any(pilot_dir_arg.iterdir()))
+				pilot_dir_arg.mkdir(parents=True, exist_ok=True)
+				(pilot_dir_arg / "Makefile").write_text("run:\n\t@true\n")
+				(pilot_dir_arg / "spec").mkdir()
+				(pilot_dir_arg / "spec" / "spec.md").write_text("STATUS: DRAFT -- pending review\n")
+				return True
+
+			argv = [
+				"goal_pilot.py", "--spec-input", "a rough idea",
+				"--pilot-dir", str(pilot_dir), "--non-interactive",
+			]
+			with mock.patch.object(sys, "argv", argv), \
+				mock.patch.object(goal_pilot, "step2_draft_spec", side_effect=fake_step2), \
+				mock.patch.object(goal_pilot, "step3_freeze_checkpoint", return_value=False):
+				goal_pilot.main()
+
+			# step3 was mocked to refuse (return False), so the run halts
+			# right after step2 -- but step2 itself must have seen an empty
+			# dir, and EXECUTION_LOG.md must exist by now (written once
+			# scaffolding was confirmed).
+			self.assertTrue((pilot_dir / "EXECUTION_LOG.md").exists())
 
 
 if __name__ == "__main__":

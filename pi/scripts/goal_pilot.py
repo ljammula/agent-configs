@@ -245,11 +245,22 @@ def run_pi_prompt(pilot_dir: Path, prompt: str, *, session_dir: Path, timeout_s:
 	os.environ.setdefault("AI_STACK_HOST", "127.0.0.1")
 	returncode, stdout, stderr, timed_out = ticket_runner.invoke_build_app(command, timeout_s)
 	errored, total = build_app.agent_turn_errors(stdout)
-	ok = returncode == 0 and not timed_out
+	# `pi` exits 0 and can still leave a real artifact (e.g. a resumed
+	# /contract-plan run's already-partial contract.md) on disk even when
+	# the model route was unreachable for the entire invocation -- every
+	# assistant turn errored with stopReason: error, no real model work
+	# happened (build_app.py's own round_blockers() treats this the same
+	# way, as "model route unreachable", never as a completed round).
+	# Without this check, step4_compile() would accept a stale/partial
+	# artifact and write .compile-complete for a self-check that never
+	# actually ran (Codex review of PR #37).
+	fully_errored = total > 0 and errored == total
+	ok = returncode == 0 and not timed_out and not fully_errored
 	diagnostics = {
 		"returncode": returncode,
 		"timed_out": timed_out,
 		"turn_errors": [errored, total],
+		"fully_errored": fully_errored,
 		"stderr_tail": stderr[-2000:],
 	}
 	return ok, stdout, diagnostics
@@ -262,13 +273,20 @@ def run_pi_prompt(pilot_dir: Path, prompt: str, *, session_dir: Path, timeout_s:
 
 def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 	"""If `raw` is an existing file, use it as-is. Otherwise treat it as
-	literal rough-input text and write it to a scratch file inside the
-	pilot dir -- /spec-plan's own argument-hint expects a path, and every
-	downstream re-invocation on resume should read the same frozen input."""
+	literal rough-input text and write it to a scratch file -- /spec-plan's
+	own argument-hint expects a path, and every downstream re-invocation on
+	resume should read the same frozen input.
+
+	The scratch file is a `pilot_dir` *sibling*, not something written
+	inside it (Codex review of PR #37): `/spec-plan`'s own step-0 scaffold
+	check refuses to run against any existing, non-empty directory that
+	has no `Makefile` yet, so writing anything into an unscaffolded
+	pilot_dir before that check runs would make every fresh run using
+	literal --spec-input text immediately unscaffoldable."""
 	candidate = Path(raw).expanduser()
 	if candidate.is_file():
 		return candidate.resolve()
-	scratch = pilot_dir / ".goal-pilot" / "raw-spec-input.txt"
+	scratch = pilot_dir.parent / f".{pilot_dir.name}.goal-pilot-raw-spec-input.txt"
 	scratch.parent.mkdir(parents=True, exist_ok=True)
 	if not scratch.exists():
 		scratch.write_text(raw)
@@ -580,8 +598,23 @@ def handle_canon_drift_halt(pilot_dir: Path, workspace: Path, tickets: list, tic
 		return False
 	amended_any = False
 	for candidate in candidates:
-		if not candidate.exists():
+		# ticket_runner.run_ticket() already restored the canonical copy
+		# over this exact file before returning failure (oracle drift's
+		# stage() call, or restore_verify_baseline() for verify-surface
+		# drift) -- by the time a halt reaches this handler, the on-disk
+		# workspace copy is back to canon, not the model's proposed fix.
+		# amend_canon() diffs the on-disk file against canon, so reading it
+		# directly here would always find "no difference, nothing to
+		# amend" and the whole class-2 recovery path would silently never
+		# work (Codex review of PR #37). Recover the model's actual
+		# proposed content from the ticket's own commit instead, and
+		# restore *that* into the workspace right before calling
+		# amend_canon() so there is a real diff to accept or reject.
+		recovered = recover_drifted_content(workspace, ticket, candidate)
+		if recovered is None:
+			print(f"could not recover {candidate}'s drifted content from ticket {ticket.nnn}'s commit -- skipping", file=sys.stderr)
 			continue
+		candidate.write_text(recovered)
 		reason = input(f"Reason to accept {candidate} as the new canon (blank to skip this file): ").strip()
 		if not reason:
 			continue
@@ -593,6 +626,22 @@ def handle_canon_drift_halt(pilot_dir: Path, workspace: Path, tickets: list, tic
 				{"ticket": ticket.nnn, "class": "canon-drift", "action": f"amend-canon {candidate}", "reason": reason, "auto_applied": False},
 			)
 	return amended_any
+
+
+def recover_drifted_content(workspace: Path, ticket: "ticket_runner.Ticket", candidate: Path) -> str | None:
+	"""Recover the model's actual proposed content for `candidate` (a path
+	inside `workspace`) from the ticket's own commit, since
+	ticket_runner.run_ticket() has already restored the on-disk copy to
+	canon by the time a halt reaches goal_pilot.py. Returns None if the
+	ticket has no commit yet or the file isn't present at that commit."""
+	sha = ticket_runner.commit_sha_for(workspace, ticket.number)
+	if not sha:
+		return None
+	rel = candidate.relative_to(workspace).as_posix()
+	result = ticket_runner.git(workspace, "show", f"{sha}:{rel}")
+	if result.returncode != 0:
+		return None
+	return result.stdout
 
 
 def handle_implementation_gap_halt(pilot_dir: Path, workspace: Path, tickets: list, ticket: "ticket_runner.Ticket", review_policy: str, on_halt: str) -> bool:
@@ -775,12 +824,21 @@ def main() -> int:
 	pilot_dir.mkdir(parents=True, exist_ok=True)
 
 	print(f"goal_pilot.py: pilot-dir={pilot_dir} checkpoint={args.checkpoint} on-halt={args.on_halt} review-policy={args.review_policy}")
-	append_execution_log(
-		pilot_dir,
-		"run started",
+	run_started_note = (
 		f"checkpoint={args.checkpoint} on-halt={args.on_halt} review-policy={args.review_policy} "
-		f"spec-input={args.spec_input}",
+		f"spec-input={args.spec_input}"
 	)
+	# Do not write anything into pilot_dir before it's confirmed safe to:
+	# /spec-plan's own step-0 scaffold check refuses to run against any
+	# existing, non-empty directory that has no Makefile yet, so writing
+	# EXECUTION_LOG.md here unconditionally would make every fresh,
+	# not-yet-scaffolded pilot_dir fail that check on its very first run
+	# (Codex review of PR #37). Log immediately only if this is already a
+	# scaffolded pilot dir (a resume); otherwise defer until step2 confirms
+	# /spec-plan has scaffolded it.
+	already_scaffolded = (pilot_dir / "Makefile").exists()
+	if already_scaffolded:
+		append_execution_log(pilot_dir, "run started", run_started_note)
 
 	# --- steps 1-3: intake, draft, freeze ---
 	status = read_spec_status(pilot_dir)
@@ -789,6 +847,11 @@ def main() -> int:
 		if status is None or status == "DRAFT":
 			if not step2_draft_spec(pilot_dir, spec_input):
 				return 1
+		if not already_scaffolded:
+			if not (pilot_dir / "Makefile").exists():
+				print(f"/spec-plan completed but {pilot_dir}/Makefile still does not exist -- refusing to proceed.", file=sys.stderr)
+				return 1
+			append_execution_log(pilot_dir, "run started", run_started_note)
 		if not step3_freeze_checkpoint(pilot_dir, non_interactive=args.non_interactive):
 			return 1
 
