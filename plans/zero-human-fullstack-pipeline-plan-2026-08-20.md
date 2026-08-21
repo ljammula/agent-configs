@@ -674,6 +674,44 @@ corrected accounting below.
   locally. Not yet tested: whether this ratio holds on a spec without
   the cloud compiler's scaffolding advantages, or with a plan whose
   tickets are more blank-page-shaped by nature.
+- **Counterfactual: what the same spec, same model, no harness would
+  have produced (2026-08-21).** Not speculation — this is what the
+  evidence already on record in this document implies would have
+  happened with the gates removed:
+  - **It would very likely have finished and reported success while
+    shipping broken code**, not failed outright. The founding evidence
+    for this whole harness design is the lru-cache case (`## Why this
+    shape`, point 3): the independent reviewer flagged a real bug
+    *twice* and the model shipped it anyway both times — only a hidden
+    test it couldn't negotiate with actually stopped it. Strip the
+    harness out and self-report is the only signal left, and self-report
+    means nothing.
+  - **Three known-shape bugs would have shipped invisibly** instead of
+    getting caught, because this pilot's own runs hit near-identical
+    shapes and only the harness's specific tiers caught them: a
+    silently-forced in-memory DB passing every unit test with no real
+    restart exercised (near-identical to ticket 012's real
+    restart-persistence bug, only caught because `verify-full` boots the
+    actual server and restarts it for real); a wire-format mismatch
+    invisible to round-trip decode (AGENTS.md gotcha #4, the exact class
+    the black-box HTTP contract tests exist to catch); and ticket 004's
+    blank-page failure specifically — the model would have produced
+    *something* and reported it done, with no failing test forcing a
+    retry and no human finding out short of clicking through the app.
+  - **Genuinely unknown, not just undocumented**: whether the model even
+    holds up across one continuous session sized for a whole app. The
+    proven envelope going into this pilot was ≤75-minute, single-feature
+    fixtures (`## Why this shape`, point 2) — a whole app is 30–100x
+    that, and a monolithic run on a 96K context window degrading or
+    losing track over hours was never validated. Decomposing into
+    fresh-session tickets with git-commit checkpoints was a deliberate
+    hedge against this; without it, a crash (like the cmux crash that
+    hit ticket 011 here) loses undifferentiated context instead of
+    resuming from the last ticket's commit.
+  - Net: not "probably would have failed outright" — plausibly would
+    have *finished*, produced something that looks like a working app,
+    and been wrong in at least the three specific ways already on
+    record, with no mechanism to tell you which parts.
 
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
