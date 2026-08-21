@@ -13,17 +13,14 @@ flow into the self-check commands below as-is, which would expand
 `"$1"/spec/acceptance/*/*.go` to a root-relative glob that matches
 nothing instead of the current directory's acceptance slices.
 
-**This is the highest-stakes step in the whole pipeline, and this
-template only does half of it.** A wrong contract or test oracle doesn't
-fail loudly -- it silently certifies broken app code as correct later,
-and there is no cheap automated way to check "was this test actually
-right" the way ticket sizing or even spec disambiguation can be checked.
-This template's output is a **local draft plus a mechanical self-check**
+**This is the highest-stakes step in the pipeline, and this template
+only does half of it.** A wrong contract or test oracle doesn't fail
+loudly -- it silently certifies broken app code as correct later. This
+template's output is a **local draft plus a mechanical self-check**
 (does it compile/analyze), nothing more. **Cloud review and correction
-of this draft is a separate, required, human-triggered step** -- a
-human brings this draft to a cloud session (Claude Code or equivalent)
-for semantic review before it is frozen. This template must never claim
-or imply that step happened; it didn't run it and can't verify it did.
+of this draft is a separate, required, human-triggered step** -- this
+template must never claim or imply that step happened; it didn't run it
+and can't verify it did.
 
 ## 0. Preconditions -- refuse rather than guess
 
@@ -41,31 +38,23 @@ Check both before writing anything:
 Read every ticket's Goal and Required Changes to enumerate the full API
 surface implied by the spec. For each endpoint: exact path, method,
 request/response JSON shape with exact field names and casing (pick one
-casing convention and use it everywhere -- this pipeline's prior real
-bug, AGENTS.md gotcha #4, was a wire-format casing mismatch invisible to
-round-trip decode), every status code with its error code and message
-shape. Do not leave a field name or status code "TBD" -- if `spec.md`'s
-"Open questions for the contract step" section flagged something as
-undecided, decide it here (this step, unlike `/spec-plan`, is not the
-one asking a human to review guesses line by line -- it hands the whole
-draft to cloud review instead, so resolve what you can and note only
-genuine forks in direction, not routine detail, as remaining questions).
+casing convention and use it everywhere -- a wire-format casing mismatch
+is invisible to round-trip decode), every status code with its error
+code and message shape. Do not leave a field name or status code "TBD"
+-- if `spec.md`'s "Open questions for the contract step" section flagged
+something as undecided, decide it here: resolve what you can and note
+only genuine forks in direction, not routine detail, as remaining
+questions.
 
 ## 2. `spec/acceptance/NNN/*`
 
 For each ticket, write its acceptance-test slice sized to what that
 ticket alone must turn green -- not the whole app's behavior, just this
-ticket's. Follow the conventions below -- **do not** read a sibling
-pilot's `spec/acceptance/` for reference (removed 2026-08-21: a full
-multi-ticket suite like `~/code/test-bed/budget-pilot/spec/acceptance/`
-overflows the local model's context budget on the very first turn --
-reproduced live, `prompt_tokens=~48k` against a `49152` budget, twice,
-even after trimming this pilot's own spec/ticket down to one small
-ticket, since the overflow comes from the reference read, not this
-pilot's own content. `goal_pilot.py` invokes this template headlessly
-with no human present to notice a silent `context_length_budget_exceeded`
-failure mid-run, so this instruction has to be safe unattended, not just
-usually fine.) -- everything the shape actually requires is spelled out
+ticket's. Follow the conventions below -- **do not** read a sibling pilot's
+`spec/acceptance/` for reference: an unbounded directory like that can
+overflow the local model's context budget on the very first turn, and
+this template runs headless with no human present to notice a silent
+failure. Everything the shape actually requires is spelled out
 explicitly below instead:
 
 - **Go slices**: black-box `httptest`/HTTP-client tests hitting the real

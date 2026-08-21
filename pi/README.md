@@ -124,7 +124,12 @@ Written here:
   follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
-  rather than unconditionally.
+  rather than unconditionally. Since this is now the sole enforcement path
+  for pi, `install.sh` no longer links the `karpathy-guidelines` skill folder
+  into `~/.pi/agent/skills/` (unlike Claude/Codex, where it's the only
+  mechanism they have) -- doing so would just advertise the skill's
+  name+description to pi's own relevance-matching a second time, redundant
+  tax for guidance the session already has unconditionally.
 - **`full-stack-dev.ts`** — activates Pi's complete standard development
   toolset: `read`, `edit`, `write`, `find`, `grep`, and `bash` (Pi's terminal
   and command/test runner). It applies to backend-only as well as full-stack
