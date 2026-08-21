@@ -721,16 +721,44 @@ class PriorBoundaryShaTests(unittest.TestCase):
 			self.assertIsNone(sha)
 			self.assertNotEqual(sha, control_root)
 
-	def test_returns_the_workspace_root_commit_once_it_has_its_own_repo(self):
+	def test_first_ticket_stays_none_even_after_its_own_commit_exists(self):
+		"""Regression for a real bug found live 2026-08-21 (second
+		calculator-pilot run, post-067c666): once the workspace has its own
+		repo AND ticket 1's commit already exists (the regate path -- a
+		second run_ticket() call for the same ticket), the old code fell
+		through to `git rev-list --max-parents=0 HEAD`, which in a
+		fresh single-commit workspace *is* ticket 1's own commit -- an
+		empty self-diff that made commit_and_state_files_ok() falsely
+		report state files untouched even when they're in the commit.
+		Ticket 1 (index 0 in the ordered list) has no prior state to diff
+		against on any call, not just the first."""
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			self._init(pilot_dir)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir()
+			self._init(workspace)  # workspace now has its own repo AND a commit
+			ticket = ticket_runner.Ticket(1, "scaffold", Path("001-scaffold.md"))
+
+			sha = ticket_runner.prior_boundary_sha(workspace, [ticket], ticket)
+
+			self.assertIsNone(sha)
+
+	def test_second_ticket_falls_back_to_root_commit_if_first_ticket_never_committed(self):
+		"""Unlike ticket 1, a later ticket with no immediately-prior commit
+		still uses the root-commit fallback -- this defensive case (an
+		earlier ticket somehow never committed) is unaffected by the
+		idx == 0 fix above."""
 		with tempfile.TemporaryDirectory() as directory:
 			pilot_dir = Path(directory)
 			self._init(pilot_dir)
 			workspace = pilot_dir / "workspace"
 			workspace.mkdir()
 			workspace_root = self._init(workspace)
-			ticket = ticket_runner.Ticket(1, "scaffold", Path("001-scaffold.md"))
+			t1 = ticket_runner.Ticket(1, "scaffold", Path("001-scaffold.md"))
+			t2 = ticket_runner.Ticket(2, "second", Path("002-second.md"))
 
-			sha = ticket_runner.prior_boundary_sha(workspace, [ticket], ticket)
+			sha = ticket_runner.prior_boundary_sha(workspace, [t1, t2], t2)
 
 			self.assertEqual(sha, workspace_root)
 

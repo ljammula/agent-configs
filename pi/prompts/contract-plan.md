@@ -55,10 +55,18 @@ genuine forks in direction, not routine detail, as remaining questions).
 
 For each ticket, write its acceptance-test slice sized to what that
 ticket alone must turn green -- not the whole app's behavior, just this
-ticket's. Follow the conventions already established in this pipeline's
-real acceptance suites (read an existing pilot's `spec/acceptance/*/`
-for the shape if one exists, e.g. `~/code/test-bed/budget-pilot/spec/
-acceptance/`):
+ticket's. Follow the conventions below -- **do not** read a sibling
+pilot's `spec/acceptance/` for reference (removed 2026-08-21: a full
+multi-ticket suite like `~/code/test-bed/budget-pilot/spec/acceptance/`
+overflows the local model's context budget on the very first turn --
+reproduced live, `prompt_tokens=~48k` against a `49152` budget, twice,
+even after trimming this pilot's own spec/ticket down to one small
+ticket, since the overflow comes from the reference read, not this
+pilot's own content. `goal_pilot.py` invokes this template headlessly
+with no human present to notice a silent `context_length_budget_exceeded`
+failure mid-run, so this instruction has to be safe unattended, not just
+usually fine.) -- everything the shape actually requires is spelled out
+explicitly below instead:
 
 - **Go slices**: black-box `httptest`/HTTP-client tests hitting the real
   router, one `MANIFEST.md` naming what the slice verifies and what it

@@ -408,11 +408,13 @@ def next_ticket(
 
 def prior_boundary_sha(workspace: Path, tickets: list[Ticket], ticket: Ticket) -> str | None:
 	"""The commit this ticket's changes should be diffed against: the
-	previous ticket's commit, or the repo's root commit if there is none
-	(ticket 1, or every earlier ticket was somehow never committed).
-	Deliberately NOT "current HEAD before invoking build_app.py" -- that
-	was wrong for regate mode, where HEAD already includes this ticket's
-	commit before the gate even starts.
+	previous ticket's commit, or None for the first ticket in the ordered
+	list (see the idx == 0 branch below for why that's None rather than
+	the workspace's own root commit), or the repo's root commit as a
+	fallback if some *later* ticket's immediately-prior commit is somehow
+	missing. Deliberately NOT "current HEAD before invoking build_app.py"
+	-- that was wrong for regate mode, where HEAD already includes this
+	ticket's commit before the gate even starts.
 
 	None until the workspace has a repo of its own. This runs before
 	build_app.py -- and therefore before ensure_git_repo() -- so on ticket 1
@@ -431,6 +433,25 @@ def prior_boundary_sha(workspace: Path, tickets: list[Ticket], ticket: Ticket) -
 		sha = commit_sha_for(workspace, prior.number)
 		if sha:
 			return sha
+	if idx == 0:
+		# The first ticket in the ordered list has no prior state to diff
+		# against on any call -- not the first run_ticket() invocation
+		# (already handled by the has_own_git_repo() guard above, since the
+		# workspace has no repo yet), and not a later regate call either,
+		# once the repo and this ticket's own commit both already exist.
+		# Falling through to the root-commit fallback below in that second
+		# case is wrong: with exactly one commit in a fresh workspace, that
+		# root commit *is* the commit being gated, so `diff_range =
+		# f"{sha}..{sha}"` in commit_and_state_files_ok() is an empty
+		# self-diff that falsely reports state files untouched even when
+		# they are plainly in the commit (reproduced live 2026-08-21, a
+		# second calculator-pilot run, post-067c666: gate 1 failed on the
+		# nested-repo bug that fix addresses, gate 2 -- the regate -- failed
+		# on this one instead). None here makes the caller diff the single
+		# commit against its own parent (or the empty tree, for a true root
+		# commit) via plain `git show`, which build_app.py's own base_sha=
+		# None fallback already does correctly.
+		return None
 	result = git(workspace, "rev-list", "--max-parents=0", "HEAD")
 	if result.returncode == 0 and result.stdout.strip():
 		return result.stdout.strip().splitlines()[0]
@@ -1075,6 +1096,20 @@ def main() -> int:
 		default=DEFAULT_REVIEW_POLICY,
 		help="Pass the review policy to build_app.py; advisory is the default, required is intended for release-hardening runs.",
 	)
+	parser.add_argument(
+		"--stop-after-ticket",
+		type=int,
+		default=None,
+		metavar="N",
+		help=(
+			"Return (exit 0) as soon as ticket N's gate settles -- pass or fail -- instead of "
+			"continuing to ticket N+1 in the same process. Added for goal_pilot.py "
+			"(plans/goal-pilot-skill-plan-2026-08-21.md step 5b), which needs to pause for a "
+			"human checkpoint right after ticket 001 without SIGTERM-ing a running build. Purely "
+			"additive control flow around the main loop -- does not change what any gate checks, "
+			"and a plain `make run`/no-flag invocation behaves exactly as before."
+		),
+	)
 	args = parser.parse_args()
 
 	pilot_dir = args.pilot_dir.resolve()
@@ -1156,6 +1191,9 @@ def main() -> int:
 			if mode in ("build", "retry", "policy") and retryable_build_state(pilot_dir, workspace, t):
 				continue
 			return 1
+		if args.stop_after_ticket is not None and t.number == args.stop_after_ticket:
+			print(f"\nstopping after ticket {t.nnn} as requested (--stop-after-ticket {args.stop_after_ticket}); gate passed.")
+			return 0
 
 
 if __name__ == "__main__":

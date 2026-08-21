@@ -399,6 +399,16 @@ registrations can't share a slash-command name.
 | List archived evidence | `make reports` |
 | Judge the final verdict | human reads `PROGRESS.md`/`reports/`, no tooling |
 
+**`goal_pilot.py` (`pi/scripts/goal_pilot.py`) drives this entire table
+from one invocation** — `/spec-plan` → spec-freeze checkpoint →
+`/contract-plan` → acceptance-suite checkpoint → `ticket_runner.py`'s
+build loop → class-aware halt handling → a `VERDICT.md`. It is not a
+prompt template (it's deterministic Python, alongside `ticket_runner.py`
+and `build_app.py`) and it does not replace `/spec-plan`/`/contract-plan`
+above — it drives them headlessly instead of a human typing each command
+in turn. See `pi/scripts/README.md`'s `goal_pilot.py` section and
+`../plans/goal-pilot-skill-plan-2026-08-21.md` for the full design.
+
 Contract and acceptance-test generation is the highest-stakes output in
 the pipeline — a wrong contract or test oracle doesn't fail loudly, it
 silently certifies broken app code as correct, and unlike ticket sizing
