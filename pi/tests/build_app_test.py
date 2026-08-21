@@ -271,6 +271,63 @@ class BuildAppTests(unittest.TestCase):
 				)
 			self.assertEqual(run.call_args.kwargs["env"]["AI_REVIEW_BASE_SHA"], "deadbeef")
 
+	def test_agent_turn_errors_counts_errored_assistant_messages(self):
+		output = "\n".join([
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "user", "content": []},
+			}}),
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "assistant", "stopReason": "error"},
+			}}),
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "assistant", "stopReason": "stop"},
+			}}),
+		])
+		self.assertEqual(build_app.agent_turn_errors(output), (1, 2))
+
+	def test_round_blockers_flags_a_fully_errored_round_as_route_unreachable(self):
+		blockers, _ = build_app.round_blockers(
+			verify_passed=False, pi_failed=False, pi_timed_out=False,
+			traces=[], review_policy="advisory", turn_errors=(3, 3),
+		)
+		self.assertIn("model route unreachable (3/3 assistant turns errored)", blockers)
+
+		# A round where the model got through at least one real turn is not
+		# an outage, even if verification still failed for a real reason.
+		partial, _ = build_app.round_blockers(
+			verify_passed=False, pi_failed=False, pi_timed_out=False,
+			traces=[], review_policy="advisory", turn_errors=(1, 3),
+		)
+		self.assertFalse(any("route unreachable" in b for b in partial))
+
+	def test_route_outage_stops_after_one_round_instead_of_burning_max_rounds(self):
+		# Every assistant turn errored out (the model route was unreachable),
+		# so no code was ever produced -- retrying more rounds against the
+		# same dead route would just repeat this outcome. build_app.py should
+		# stop immediately rather than looping to max_rounds; recovery is
+		# ticket_runner.py's own build-attempt retry once the route is back
+		# (observed live: budget-pilot ticket 005 burned all 3 rounds this
+		# way before the outage was noticed -- Codex review of PR #28).
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			errored_output = json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "assistant", "stopReason": "error"},
+			}})
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "")),
+				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, errored_output, "")) as run,
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=3, containment=False, timeout_minutes=1,
+				)
+		self.assertFalse(result.succeeded)
+		self.assertEqual(len(result.rounds), 1)
+		self.assertEqual(run.call_count, 1)
+		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)

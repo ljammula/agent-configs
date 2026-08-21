@@ -205,12 +205,21 @@ def round_blockers(
 	pi_timed_out: bool,
 	traces: list[dict],
 	review_policy: str,
+	turn_errors: tuple[int, int] = (0, 0),
 ) -> tuple[list[str], ReviewSignal]:
 	blockers: list[str] = []
 	if pi_timed_out:
 		blockers.append("pi invocation timed out")
 	elif pi_failed:
 		blockers.append("pi invocation failed")
+	errored, total = turn_errors
+	if total and errored == total:
+		# Every assistant turn in this round errored out (e.g. the model
+		# route was unreachable) -- pi still exits 0 and verify still
+		# legitimately fails, so without this the round is indistinguishable
+		# from the model actually trying and failing (observed live:
+		# budget-pilot ticket 005, 2026-08-20).
+		blockers.append(f"model route unreachable ({errored}/{total} assistant turns errored)")
 	if any(trace.get("outcome") == "stall-timeout" or trace.get("stallTimeout") is True for trace in traces):
 		blockers.append("stall-timeout")
 	if verify_passed is not True:
@@ -234,6 +243,40 @@ def parse_usage(output: str) -> dict | None:
 	return None
 
 
+def agent_turn_errors(output: str) -> tuple[int, int]:
+	"""Count assistant turns whose model call errored out (e.g. the local
+	route being unreachable) vs. the total assistant turns in this round.
+
+	`pi -p` exits 0 and `verify` legitimately fails in this case -- from
+	round_blockers' other signals alone this is indistinguishable from the
+	model actually trying and producing bad code, which silently burns
+	real round budget against an outage instead of surfacing it distinctly
+	(observed live: budget-pilot ticket 005, 2026-08-20)."""
+	total = 0
+	errored = 0
+	for line in output.splitlines():
+		try:
+			event = json.loads(line)
+		except json.JSONDecodeError:
+			continue
+		# pi --mode json emits every session entry wrapped as
+		# {"type": "entry_appended", "entry": {...}} (agent-session.js's
+		# `_emit`); the entry itself carries "type": "message" and, for the
+		# assistant side, "message": {"role": "assistant", "stopReason": ...}.
+		if event.get("type") != "entry_appended":
+			continue
+		entry = event.get("entry") or {}
+		if entry.get("type") != "message":
+			continue
+		message = entry.get("message") or {}
+		if message.get("role") != "assistant":
+			continue
+		total += 1
+		if message.get("stopReason") == "error":
+			errored += 1
+	return errored, total
+
+
 @dataclass
 class Round:
 	index: int
@@ -249,6 +292,7 @@ class Round:
 	verify_timed_out: bool
 	verify_output_tail: str
 	duration_s: float
+	turn_errors: tuple[int, int] = (0, 0)
 
 
 @dataclass
@@ -463,12 +507,14 @@ def run_build(
 		# (returncode 0) and the real verification command passed.
 		pi_failed = timed_out or pi_returncode != 0
 		traces = parse_pi_traces(stdout)
+		turn_errors = agent_turn_errors(stdout)
 		blockers, reviewer = round_blockers(
 			verify_passed=verify_passed,
 			pi_failed=pi_failed,
 			pi_timed_out=timed_out,
 			traces=traces,
 			review_policy=review_policy,
+			turn_errors=turn_errors,
 		)
 
 		rnd = Round(
@@ -479,6 +525,7 @@ def run_build(
 			pi_timed_out=timed_out,
 			pi_usage=parse_usage(stdout),
 			traces=traces,
+			turn_errors=turn_errors,
 			reviewer=reviewer,
 			verify_command=verify_command,
 			verify_passed=verify_passed,
@@ -490,6 +537,18 @@ def run_build(
 
 		if verify_command is None:
 			result.stopped_reason = "no canonical verification command resolvable"
+			break
+		errored, total = turn_errors
+		if total and errored == total:
+			# The model route was unreachable for every assistant turn this
+			# round -- no code was ever produced for the agent to act on, so
+			# further rounds against the same dead route would just repeat
+			# this outcome and burn the rest of the round budget for nothing
+			# (observed live: budget-pilot ticket 005 burned all 3 rounds this
+			# way before the outage was noticed). Stop immediately instead of
+			# looping to max_rounds; ticket_runner.py's own build-attempt
+			# retry is the layer that should recover once the route is back.
+			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
 			break
 		if not blockers:
 			result.succeeded = True
@@ -589,6 +648,9 @@ def write_report(result: BuildResult) -> Path:
 		lines.append(f"- agent: {rnd.agent}")
 		lines.append(f"- agent exit code: {rnd.pi_returncode}")
 		lines.append(f"- agent timed out: {rnd.pi_timed_out}")
+		errored, total = rnd.turn_errors
+		if errored and errored == total:
+			lines.append(f"- agent turns errored: {errored}/{total} (model route unreachable)")
 		if rnd.pi_usage:
 			lines.append(f"- agent usage: {json.dumps(rnd.pi_usage)}")
 		lines.append(f"- reviewer outcome: {rnd.reviewer.outcome}{f' ({rnd.reviewer.detail})' if rnd.reviewer.detail else ''}")

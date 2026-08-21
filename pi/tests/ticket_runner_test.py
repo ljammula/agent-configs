@@ -394,6 +394,57 @@ class TicketRunnerRetryTests(unittest.TestCase):
 			}))
 			self.assertFalse(ticket_runner.retryable_build_state(root, workspace, self.ticket))
 
+	def test_model_route_unreachable_is_retried_as_transient_infrastructure(self):
+		# build_app.py's own outage short-circuit (round_blockers()) stops a
+		# round early with this exact outcome text when every assistant turn
+		# errored out -- no implementation work was ever attempted, so this
+		# is infrastructure state, not a real gate failure, and should use
+		# the bounded build-attempt retry instead of halting for a human
+		# (Codex review of PR #28: this marker was previously missing from
+		# TRANSIENT_BUILD_MARKERS, so an outage halted the line exactly like
+		# a genuine implementation failure).
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			workspace = root / "workspace"
+			workspace.mkdir()
+			(workspace / "BUILD_REPORT.md").write_text(
+				"Outcome: DID NOT SUCCEED -- model route unreachable "
+				"(3/3 assistant turns errored)\n"
+			)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate.json").write_text(json.dumps({
+				"passed": False,
+				"checks": [
+					{"name": "make verify", "ok": False},
+					{"name": "BUILD_REPORT.md SUCCEEDED", "ok": False},
+				],
+			}))
+			self.assertTrue(ticket_runner.retryable_build_state(root, workspace, self.ticket))
+
+	def test_model_route_unreachable_still_stops_on_oracle_or_surface_drift(self):
+		# An outage report is only transient infrastructure noise as long as
+		# nothing else genuinely went wrong; oracle/verify-surface drift is
+		# never treated as retryable regardless of what else the report says.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			workspace = root / "workspace"
+			workspace.mkdir()
+			(workspace / "BUILD_REPORT.md").write_text(
+				"Outcome: DID NOT SUCCEED -- model route unreachable "
+				"(3/3 assistant turns errored)\n"
+			)
+			reports = root / "reports" / "ticket-001"
+			reports.mkdir(parents=True)
+			(reports / "gate.json").write_text(json.dumps({
+				"passed": False,
+				"checks": [
+					{"name": "oracle integrity", "ok": False},
+					{"name": "BUILD_REPORT.md SUCCEEDED", "ok": False},
+				],
+			}))
+			self.assertFalse(ticket_runner.retryable_build_state(root, workspace, self.ticket))
+
 	def test_real_gate_failure_remains_regate_only(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)

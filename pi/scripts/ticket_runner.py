@@ -61,6 +61,7 @@ for a release-hardening run that requires clean independent review.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -96,6 +97,16 @@ TRANSIENT_BUILD_MARKERS = (
 	"stall-timeout",
 	"review unavailable (request-failed)",
 	"review unavailable (no-review-verdict)",
+	# build_app.py's own outage short-circuit (agent_turn_errors()/
+	# round_blockers() in build_app.py): every assistant turn in the round
+	# errored out because the model route itself was unreachable, so no
+	# implementation work was ever attempted. Without this marker,
+	# retryable_build_state() treats an outage report exactly like a real
+	# implementation failure and halts for human intervention instead of
+	# using the bounded build-attempt retry this class of failure is meant
+	# for (observed live: budget-pilot ticket 005, 2026-08-20 -- Codex
+	# review of PR #28 flagged this gap).
+	"model route unreachable",
 )
 # The Makefile and verify scripts are agent-writable but gate-trusted --
 # nothing byte-checks them the way oracle_drift() byte-checks acceptance
@@ -838,6 +849,18 @@ def main() -> int:
 	if args.status:
 		print_status(pilot_dir, tickets, workspace, args.review_policy)
 		return 0
+
+	lock_path = pilot_dir / ".ticket_runner.lock"
+	lock_handle = lock_path.open("w")
+	try:
+		fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+	except OSError:
+		print(
+			f"another ticket_runner.py is already running against {pilot_dir} "
+			f"(lock held on {lock_path}); refusing to race it",
+			file=sys.stderr,
+		)
+		return 1
 
 	while True:
 		t, mode = next_ticket(tickets, pilot_dir, workspace, args.review_policy)
