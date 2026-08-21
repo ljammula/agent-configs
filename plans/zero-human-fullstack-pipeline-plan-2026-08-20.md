@@ -713,6 +713,51 @@ corrected accounting below.
     and been wrong in at least the three specific ways already on
     record, with no mechanism to tell you which parts.
 
+### Follow-up tickets 013–016 and a reporting gap (2026-08-21)
+
+Despite "this plan's active work ends at the verdict above" (previous
+section), four more tickets ran after the verdict: a gap-analysis pass
+over the ticket-012 close-out state (`spec/follow-up.md`) found five
+functional gaps in the shipped app (category correction unreachable from
+the UI, no post-onboarding navigation, unhandled network failures, a
+12-month selector cap, plus minor items), and tickets 013–016 closed four
+of them through the same `ticket_runner.py`/local-model pipeline as
+001–012 — user-confirmed, not inferred.
+
+**The gap:** unlike every ticket through 012, none of 013–016 left the
+pipeline's usual evidence trail. There is no `reports/ticket-013/`
+through `reports/ticket-016/` directory, and neither `pilot-run*.log` nor
+`EXECUTION_LOG.md` mention ticket numbers past 011 (the last `resume-011`
+log). `PROGRESS.md`'s ledger entries for 013–016 are also written in a
+different register than 001–012's — no "oracle," "staged," or "automated
+run halted" language, which every prior entry uses. Reviewing the
+workspace cold (fresh session, no access to the actual run) produced the
+wrong conclusion from this: that 013–016 were hand-written outside the
+pipeline entirely, rather than local-model output that simply wasn't
+logged the same way. The user had to correct that misattribution
+directly.
+
+This matters for the plan's own stated goals, not just as a paperwork
+complaint: the whole point of `reports/`+`pilot-run.log`+`EXECUTION_LOG.md`
+is to make "did the local model actually do this, unassisted" a question
+answerable from the repo alone rather than from asking the person who ran
+it — exactly the auditability the Pilot verdict section above relies on
+for its rescue-count and unassisted-rate figures. A follow-up-ticket run
+that produces working code but no matching evidence trail is a blind spot
+in that auditability, separate from (and not fixed by) the `--amend-canon`
+and `--status` rescue-accounting work already landed post-verdict. Flagged
+as a PR #33 comment (`ticket_runner.py`'s staging/logging is what that PR
+already touches) rather than as new scope here, since no second pilot or
+further hardening is queued per the user's 2026-08-20 decision above —
+this is a correction to the record, not a call to action.
+
+Quality note, for what it's worth given the misattribution: independent
+review (diff read against `spec/plan-follow-up-fixes.md`) plus live
+end-to-end testing of the running app (real backend, real Flutter web
+build, headless-Chrome-driven) found all three functional fixes (013
+onboarding navigation, 014 network-error handling, 015 the transactions
+screen) working correctly with no discrepancies from what was reviewed.
+
 ### Phase 5 — Local decomposition experiment (**post-pilot only**)
 
 Goal: move step "compile the spec" from cloud to the local model, making
