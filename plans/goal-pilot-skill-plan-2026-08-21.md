@@ -376,56 +376,58 @@ needed beyond what each step already writes.
   safe) — worth confirming against the actual prompt text before
   implementation rather than assuming.
 
-**TODO — two more real bugs found live (2026-08-21), independent of this
-plan's own end-to-end run, via a second live `spec-plan -> contract-plan
--> make run` pass on a fresh `~/code/test-bed/calculator-pilot/` pilot
+**Two more real bugs found live (2026-08-21), independent of this plan's
+own end-to-end run, via a second live `spec-plan -> contract-plan -> make
+run` pass on a fresh `~/code/test-bed/calculator-pilot/` pilot
 (single-ticket "add two numbers" app, same scenario `067c666`'s fix was
-verified against):**
+verified against) — both fixed:**
 
-- **`/contract-plan` overflows the local model's context budget when a
-  sibling pilot exists to read as a reference.** The template's step 2
-  tells the model to "read an existing pilot's `spec/acceptance/*/` for
+- **`/contract-plan` overflowed the local model's context budget when a
+  sibling pilot existed to read as a reference.** The template's step 2
+  told the model to "read an existing pilot's `spec/acceptance/*/` for
   the shape if one exists, e.g. `~/code/test-bed/budget-pilot/spec/
   acceptance/`" — with `budget-pilot`'s full 12-ticket acceptance suite
   present, the very first turn hit `context_length_budget_exceeded`
   (`prompt_tokens=~48k` against a `49152` budget), twice, even after
   trimming the pilot's own spec/ticket down to one small ticket (trimming
   didn't help because the overflow comes from the reference read, not
-  the pilot's own content). Worked around for that run by inlining the
-  template with the reference-read step stripped; the real fix belongs
-  in `/contract-plan` itself — either drop the "read a sibling pilot"
-  suggestion, or make it read only the one most relevant slice's
-  `MANIFEST.md` instead of the whole suite. Relevant to `goal_pilot.py`
-  because step 4 invokes `/contract-plan` headlessly with no human
-  present to notice a silent `context_length_budget_exceeded` failure
-  mid-run.
-- **`ticket_runner.py`'s `commit_and_state_files_ok()` self-diffs on a
-  ticket-1 *regate*, after `067c666`'s fix.** That fix correctly makes
+  the pilot's own content). **Fixed**: the "read a sibling pilot"
+  instruction is removed from `/contract-plan` entirely — the shape it
+  pointed at is spelled out explicitly in the template's own bullets
+  instead (Go/Dart slice conventions, `MANIFEST.md`, `go.mod` placement),
+  so there's no longer a reference read to overflow on. Relevant to
+  `goal_pilot.py` because step 4 invokes `/contract-plan` headlessly with
+  no human present to notice a silent `context_length_budget_exceeded`
+  failure mid-run — this closes that specific unattended-failure mode.
+- **`ticket_runner.py`'s `commit_and_state_files_ok()` self-diffed on a
+  ticket-1 *regate*, after `067c666`'s fix.** That fix correctly made
   `prior_boundary_sha()` return `None` while `build_app.py` is about to
   create the workspace's first-ever repo. But on a **second** `run_ticket()`
   call for the same ticket (the regate path — commit exists, gate record
-  doesn't) `prior_boundary_sha()` is recomputed fresh, `has_own_git_repo()`
-  now correctly returns `True` (the repo exists by now), and — since
-  ticket 1 has no prior ticket in the loop — it falls through to
+  doesn't) `prior_boundary_sha()` was recomputed fresh, `has_own_git_repo()`
+  now correctly returned `True` (the repo exists by now), and — since
+  ticket 1 has no prior ticket in the loop — it fell through to
   `git rev-list --max-parents=0 HEAD`, i.e. the workspace's own root
   commit. With exactly one commit in a fresh ticket-1 workspace, that
   root commit **is** the commit being gated, so `diff_range =
-  f"{sha}..{sha}"` is empty and the check reports state files untouched
-  even when `git show --stat` on the same commit proves otherwise.
-  Reproduced live: gate 1 failed on the original (pre-`067c666`-fix)
-  bug, `make run` was re-invoked with the fix already on disk, and gate 2
-  failed on this one instead (`"commit c6a4a385e419 did not touch
-  ['ARCHITECTURE.md', 'PROGRESS.md']"`) even though those files are both
-  in the commit. Fix belongs in `prior_boundary_sha()`: for ticket 1
-  specifically, the correct base is always "no prior state" (empty tree /
-  no `base_sha`), regardless of whether this is the first `run_ticket()`
-  call or a regate — the current code conflates "the workspace has its
-  own repo now" with "there is a real prior commit to diff against,"
-  which isn't true for ticket 1 on any invocation. Relevant to
-  `goal_pilot.py` because step 6/7's halt classification reads this exact
-  gate check to decide "genuine implementation gap" vs. something else —
-  a false failure here would currently misclassify a good ticket 1 as a
-  halt needing rescue.
+  f"{sha}..{sha}"` was an empty diff and the check reported state files
+  untouched even when `git show --stat` on the same commit proved
+  otherwise. Reproduced live: gate 1 failed on the original
+  (pre-`067c666`-fix) bug, `make run` was re-invoked with the fix already
+  on disk, and gate 2 failed on this one instead (`"commit c6a4a385e419
+  did not touch ['ARCHITECTURE.md', 'PROGRESS.md']"`) even though those
+  files were both in the commit. **Fixed** in `prior_boundary_sha()`:
+  the first ticket in the ordered list (`idx == 0`) now always returns
+  `None` once past the `has_own_git_repo()` guard, regardless of whether
+  this is the first `run_ticket()` call or a regate — the old code
+  conflated "the workspace has its own repo now" with "there is a real
+  prior commit to diff against," which isn't true for ticket 1 on any
+  invocation. A later ticket with a genuinely missing prior commit still
+  falls back to the root-commit case, unaffected by this fix (covered by
+  a new test). Relevant to `goal_pilot.py` because step 6/7's halt
+  classification reads this exact gate check to decide "genuine
+  implementation gap" vs. something else — a false failure here would
+  have misclassified a good ticket 1 as a halt needing rescue.
 
 ## What this explicitly does not change
 
