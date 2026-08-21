@@ -271,6 +271,35 @@ class BuildAppTests(unittest.TestCase):
 				)
 			self.assertEqual(run.call_args.kwargs["env"]["AI_REVIEW_BASE_SHA"], "deadbeef")
 
+	def test_agent_turn_errors_counts_errored_assistant_messages(self):
+		output = "\n".join([
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "user", "content": []},
+			}}),
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "assistant", "stopReason": "error"},
+			}}),
+			json.dumps({"type": "entry_appended", "entry": {
+				"type": "message", "message": {"role": "assistant", "stopReason": "stop"},
+			}}),
+		])
+		self.assertEqual(build_app.agent_turn_errors(output), (1, 2))
+
+	def test_round_blockers_flags_a_fully_errored_round_as_route_unreachable(self):
+		blockers, _ = build_app.round_blockers(
+			verify_passed=False, pi_failed=False, pi_timed_out=False,
+			traces=[], review_policy="advisory", turn_errors=(3, 3),
+		)
+		self.assertIn("model route unreachable (3/3 assistant turns errored)", blockers)
+
+		# A round where the model got through at least one real turn is not
+		# an outage, even if verification still failed for a real reason.
+		partial, _ = build_app.round_blockers(
+			verify_passed=False, pi_failed=False, pi_timed_out=False,
+			traces=[], review_policy="advisory", turn_errors=(1, 3),
+		)
+		self.assertFalse(any("route unreachable" in b for b in partial))
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
