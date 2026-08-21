@@ -58,11 +58,16 @@ tokens, output side barely moved):
    2,770 tokens) is paid on every single session**, including trivial
    ones — this is pure per-session tax, not amortized against any
    particular task's value.
-2. **The two large prompt templates are each ~15–20% of the entire
-   request budget by themselves**, before any spec/ticket/reference
-   content is added — `/contract-plan`'s overflow this session is exactly
-   what happens when a template already this large adds one more
-   large read on top.
+2. **The two large prompt templates are each ~4.3–4.6% of the entire
+   request budget by themselves** (2,132–2,275 tokens out of 49,152 —
+   corrected from an earlier draft of this section, which divided raw
+   *bytes* by the token budget instead of the already-converted token
+   estimate two paragraphs up; Codex review of PR #38 caught this),
+   before any spec/ticket/reference content is added. Small on their own,
+   but `/contract-plan`'s overflow this session is exactly what happens
+   when a template this size adds one more unbounded read on top — the
+   static template share isn't the risk, the *unbounded add-on* is (see
+   Phase 3).
 
 Already fixed and out of scope for new work here: the 8 stack skills
 (`stack-skill-overlay.ts`, done), `rtk-rewrite.ts`'s bash-output trimming
@@ -85,33 +90,40 @@ relative terms (cut X, saves ~Y%) so it doesn't depend on getting this
 exact number first, but Phase 5's regression guard does need a real
 number to set its threshold against.
 
-### Phase 1 — Gate `karpathy-guidelines` the same way stack skills are gated
+### Phase 1 — Stop double-paying for `karpathy-guidelines` on pi
 
-`karpathy-guardrail.ts` appends the skill's full text unconditionally,
-via a different mechanism than the 8 stack skills used (which
-`stack-skill-overlay.ts` already fixed by routing through
-`resources_discover`). This is the same shape of problem, one skill,
-still unfixed: ~730 tokens paid every session regardless of whether the
-task is a one-line question or a multi-file build. Options, in order of
-preference:
-1. Route it through the same `resources_discover` relevance-matching
-   `stack-skill-overlay.ts` uses, dropping the dedicated guardrail
-   extension entirely.
-2. If relevance-matching is judged unreliable for this specific skill
-   (the guardrail extension's own comment says it exists *because*
-   pi's relevance-matching is unreliable on this model — this is the
-   likely blocker), keep the unconditional append but shrink the skill
-   itself: 2,922 bytes of guidance appended to every session, including
-   ones where none of it is relevant, is worth auditing for what's
-   actually load-bearing versus restated elsewhere (`full-stack-dev.ts`'s
-   own workflow prompt already covers some of the same ground per
-   `pi/README.md`'s description).
-Needs a live test either way — this is exactly the kind of change
-`pi-harness-history.md`'s adoption-bar convention exists for (a
-regression here would be silent: the model would just start missing
-guidance it used to always get).
+**Status: implemented, PR #38.** The mechanism this section originally
+described was wrong (Codex review of PR #38 caught it) — corrected here
+rather than left stale:
+
+`karpathy-guardrail.ts` does **not** append the skill's full 2,922-byte
+`SKILL.md` unconditionally; it appends a short, inline ~415-byte (~104
+token) summary via `before_agent_start`. The actual redundant tax was a
+different mechanism: `install.sh` *also* globally linked
+`karpathy-guidelines` into `~/.pi/agent/skills/` (via `PORTABLE_SKILLS`,
+the same list Claude/Codex use), so pi's own relevance-matching
+advertised the skill's name+description a second time — on top of the
+guardrail's already-unconditional coverage — for guidance the session
+already had. Routing it through `resources_discover` (this section's
+original option 1) wouldn't have fixed that: the global link itself was
+the redundant path, not the routing mechanism.
+
+Implemented fix: `install.sh` now excludes `karpathy-guidelines` from
+pi's global skill-linking list (`PI_PORTABLE_SKILLS`, `PORTABLE_SKILLS`
+minus that one skill) while leaving it linked for Claude/Codex, whose
+Skill tool is their only enforcement mechanism for it. Verified live:
+`ls ~/.pi/agent/skills/` no longer lists `karpathy-guidelines` after
+re-running `install.sh`; `karpathy-guardrail.ts`'s summary append is
+unchanged and still the sole pi-side enforcement path. This is a
+structural fix (removing a duplicate advertisement), not a token-savings
+claim resting on the ~730-token figure this section originally cited —
+that figure conflated the skill's full byte size with what was actually
+being paid twice.
 
 ### Phase 2 — Prompt-template diet: split human rationale from model instructions
+
+**Status: implemented, PR #38**, with one correction to the approach
+originally proposed here (Codex review of PR #38 caught it):
 
 `/spec-plan` and `/contract-plan` currently mix two audiences in one
 file: instructions the model must follow, and rationale/history explaining
@@ -121,13 +133,27 @@ spec-plan.md's explanation of why the scaffold step uses heredocs). The
 model has to pay token cost for the rationale paragraphs even though only
 the imperative sentences are actionable.
 
-Concrete move: for each template, extract the "why" prose into an
-adjacent comment file or a `<!-- -->`-style block the model is told to
-skip, keeping only the numbered steps and exact required strings
-(heredocs, commit message formats, banners) in the model-facing prompt.
-Estimate 20–30% size reduction on both templates based on a rough read
-of the current proportion of rationale vs. instruction text — needs a
-real diff to confirm, not assumed.
+~~Concrete move: extract the "why" prose into an adjacent comment file
+or a `<!-- -->`-style block the model is told to skip.~~ **This
+alternative does not work and must not be used**: pi loads a prompt
+template as plain file content with no repository preprocessor, so an
+HTML comment the model is merely *told* to skip still gets sent as
+prompt text and still consumes context — "told to skip" is not "not
+transmitted". Any rationale that needs to stay out of the model's
+context has to either live in a file that is never loaded as part of the
+prompt, or go through an actual stripping/generation step (author one
+file, ship a generated, trimmed copy) — a real build step, not a comment
+convention.
+
+Implemented instead: rationale prose was deleted outright from
+`spec-plan.md` and `contract-plan.md`, keeping every imperative
+instruction, exact required string (heredocs, commit message formats,
+banners), and the load-bearing ambiguity-flagging rationale (see risk
+paragraph below) verbatim in the one authored file that is the prompt.
+Result: ~8% smaller (`spec-plan.md`) and ~10% smaller
+(`contract-plan.md`) — deliberately conservative versus this section's
+original 20–30% estimate, prioritizing "quality not lost" (explicit user
+steer during implementation) over chasing the larger number.
 
 Risk this must be checked against: some of that "rationale" is load-bearing
 context the model uses to resolve ambiguity correctly (e.g.
@@ -135,7 +161,14 @@ context the model uses to resolve ambiguity correctly (e.g.
 plausibly affects whether the model actually flags guesses rather than
 silently absorbing them). Cutting this needs a before/after comparison on
 a real drafting run, not just a byte-count win — a smaller prompt that
-produces worse specs is a net loss.
+produces worse specs is a net loss. Live-validated on a calculator-app
+pilot (`goal_pilot.py`, single "add two numbers" scope): the trimmed
+`/spec-plan` produced a 10-item Assumptions & Interpretations list, clear
+Non-goals/Open-questions split, and correct tracer-bullet ticket
+decomposition at 9,390 first-turn prompt tokens; the trimmed
+`/contract-plan` produced an exact wire contract and a working acceptance
+suite at 8,537 first-turn tokens (~26,351 peak) — both far under the
+49,152-token budget, no quality regression observed.
 
 ### Phase 3 — Ban the "read a whole reference file/dir" instruction pattern
 
