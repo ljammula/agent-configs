@@ -242,15 +242,15 @@
     pages.
   </p>
   <div class="meta-row">
-    <span><b>Host</b> kannasmacstudio.lan · mlx-vlm</span>
-    <span><b>Harness</b> pi 0.83.0</span>
-    <span><b>Last updated</b> 2026-08-19</span>
+    <span><b>Host</b> kannasmacstudio.lan · mtplx (swapped 2026-08-21 from mlx-vlm)</span>
+    <span><b>Harness</b> pi 0.84.2</span>
+    <span><b>Last updated</b> 2026-08-21</span>
     <span><a href="timeline.html">Full timeline →</a></span>
   </div>
 
   <div class="stats">
     <div class="stat"><div class="num">8/9</div><div class="label">Harness vs. 7/9 stock-Pi baseline, pre-hardening paired battery</div></div>
-    <div class="stat"><div class="num">5/6</div><div class="label">Hardened-config rerun, both flagged timeouts now re-isolated: pair 4 resolved as contention-caused (now passes clean); pair 5 root-caused to a real stall-guard gap, still open</div></div>
+    <div class="stat"><div class="num">7/9</div><div class="label">Latest full harness-only battery (2026-08-20): 7 valid+passed, 2 valid-but-failed on new, unrelated issues — the historically stall-prone pair now passes clean and fast; no stalls, no timeouts anywhere in this run</div></div>
     <div class="stat"><div class="num">15/15</div><div class="label">Planted-bug catches, independent reviewer</div></div>
     <div class="stat"><div class="num">4/4</div><div class="label">Replicated fix, direct scratch-task trials: Qwen3.8 thinking + temperature tuning</div></div>
   </div>
@@ -297,7 +297,7 @@
         <div class="count">1</div>
         <div class="glabel">Trace-only, pending a fix</div>
         <ul>
-          <li><code>progress-stall-guard.ts</code> — two more detection bugs fixed 8/19, plus an opt-in intercept action; 3 live pair-5 attempts, 3 different loop shapes, 0 recoveries so far</li>
+          <li><code>progress-stall-guard.ts</code> — the always-on wall-clock backstop is now live-confirmed to recover a stall unattended (8/19, 6th same-fixture rerun, no manual kill needed); cycle detection is live-confirmed too. Shape-specific detection/the opt-in intercept action remain trace-only, only tested at shortened thresholds so far</li>
         </ul>
       </div>
       <div class="status-group off">
@@ -322,7 +322,8 @@
   <section>
     <h2>Open items</h2>
     <div class="steps">
-      <div class="step"><div class="dot"></div><p>Both hardened-config timeout flags from 8/17 are now re-isolated. <code>go-flutter/bookmarks-app</code> (pair 4) was contention — a clean-restart rerun passed in 18 min with a real 328-line diff. <code>dart/sequential-runner</code> (pair 5) is <b>not</b> contention or a genuine settlement-speed problem: <b>three</b> clean-isolation reruns, three different loop shapes, still 0/3 recovered. Shell-masked pipe (Task 4) → shape-sensitive alternation (confirmed the widened fingerprint detects a real stall live, <code>sameFailure</code> reaching 4, <code>stalled</code> firing 33 times — but trace-only, nothing could act) → <b>argument-echoed-into-output alternation</b> (same day, with two more detection fixes and an opt-in intercept action live): the model's two looping commands' literal filter arguments got echoed into the output text itself, so even the category-based fingerprint saw different text every time and never sustained a streak. Deliberately not chased with a fourth same-day rerun — the real fix now looks like it needs cycle detection over a trailing window, not another fingerprinting refinement.</p></div>
+      <div class="step"><div class="dot"></div><p><b>Resolved, 8/19.</b> Both hardened-config timeout flags from 8/17 are now re-isolated. <code>go-flutter/bookmarks-app</code> (pair 4) was contention — a clean-restart rerun passed in 18 min with a real 328-line diff. <code>dart/sequential-runner</code> (pair 5) needed real fixes to <code>progress-stall-guard.ts</code>: a fingerprinting bug, a masking-blind reset, and a missing cycle detector, found across five reruns hitting five different loop shapes (shell-masked pipe → shape-sensitive alternation → argument-echoed-into-output alternation → an incrementally-widening pipe chain). A sixth rerun, with the fixes plus the new independent wall-clock backstop live, ended cleanly and unattended in under 6 minutes — no manual kill needed, the first fully autonomous recovery from this exact stall. The 2026-08-20 full battery below independently confirms it: this same fixture now passes clean and fast (271.4s, no stall-guard activity at all).</p></div>
+      <div class="step"><div class="dot"></div><p><b>New from the 2026-08-20 full harness-only battery</b> (7/9 valid+passed, 2/9 valid-but-failed, no timeouts, no stall-guard activity anywhere): both failures land on <code>go-flutter</code> tasks, and neither is a stall. (1) <b>Scratch-test/hidden-test name collisions, now 2/2 on go-flutter tasks</b> — the model's own leftover scratch Go test file independently picks the same function names (<code>TestGetNote</code>, <code>TestUnknownRoutes</code>) the hidden test's author picked, colliding at grading time in a way no in-session mechanism can see (the hidden test doesn't exist until after the session ends). A fixture/harness-methodology issue, not a model or extension defect. (2) <code>go-flutter/bookmarks-app</code> shipped a <b>third, differently-shaped race condition</b> across its reruns, missed by 2 reviewer <code>clean</code> verdicts and local quality-gate rounds each time — neither runs Go's <code>-race</code> detector, only the hidden test does.</p></div>
       <div class="step"><div class="dot"></div><p>Background-process kills on long unattended <code>/goal</code> runs — <b>root-caused (Task 5)</b> to Pi's client-side 5-minute idle HTTP timeout, not the proxy's 30-minute total cap. Disabling it (<code>httpIdleTimeoutMs: 0</code>) was tested against the exact reproduction that killed two prior forced-compaction runs (Task 8): both survived. Not a fully controlled A/B (the precise trigger — a gap over 5 minutes — wasn't reproduced independently of compaction), but the first time this recipe hasn't killed the process, matching the root-cause prediction.</p></div>
       <div class="step"><div class="dot"></div><p><b>Corrective-follow-up mechanism resolved by narrowing, not by fixing delivery mode (8/19).</b> The reviewer-truncation investigation found <code>followUp</code> messages structurally can't interrupt an active tool-calling loop — a queued correction can sit undelivered forever. Rather than switch to <code>deliverAs: "steer"</code> (untested, its own validation question), in-band corrective nudging was removed entirely from <code>quality-gate.ts</code> and <code>cross-model-review.ts</code>; both now do pure reporting via trace metadata. <b>Live-confirmed end to end</b>: a 4th <code>go/lru-cache</code> rerun post-decoupling shows zero injected <code>followUp</code> messages, the reviewer's finding landing purely in trace metadata, and the session settling honestly as a real, cleanly-reported failure. <code>goal-gate.ts</code>'s <code>followUp</code> calls were deliberately left alone — unattended builds have no human to hand a trace to mid-run.</p></div>
       <div class="step"><div class="dot"></div><p>The <code>malformed-verdict</code> reviewer failure flagged 8/18 is <b>root-caused and fixed</b>: token-cap truncation (<code>finish_reason: "length"</code>) on a long self-correcting <code>analysis</code> field, not a parsing regression. Fix: explicit <code>max_tokens: 8192</code>, a brevity-bounded prompt, and a one-shot stricter retry on truncation — verified via the planted-bug battery (still 15/15 catches, 0/9 false positives) and a direct replay of the original truncating diff (now clean in 5.8s, was 202.9s/178.8s failing).</p></div>
