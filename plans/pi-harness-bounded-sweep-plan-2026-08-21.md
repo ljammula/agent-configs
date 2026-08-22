@@ -56,10 +56,16 @@ the one-candidate-at-a-time legwork.
 - No expansion of the search space beyond what's explicitly listed in the
   sweep config for a given invocation — no "while we're at it, also try…"
   additions inside the script itself.
-- Not a replacement for `run_screening.py`/`run_single_arm.py`. The
+- Not a replacement for `run_screening.py`/`run_single_pair.py`. The
   workflow calls them as a subprocess per candidate; it does not
   reimplement grading, scoring, or the existing fixture-hygiene cleanup
   (`remove_prohibited_scratch_files()`).
+- No temperature sweeping in this version. Neither `run_screening.py` nor
+  `run_single_pair.py` exposes a temperature flag — it's hardcoded in
+  `pi/extensions/ai-stack-local.ts`, which the non-goal above already
+  forbids editing. Adding a `--temperature` override to the runner (so a
+  future sweep could vary it as a genuine per-call override rather than a
+  config-file edit) is a separate, later change, not part of this plan.
 - Does not touch the reviewer route (`cross-model-review.ts`) or the
   `:8080` model swap history — orthogonal to this sweep.
 
@@ -67,9 +73,10 @@ the one-candidate-at-a-time legwork.
 
 ### Inputs (per invocation, via `Workflow`'s `args`)
 
-- `candidates`: list of `{label, thinking_level, temperature?}` — the
-  configs to compare. Kept small by convention (2-4 candidates) since each
-  one is a real battery subprocess.
+- `candidates`: list of `{label, thinking_level}` — the configs to
+  compare. Kept small by convention (2-4 candidates) since each one is a
+  real battery subprocess. Temperature is not a candidate field in this
+  version — see the Non-goals entry above.
 - `pairs` or `--max-pairs`: which task pairs to run, defaulting to a fixed
   small subset (e.g. the existing pair-1/pair-4 pairing already used for
   reruns in `pi-harness-validation-status.md`) rather than the full
@@ -80,9 +87,9 @@ the one-candidate-at-a-time legwork.
 ### Mechanics
 
 1. For each candidate, the workflow spawns one agent whose job is to
-   invoke `run_screening.py` (or `run_single_arm.py` for a single pair)
-   with that candidate's `--thinking`/temperature override and the shared
-   seed, and report back the run's own result record (pass/fail, seconds,
+   invoke `run_screening.py` (or `run_single_pair.py` for a single pair)
+   with that candidate's `--thinking` override and the shared seed, and
+   report back the run's own result record (pass/fail, seconds,
    any `removed_prohibited_scratch_files` entries, hidden-test exit code)
    — not its own summary or judgment of what the numbers mean.
 2. `pipeline()` over candidates × pairs, since candidates are independent
@@ -126,6 +133,10 @@ step rather than asserted by the workflow).
 
 ## Follow-up (explicitly out of scope for this plan)
 
+- Adding a `--temperature` override to `run_screening.py`/`run_single_pair.py`
+  (plumbed through to the `ai-stack-local.ts` sampling-params hook as a
+  per-call override, not a config-file edit) so a later sweep could vary
+  temperature the same way this plan varies `--thinking`.
 - Whether to fold the sweep report format back into
   `qwen38-agentic-coding-tuning-research.md`'s existing tables, or keep it
   as a separate artifact under `pi/evals/battery-results/` — decide once
