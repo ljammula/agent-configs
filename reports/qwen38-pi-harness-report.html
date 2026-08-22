@@ -655,11 +655,11 @@ presence_penalty: 0.0 <span style="color:var(--ink-faint)">(all injected client-
           <span class="tag">resolved 2026-08-17 (evening) — a clean-restart, isolated-only rerun passed in 18 min with a real 328-line diff. Contention-caused, not a genuine stall or thinking-mode defect.</span>
         </div>
       </div>
-      <div class="step open">
+      <div class="step done">
         <div class="dot"></div>
         <div>
-          <p>Per-task timeout budgets (30/45 min) predate thinking being enabled and weren't sized for the ~3x wall-clock cost it adds. A second flagged timeout (<code>dart/sequential-runner</code>) was re-isolated the same way as the one above and did <b>not</b> resolve as contention: a clean rerun still hit the 30-min budget, with the raw session log showing 133 sourceless diagnostic rounds — a genuine stall, now root-caused to a real <code>progress-stall-guard.ts</code> detection gap rather than a budget-sizing problem.</p>
-          <span class="tag">sharpened 2026-08-19 — one of two flagged timeouts is contention, the other is a real bug; budgets still not revisited for the raised wall-clock cost</span>
+          <p>Per-task timeout budgets (30/45 min) predate thinking being enabled and weren't sized for the ~3x wall-clock cost it adds. A second flagged timeout (<code>dart/sequential-runner</code>) was re-isolated the same way as the one above and did <b>not</b> resolve as contention: a clean rerun still hit the 30-min budget, with the raw session log showing 133 sourceless diagnostic rounds — a genuine stall, root-caused to a real <code>progress-stall-guard.ts</code> detection gap rather than a budget-sizing problem. Five further live reruns on the same fixture chased the fix down: a fingerprinting bug, a masking-blind reset, and a missing cycle detector were each found and fixed, but the first four reruns after those fixes still needed a human watching the session log to send a manual kill — the harness could <em>detect</em> the stall but not yet <em>act</em> on it unattended.</p>
+          <span class="tag">resolved 2026-08-19 (later) — sixth rerun of the same fixture, with the new independent wall-clock backstop live, ended cleanly and unattended in under 6 minutes (soft warning at 2min, hard <code class="mono">ctx.abort()</code> at 4min, no manual SIGTERM) — the first fully autonomous recovery from this exact stall. Tested at shortened 2/4-min thresholds for a fast confirmation cycle, not yet at the 10/20-min production defaults; the separate bash-driven-edit detection path still has unit coverage only, not a live confirmation.</span>
         </div>
       </div>
       <div class="step open">
