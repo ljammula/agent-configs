@@ -43,9 +43,17 @@ validation run actually exercised the full pipeline):
 
 - **This machine's real budget is small and fixed.** `AI_STACK_HOST`'s
   local route: `max_kv_size=65536`, active request budget **49,152
-  tokens**, compaction/rejection threshold **~46,694**. This doesn't move
-  without a hardware/model change — every other number below has to fit
-  inside it.
+  tokens**, compaction/rejection threshold **~46,694** — the numbers this
+  plan's percentages below were measured against.
+  **Update 2026-08-21: `max_kv_size` was raised 65536 → 81920**
+  (`DEFAULT_QWEN_MAX_KV_SIZE`, ai-stack commit `8007af0`), so the route's
+  active request budget is now **65536 tokens** (`contextWindow` in
+  `pi/extensions/ai-stack-local.ts`, updated to match). The
+  compaction/rejection threshold has not been re-measured at the new
+  budget — treat `~46,694` as stale. The percentages/token counts
+  elsewhere in this doc (e.g. "X out of 49,152") were computed against
+  the pre-bump budget and describe those historical runs correctly; they
+  are not wrong, but they're no longer against the current live ceiling.
 - **Historical baseline tax: ~7,036 tokens** measured before
   `stack-skill-overlay.ts` existed — of which ~1,790 tokens was 8 stack
   skills loading into every session regardless of repo, now fixed by
@@ -293,7 +301,9 @@ above.
 
 - Raising `max_kv_size`/the model's own context window — a different
   lever (hardware/model config), not a prompt-content problem, and not
-  this plan's to solve.
+  this plan's to solve. (Done anyway, outside this plan, 2026-08-21:
+  65536 → 81920 — see the "Why this matters" section above. Doesn't
+  change this plan's prompt-content scope.)
 - Any change to pi's own core system prompt (upstream, not this repo's
   to edit).
 - Re-litigating the RTK/local-execution-harness decisions already settled
@@ -301,7 +311,7 @@ above.
   of scope here.
 - Cloud-side (Claude/Sonnet) prompt size — this plan is scoped to the
   local-model budget, which is the actual hard constraint; cloud sessions
-  don't hit a 49,152-token wall.
+  don't hit that local wall (now 65536 tokens, was 49,152).
 
 ## Open questions for whoever picks this up
 

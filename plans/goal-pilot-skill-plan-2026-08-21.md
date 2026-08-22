@@ -388,7 +388,9 @@ verified against) — both fixed:**
   the shape if one exists, e.g. `~/code/test-bed/budget-pilot/spec/
   acceptance/`" — with `budget-pilot`'s full 12-ticket acceptance suite
   present, the very first turn hit `context_length_budget_exceeded`
-  (`prompt_tokens=~48k` against a `49152` budget), twice, even after
+  (`prompt_tokens=~48k` against the then-live `49152` budget — raised to
+  `65536` on 2026-08-21, see `pi/extensions/ai-stack-local.ts`), twice,
+  even after
   trimming the pilot's own spec/ticket down to one small ticket (trimming
   didn't help because the overflow comes from the reference read, not
   the pilot's own content). **Fixed**: the "read a sibling pilot"

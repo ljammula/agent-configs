@@ -173,7 +173,8 @@ Context claims from the same sources were internally inconsistent between
 "262K native" and a "1M advertised" agentic context figure in the search
 summaries used to compile this table, and were not independently resolved.
 Treat the exact long-context numbers as unverified; they are also
-irrelevant at this deployment's actual `contextWindow: 49152` /
+irrelevant at this deployment's actual `contextWindow: 65536` (raised from
+49152 on 2026-08-21 when `max_kv_size` was bumped 65536 → 81920) /
 `maxTokens: 16384` (see Risks, below).
 
 ## The GLM precedent (closest internal prior)
@@ -358,9 +359,10 @@ before drawing any conclusion.
 ## Risks
 
 - **Context-budget interaction.** This deployment's real admission budget
-  is `contextWindow: 49152` (the proxy's actual ceiling, already
-  corrected once from an ungrounded 96000 guess — see the comment in
-  `ai-stack-local.ts`), with `maxTokens: 16384` and
+  is `contextWindow: 65536` (the proxy's actual ceiling — raised from
+  49152 on 2026-08-21 when `max_kv_size` was bumped 65536 → 81920;
+  before that, corrected once from an ungrounded 96000 guess — see the
+  comment in `ai-stack-local.ts`), with `maxTokens: 16384` and
   `compaction: { reserveTokens: 16384, keepRecentTokens: 24000 }`.
   Reasoning tokens consume the same output budget as the final answer.
   Turning on `xhigh` reasoning_effort risks reproducing the exact
