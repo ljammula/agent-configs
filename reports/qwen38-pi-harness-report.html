@@ -407,7 +407,7 @@
     <span class="living-badge">living doc — updated as we learn more</span>
     <span><b>Host</b> kannasmacstudio.lan · Qwen3.8-27B-8bit, mlx-vlm</span>
     <span><b>Task</b> local-model-bench <code class="mono">go/lru-cache</code></span>
-    <span><b>Last updated</b> 2026-08-19 · 4/4 replicated</span>
+    <span><b>Last updated</b> 2026-08-21 · 4/4 replicated</span>
   </div>
 
   <div class="callout">
@@ -422,6 +422,20 @@
     exact-text/tool-call checks, not independently re-run against this
     task. Full account: <code class="mono">local-ai-stack.md</code>'s
     "<code class="mono">:8080</code> swap to mtplx" section.
+  </div>
+
+  <div class="callout">
+    <b>Context-budget update, 2026-08-21:</b> <code class="mono">DEFAULT_QWEN_MAX_KV_SIZE</code>
+    was raised <code class="mono">65536 → 81920</code> on the same
+    <code class="mono">:8080</code> route (ai-stack commit
+    <code class="mono">8007af0</code>), so the proxy's real admission
+    budget — <code class="mono">contextWindow</code> in
+    <code class="mono">ai-stack-local.ts</code> — moves from
+    <code class="mono">49152</code> to <code class="mono">65536</code>
+    tokens. This is a separate change from the mtplx swap above, done for
+    headroom, not correctness; the trials on this page all ran under the
+    old, smaller budget. The old ~46,694–49,152 empirical
+    compaction/rejection line hasn't been re-measured at the new one.
   </div>
 
   <div class="scoreline">
