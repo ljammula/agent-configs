@@ -5501,3 +5501,36 @@ bump anyway, not because a forcing reason had newly appeared).
   since the narrower pair-4 subset wasn't ambiguous enough on its own to
   warrant it; revisit if a future finding makes the `0.84.2` pin's
   battery-level evidence gap matter.
+
+## `:8080` swapped from 8-bit mlx-vlm to the mtplx runtime (2026-08-21)
+
+Production `:8080` now serves `Qwen3.8-27B-MTPLX-Optimized-Quality` through
+the mtplx runtime instead of the dedicated `Qwen3.8-27B-8bit` mlx-vlm
+instance this file's earlier entries all measured. Full evaluation trail is
+`ai-stack` PR #20 (`eval/qwen38-mtplx-optimized-speed-plan.md`); rollout
+commits are `f226a5b` (swap `:8080`) and `d0ef43a` (retire the now-redundant
+`:8083` candidate route). See `local-ai-stack.md`'s "`:8080` swap to mtplx"
+section for the full account (decision rationale, rollback path,
+concurrency-model change). Recorded here because it invalidates the framing
+of every decode-throughput/MTP-block-size measurement earlier in this file
+and in `local-ai-stack.md`'s tables -- those numbers describe the retired
+8-bit route, not the model `:8080` currently serves.
+
+Corresponding `pi/extensions/ai-stack-local.ts` change (same day): the
+`ai-stack-local` provider's model id now points at the mtplx model; the
+separate `ai-stack-local-mtplx` provider that had fronted the now-retired
+`:8083` for head-to-head comparison was removed. Sampling params and
+`compat.thinkingFormat: "qwen"` settings were carried over unchanged onto
+the new model id -- verified only via PR #20's exact-text/tool-call checks,
+not independently re-derived against this specific backend the way the
+retired 8-bit route's settings were (see that file's inline comments for
+the original derivation trace, still accurate for how those settings were
+found, just not re-verified against the new backend).
+
+Open gap, carried over from the plan doc: the swap was adopted on the
+memory-footprint case (mtplx's ~42GB session peak vs. the old route's
+~71GB) plus four harness trials showing no correctness regression and a
+wash-to-slight speed edge -- but the plan doc's own item-5 quality-scoring
+gate (a scored comparison against the old 8-bit route, not just pass/fail)
+was never run. Worth another look if quality regressions surface on real
+harness work.

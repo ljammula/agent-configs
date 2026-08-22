@@ -1,17 +1,69 @@
 # Local ai-stack model endpoints
 
-Operational snapshot: 2026-08-19 (`ai-stack` pulled to `953c540`). The owning
-runtime repository is `~/code/ai-stack`; its `PLAN.md`, launchers, exact
-package locks, and `mlx-vlm-rollback.md` remain the source of truth. This
-file records only the facts agent configurations need when choosing or
-calling a local route.
+Operational snapshot: 2026-08-21 (`ai-stack` pulled to `d0ef43a`, superseding
+the 2026-08-19 `953c540` snapshot below). The owning runtime repository is
+`~/code/ai-stack`; its `PLAN.md`, launchers, exact package locks, and
+`mlx-vlm-rollback.md` remain the source of truth. This file records only the
+facts agent configurations need when choosing or calling a local route.
+
+**2026-08-21: `:8080` swapped from the dedicated 8-bit mlx-vlm route to the
+mtplx runtime.** See "`:8080` swap to mtplx" below for the full account; the
+decode-throughput tables further down in this file predate the swap and
+describe the retired 8-bit route, kept for the rollback path and historical
+comparison, not the currently-serving model.
 
 ## Resident routes
 
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
-| `:8080/v1` | `Qwen3.8-27B-8bit`, coding, blind same-model review, and triage | mlx-vlm 0.6.8, APC + MTP block 5 (`--draft-block-size 5`, confirmed live via `ps aux` on `kannasmacstudio.lan`) | 54.51 tok/s median, short context, synthetic (see tables below) -- but see "Live vs. synthetic decode gap" for what real tool-calling turns actually get |
+| `:8080/v1` | `Qwen3.8-27B-MTPLX-Optimized-Quality`, coding, blind same-model review, and triage (swapped 2026-08-21 from a dedicated `Qwen3.8-27B-8bit` mlx-vlm instance -- see below) | mtplx v2.9.0, native MTP draft head (depth 3), shared backend on internal port 18084 (also fronted `:8083` until that route was retired the same day) | ~46-49 tok/s decode on a 400-token story prompt under native `mtplx serve` (2026-08-21 native-runtime eval); the block-5 mlx-vlm table below is the retired 8-bit route's number, not this route's |
 | `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05, 118.1 tok/s solo short-context (2026-08-16) |
+
+## `:8080` swap to mtplx (2026-08-21)
+
+Full evaluation trail lives in `ai-stack` PR #20
+(`eval/qwen38-mtplx-optimized-speed-plan.md`, commits `c1e6a27`..`d0ef43a`):
+a bounded eval of `Youssofal/Qwen3.8-27B-MTPLX-Optimized-Speed`/`-Quality`
+that started as an isolated oMLX load test, moved to the native `mtplx`
+runtime (confirmed working vision/tools/JSON/long-context, unlike the oMLX
+fallback), then four rounds of `pi` harness trials comparing the candidate
+(fronted temporarily on `:8083`) against the production 8-bit route on
+`:8080` -- single-run, then N=3 repeats, then a variant swap from
+`-Optimized-Speed` to `-Optimized-Quality`, then a memory-only readout.
+
+**Decision and rollout** (ai-stack commits `f226a5b`, `d0ef43a`): production
+`:8080` traffic was repointed at the same shared mtplx backend (`18084`)
+`:8083` had been using, on the memory case -- mtplx's session peak (~42GB)
+came in well below the old 8-bit route's (~71GB), and four harness trials
+found no correctness regression and a wash-to-slight speed edge. **Adopted
+ahead of the plan doc's own item-5 quality-scoring gate**, which was never
+run -- only pass/fail correctness was checked, not a scored quality
+comparison against the old 8-bit route. That gap is open. `:8083`, now
+redundant (a second public listener on the identical upstream), was retired
+the same day.
+
+Rollback path: the old dedicated `mlx_vlm.server` instance (`Qwen3.8-27B-8bit`
++ MTP-4bit draft, internal port `18080`, `com.aistack.qwen38` launchd job) is
+unloaded, not deleted -- weights and launchd plist both still on disk.
+`QWEN_UPSTREAM_PORT`/`QWEN_IDLE_CACHE_CLEAR_*_BY_PORT` entries keyed to
+`18080` are now inert (no live route uses that upstream) but were left in
+place rather than removed.
+
+Concurrency note: `:8080` now shares one upstream process with what used to
+be `:8083`'s traffic. mtplx runs `--scheduler-mode serial`, so real
+concurrency through this backend is 1 regardless of how many requests the
+proxy's own semaphore (`QWEN_MAX_CONCURRENT`) admits -- unlike the old
+two-draft-stream `mlx_vlm.server` setup, concurrent requests queue at mtplx
+itself rather than running in parallel.
+
+`pi/extensions/ai-stack-local.ts` was updated in lockstep (same day): the
+`ai-stack-local` provider's model id now points at
+`Qwen3.8-27B-MTPLX-Optimized-Quality`, and the separate `ai-stack-local-mtplx`
+provider that had fronted `:8083` for the head-to-head comparison was
+removed along with the retired route. Sampling params and `thinkingFormat:
+"qwen"` compat settings were carried over unchanged, verified only via PR
+#20's exact-text/tool-call checks -- not independently re-derived against
+this specific backend the way the old 8-bit route's settings were.
 
 **`:8080` decode throughput by context length (2026-08-16, 3 runs/point,
 median shown, 256-token forced completions, temp 0, solo load, MTP block 3

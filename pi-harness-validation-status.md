@@ -23,8 +23,11 @@ reporting `0.83.0` after the project-local bump alone. Static checks
 != "0.83.0"` preflight guard existed independently in all four eval
 scripts (`run_screening.py`, `run_single_arm.py`, `run_single_pair.py`,
 `run_js_lru_pair.py`, not centralized) — all four updated to `0.84.2`.)
-has two resident inference routes: `Qwen3.8-27B-8bit`
-on `:8080` (primary, host `kannasmacstudio.lan`) and `gemma-4-26b-a4b-it` on
+has two resident inference routes: `Qwen3.8-27B-MTPLX-Optimized-Quality`
+on `:8080` (primary, host `kannasmacstudio.lan`, swapped 2026-08-21 from a
+dedicated `Qwen3.8-27B-8bit` mlx-vlm instance to the mtplx runtime — see
+`local-ai-stack.md`'s "`:8080` swap to mtplx" and `pi-harness-history.md`
+for the full account) and `gemma-4-26b-a4b-it` on
 `:8081` (reviewer, same host). `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`/
 `AI_STACK_HOST` live in `~/.zshenv` (sourced by every zsh invocation,
 interactive or not — see `pi-harness-history.md` for why this moved out of

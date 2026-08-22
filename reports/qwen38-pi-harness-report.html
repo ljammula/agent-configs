@@ -410,6 +410,20 @@
     <span><b>Last updated</b> 2026-08-19 · 4/4 replicated</span>
   </div>
 
+  <div class="callout">
+    <b>Runtime update, 2026-08-21:</b> <code class="mono">:8080</code> now
+    serves <code class="mono">Qwen3.8-27B-MTPLX-Optimized-Quality</code>
+    through the mtplx runtime, not the <code class="mono">Qwen3.8-27B-8bit</code>
+    mlx-vlm route this investigation was run against — swapped for a much
+    smaller memory footprint (~42GB vs ~71GB session peak) after four
+    harness trials found no correctness regression and a wash-to-slight
+    speed edge. The three thinking/sampling fixes below were carried over
+    onto the new route unverified, on the strength of the swap eval's
+    exact-text/tool-call checks, not independently re-run against this
+    task. Full account: <code class="mono">local-ai-stack.md</code>'s
+    "<code class="mono">:8080</code> swap to mtplx" section.
+  </div>
+
   <div class="scoreline">
     <div class="score-block baseline">
       <div class="score-num">0 / 4</div>

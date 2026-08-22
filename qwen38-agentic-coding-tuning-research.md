@@ -5,6 +5,18 @@ Colleague-facing summary: `reports/qwen38-pi-harness-report.html`
 from the project overview at `index.html`; kept in sync with this file,
 update both when new trials land).
 
+**Superseded runtime, findings still relevant (2026-08-21):** everything
+below was measured against the dedicated 8-bit mlx-vlm instance that used
+to serve `:8080`. That route was swapped to the mtplx runtime's
+`Qwen3.8-27B-MTPLX-Optimized-Quality` on 2026-08-21 (see
+`local-ai-stack.md`'s "`:8080` swap to mtplx" and `pi-harness-history.md`);
+the quantization/route-level claims below (e.g. "don't change quantization,
+8-bit is right") describe the retired route, not the model `:8080`
+currently serves. The thinking-format/sampling-parameter findings were
+carried over onto the new route unverified — see `ai-stack-local.ts`'s
+inline comments. Treat this file as the historical trace behind those
+carried-over settings, not a live description of `:8080`.
+
 Research date: 2026-08-17, revised after Opus review same day. Scope:
 validate `pi.dev` local harness's Qwen3.8-27B route (`:8080`, see
 `local-ai-stack.md`) against vendor documentation for agentic coding, and

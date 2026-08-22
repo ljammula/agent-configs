@@ -120,7 +120,8 @@ configuration is supplied.
 Written here:
 
 - **`ai-stack-local.ts`** — registers ai-stack's resident provider:
-  `ai-stack-local` (:8080, Qwen3.8-27B-8bit, "code"). It
+  `ai-stack-local` (:8080, `Qwen3.8-27B-MTPLX-Optimized-Quality` as of the
+  2026-08-21 mtplx swap, previously `Qwen3.8-27B-8bit`; "code"). It
   follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching

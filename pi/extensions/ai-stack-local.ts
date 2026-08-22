@@ -1,6 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
+// :8080 swapped 2026-08-21 (ai-stack commits f226a5b/d0ef43a, following the
+// eval on PR #20/eval/qwen38-mtplx-optimized-speed-plan.md) from a dedicated
+// mlx_vlm.server instance of Qwen3.8-27B-8bit (internal port 18080,
+// com.aistack.qwen38 launchd job) to the mtplx runtime's
+// Qwen3.8-27B-MTPLX-Optimized-Quality artifact, served through the same
+// shared mtplx backend (internal port 18084) that the since-retired :8083
+// candidate route used. Driven by memory footprint (mtplx's session peak
+// ~42GB vs the old 8-bit route's ~71GB) plus 4 harness trials showing no
+// correctness regression and a wash-to-slight speed edge; adopted ahead of
+// the plan doc's own quality-scoring gate (item 5), which was never run --
+// that comparison is still open. The old mlx_vlm.server route/model stay on
+// disk with the launchd plist just unloaded, not deleted, for rollback.
+//
+// :8083 (the separate "candidate" route this file used to register
+// alongside :8080 for head-to-head comparison) was retired the same day
+// once :8080 pointed at the identical mtplx/18084 backend -- two public
+// listeners fronting one upstream served no purpose. Do not re-add it
+// without a corresponding live route in ai-stack's proxy_config.py.
+const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
 // mlx-vlm's OpenAI-compatible server defaults unset sampling fields to
 // greedy/no-op values (temperature 0.0, no top_p/top_k/presence_penalty
 // clamp at all) whenever a request omits them, and pi-coding-agent has no
@@ -23,7 +41,9 @@ const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
 // variance on a coding-agent harness that also wants reproducible trial
 // comparisons. See qwen38-agentic-coding-tuning-research.md's "Effective
 // temperature during all trials, resolved" and "Vendor-recommended sampling
-// parameters" sections for the full trace of how this was found.
+// parameters" sections for the full trace of how this was found. Carried
+// over unchanged onto the mtplx route -- not independently re-verified
+// against this specific backend yet.
 const QWEN38_SAMPLING_PARAMS = {
   temperature: 0.6,
   top_p: 0.95,
@@ -61,21 +81,26 @@ export default function (pi: ExtensionAPI) {
     api: "openai-completions",
     models: [
       {
-        id: "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
-        name: "Qwen3.8-27B-8bit",
+        id: QWEN38_MODEL_ID,
+        name: "Qwen3.8-27B-MTPLX-Optimized-Quality",
         // Was `reasoning: false`, which made pi send no thinking-control
         // field at all (every thinkingFormat branch in pi-ai's buildParams
         // is gated on model.reasoning) -- not an explicit "thinking off",
-        // an unset one. Live-verified 2026-08-17 against :8080 directly
-        // (see qwen38-agentic-coding-tuning-research.md "Step 1"): a bare
-        // request with no thinking fields returns null reasoning_content
-        // (2 completion tokens); `enable_thinking`/`reasoning_effort` sent
-        // top-level (compat.thinkingFormat "qwen") returns a populated
-        // reasoning_content block (40 completion tokens). The nested
-        // `chat_template_kwargs` shape (the one that worked for GLM on this
-        // same stack per pi-harness-history.md) was also tried live and did
-        // NOT trigger thinking on this route -- do not switch to
-        // "chat-template"/"qwen-chat-template" without re-verifying live.
+        // an unset one. Live-verified 2026-08-17 against the old 8-bit
+        // route on :8080 (see qwen38-agentic-coding-tuning-research.md
+        // "Step 1"): a bare request with no thinking fields returns null
+        // reasoning_content (2 completion tokens); `enable_thinking`/
+        // `reasoning_effort` sent top-level (compat.thinkingFormat "qwen")
+        // returns a populated reasoning_content block (40 completion
+        // tokens). The nested `chat_template_kwargs` shape (the one that
+        // worked for GLM on this same stack per pi-harness-history.md) was
+        // also tried live and did NOT trigger thinking on this route -- do
+        // not switch to "chat-template"/"qwen-chat-template" without
+        // re-verifying live. Carried over onto the mtplx route on the
+        // strength of ai-stack PR #20's confirmation that this route
+        // returns exact text + a correctly structured tool call under the
+        // same generic mlx server loader -- not independently re-derived
+        // for this specific backend the way the above trace was.
         reasoning: true,
         compat: {
           thinkingFormat: "qwen",
@@ -119,7 +144,8 @@ export default function (pi: ExtensionAPI) {
         // fired before a 400 context_length_budget_exceeded. See
         // local-model-bench/STATUS.md's 2026-08-07 entry for the failure this
         // caused and pi-harness-validation-status.md's context-budget-awareness
-        // finding.
+        // finding. Unchanged after the mtplx swap -- proxy_config.py derives
+        // :8080's budget the same way regardless of which model backs it.
         contextWindow: 49152,
         maxTokens: 16384,
       },

@@ -57,7 +57,10 @@ from pathlib import Path
 PI_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PI_ROOT.parent
 CONTAINMENT_DIR = PI_ROOT / "containment"
-MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit"
+# Swapped 2026-08-21: :8080 now serves the mtplx runtime's
+# Qwen3.8-27B-MTPLX-Optimized-Quality, not the prior dedicated 8-bit mlx-vlm
+# instance -- see local-ai-stack.md's ":8080 swap to mtplx" section.
+MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
 SONNET_MODEL = "claude-sonnet-5"
 VERIFY_RESOLVER = PI_ROOT / "scripts" / "resolve-verification.ts"
 TSX = PI_ROOT / "node_modules" / ".bin" / "tsx"

@@ -2,10 +2,10 @@
   "lastChangelogVersion": "0.83.0",
   "theme": "dark",
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
+  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality",
   "defaultThinkingLevel": "medium",
   "enabledModels": [
-    "Qwen3.8-27B-8bit"
+    "Qwen3.8-27B-MTPLX-Optimized-Quality"
   ],
   "compaction": {
     "enabled": true,

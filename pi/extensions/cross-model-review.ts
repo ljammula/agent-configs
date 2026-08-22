@@ -71,7 +71,14 @@ export function resolveReviewerConfig(env: NodeJS.ProcessEnv = process.env): Rev
 	const primaryBaseUrl = normalizeUrl(
 		env.AI_PRIMARY_BASE_URL ?? `http://${env.AI_STACK_HOST || "127.0.0.1"}:8080/v1`,
 	);
-	const primaryModel = env.AI_PRIMARY_MODEL ?? "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit";
+	// Swapped 2026-08-21: :8080 now serves the mtplx runtime's
+	// Qwen3.8-27B-MTPLX-Optimized-Quality, not the prior dedicated 8-bit
+	// mlx-vlm instance -- see local-ai-stack.md's ":8080 swap to mtplx"
+	// section. Only used as a same-primary fallback when AI_PRIMARY_MODEL is
+	// unset; a stale id here would misclassify a same-model review as
+	// independent-review instead of blind-self-review.
+	const primaryModel =
+		env.AI_PRIMARY_MODEL ?? "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
 	const samePrimary = baseUrl === primaryBaseUrl && model === primaryModel;
 	if (samePrimary && env.AI_REVIEW_ALLOW_SELF !== "1") {
 		return { enabled: false, kind: "disabled", baseUrl, model, reason: "same-primary" };
