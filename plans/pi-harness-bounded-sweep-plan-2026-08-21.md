@@ -77,10 +77,16 @@ commit — exactly as today, minus the one-candidate-at-a-time legwork.
 
 ### Inputs (per invocation, via `Workflow`'s `args`)
 
-- `candidates`: list of `{label, thinking_level}` — the configs to
-  compare. Kept small by convention (2-4 candidates) since each one is a
-  real battery subprocess. Temperature is not a candidate field in this
-  version — see the Non-goals entry above.
+- `candidates`: list of `{label, thinking_level, target_pairs}` — the
+  configs to compare. `target_pairs` is a list of 1-based pair numbers
+  (a subset of `1..max_pair`) that receive this candidate's
+  `thinking_level` via `--thinking-override`; any pair inside the
+  `--max-pairs` prefix but outside `target_pairs` keeps running at its
+  own `TASK_THINKING_LEVELS` default instead of being forced to the
+  candidate's level (see Mechanics item 1). Kept small by convention
+  (2-4 candidates) since each one is a real battery subprocess.
+  Temperature is not a candidate field in this version — see the
+  Non-goals entry above.
 - `max_pair`: a single 1-based integer, passed straight through as
   `--max-pairs`, bounding the invocation to the schedule's first
   `max_pair` pairs (e.g. `4`, to reach the pair-4 pairing already used
@@ -103,11 +109,9 @@ commit — exactly as today, minus the one-candidate-at-a-time legwork.
 ### Mechanics
 
 1. For each candidate, the workflow spawns one agent whose job is to
-   invoke `run_screening.py` with that candidate's per-pair
-   `--thinking-override PAIR=LEVEL` (targeting the specific pair(s) the
-   candidate varies; other pairs inside the `--max-pairs` prefix keep
-   running at their own `TASK_THINKING_LEVELS` default rather than being
-   silently forced), the shared seed, and `--max-pairs max_pair`, then
+   invoke `run_screening.py` with one `--thinking-override PAIR=LEVEL`
+   per entry in that candidate's `target_pairs` (each pointing at
+   `thinking_level`), the shared seed, and `--max-pairs max_pair`, then
    report back the run's own result record (pass/fail, seconds, any
    `removed_prohibited_scratch_files` entries, hidden-test exit code) —
    not its own summary or judgment of what the numbers mean.
@@ -144,9 +148,10 @@ step rather than asserted by the workflow).
 
 ## Acceptance criteria
 
-- Running the workflow with 2 candidates and `max_pair=4` produces one
-  report containing a pass/fail, timing, and raw result path for each of
-  the 4 scheduled pairs under each candidate — no config file under `pi/`
+- Running the workflow with 2 candidates (each with `target_pairs: [4]`)
+  and `max_pair=4` produces one report containing a pass/fail, timing,
+  and raw result path for each of the 4 scheduled pairs under each
+  candidate — no config file under `pi/`
   is modified by the run.
 - The report explicitly separates run-record facts from interpretation,
   matching the rest of this project's documentation style.
