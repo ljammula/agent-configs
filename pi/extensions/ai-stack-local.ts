@@ -136,15 +136,20 @@ export default function (pi: ExtensionAPI) {
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         // contextWindow is the proxy's real admission budget (max_kv_size
-        // 81920 - maxTokens 16384 = 65536; see
+        // 147456 - maxTokens 16384 = 131072; see
         // ~/code/ai-stack/scripts/proxy_config.py on kannasmacstudio.lan),
         // not the model's max_kv_size itself. proxy_config.py derives
         // :8080's budget the same way regardless of which model backs it,
         // so this was unaffected by the mtplx swap itself -- it moved only
         // because DEFAULT_QWEN_MAX_KV_SIZE was separately raised 65536 ->
         // 81920 on 2026-08-21 (ai-stack commit 8007af0), taking this from
-        // 49152 to 65536. The old ~46694-49152 empirical rejection line has
-        // not been re-measured at the new budget. Before that: was 96000
+        // 49152 to 65536, and again 81920 -> 147456 on 2026-09-07 (ai-stack
+        // commit 7f969a1), taking this to 131072. That last raise also
+        // dropped the route to concurrency 1 to pay for the KV. The old
+        // ~46694-49152 empirical rejection line has not been re-measured at
+        // either new budget; the proxy's own soft threshold now sits at
+        // 124518, and with reserveTokens 16384 Pi compacts at 114688, below
+        // it. Before all that: was 96000
         // (an ungrounded guess), which let Pi's auto-compaction trigger
         // (contextTokens > contextWindow - reserveTokens) sit at 79616 --
         // well past the proxy's real rejection line, so compaction never
@@ -152,7 +157,7 @@ export default function (pi: ExtensionAPI) {
         // local-model-bench/STATUS.md's 2026-08-07 entry for the failure
         // this caused and pi-harness-validation-status.md's
         // context-budget-awareness finding.
-        contextWindow: 65536,
+        contextWindow: 131072,
         maxTokens: 16384,
       },
     ],
