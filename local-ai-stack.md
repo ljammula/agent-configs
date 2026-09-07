@@ -12,6 +12,19 @@ decode-throughput tables further down in this file predate the swap and
 describe the retired 8-bit route, kept for the rollback path and historical
 comparison, not the currently-serving model.
 
+## Reaching this host off-LAN
+
+`kannasmacstudio.lan` (the `AI_STACK_HOST` default for LAN clients) only
+resolves on the local network. For a client outside the LAN but on the same
+Tailscale tailnet, the equivalent address is this machine's Tailscale
+MagicDNS name: `kannas-mac-studio.tailfb69fc.ts.net`. Tailscale routes all
+ports between tailnet devices by default (no `tailscale serve`/funnel setup
+needed for tailnet-internal reachability) as long as Tailscale is running on
+both ends. The tailnet name segment (`tailfb69fc`) is stable in practice but
+tied to the Tailscale account/org identity, not guaranteed permanent --
+re-verify with `tailscale status` after any login/org change before trusting
+a hardcoded copy of it.
+
 ## Resident routes
 
 | Route | Model and role | Runtime | Measured sustained decode |
