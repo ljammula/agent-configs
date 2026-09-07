@@ -81,14 +81,20 @@ commit — exactly as today, minus the one-candidate-at-a-time legwork.
   compare. Kept small by convention (2-4 candidates) since each one is a
   real battery subprocess. Temperature is not a candidate field in this
   version — see the Non-goals entry above.
-- `pairs`: which task pairs to run, defaulting to a fixed small subset
-  (e.g. the existing pair-1/pair-4 pairing already used for reruns in
-  `pi-harness-validation-status.md`) rather than the full battery, to keep
-  a single sweep invocation bounded. `run_screening.py`'s `--max-pairs`
-  selects a schedule *prefix*, not an arbitrary subset, so targeting a
-  non-prefix pairing like {1, 4} means passing every other scheduled
-  task's id to `--skip-task` (repeatable) rather than relying on
-  `--max-pairs` alone.
+- `max_pair`: a single 1-based integer, passed straight through as
+  `--max-pairs`, bounding the invocation to the schedule's first
+  `max_pair` pairs (e.g. `4`, to reach the pair-4 pairing already used
+  for reruns in `pi-harness-validation-status.md`) rather than the full
+  9-pair battery. This plan does **not** use `--skip-task` to reach a
+  non-prefix subset like {1, 4}: `schedule()` only increments its pair
+  counter for tasks that survive `--skip-task` filtering, so skipping any
+  task renumbers every later pair, and because `TASKS` contains
+  duplicate task ids (`go/lru-cache`, `go/notes-api` each appear twice),
+  skipping one occurrence by id silently skips both — verified by reading
+  `schedule()`'s loop, not merely `--help`. A `--max-pairs` prefix has
+  neither failure mode: nothing is skipped, so the original 1-based
+  indices are preserved exactly, at the cost of also running whichever
+  earlier pairs fall inside the prefix.
 - `seed`: fixed seed, reused across candidates so the task/prompt content
   is identical between arms — only the config under test varies. Reusing
   a seed only pins which tasks and prompts are scheduled; it does not pin
@@ -97,9 +103,11 @@ commit — exactly as today, minus the one-candidate-at-a-time legwork.
 ### Mechanics
 
 1. For each candidate, the workflow spawns one agent whose job is to
-   invoke `run_screening.py` with that candidate's `--thinking` (or
-   per-pair `--thinking-override PAIR=LEVEL`) setting, the shared seed,
-   and `--skip-task` for every task outside the chosen `pairs` subset, and
+   invoke `run_screening.py` with that candidate's per-pair
+   `--thinking-override PAIR=LEVEL` (targeting the specific pair(s) the
+   candidate varies; other pairs inside the `--max-pairs` prefix keep
+   running at their own `TASK_THINKING_LEVELS` default rather than being
+   silently forced), the shared seed, and `--max-pairs max_pair`, then
    report back the run's own result record (pass/fail, seconds, any
    `removed_prohibited_scratch_files` entries, hidden-test exit code) —
    not its own summary or judgment of what the numbers mean.
@@ -136,14 +144,15 @@ step rather than asserted by the workflow).
 
 ## Acceptance criteria
 
-- Running the workflow with 2 candidates × 2 pairs produces one report
-  containing per-cell pass/fail, timing, and raw result paths — no config
-  file under `pi/` is modified by the run.
+- Running the workflow with 2 candidates and `max_pair=4` produces one
+  report containing a pass/fail, timing, and raw result path for each of
+  the 4 scheduled pairs under each candidate — no config file under `pi/`
+  is modified by the run.
 - The report explicitly separates run-record facts from interpretation,
   matching the rest of this project's documentation style.
 - A dry run with `candidates` limited to the harness's *current* live
   config (no change) invokes `run_screening.py` with the same effective
-  arguments (seed, thinking level/overrides, skipped tasks) as the most
+  arguments (seed, thinking overrides, `--max-pairs`) as the most
   recent manual run of the same pair/seed in
   `pi-harness-validation-status.md`, and its manifest and fixture
   identity match. This is *not* required to reproduce the same pass/fail
@@ -169,7 +178,13 @@ step rather than asserted by the workflow).
   temperature the same way this plan varies `--thinking`.
 - Adding `--thinking` (and ideally `--pair`-style multi-target selection)
   to `run_single_pair.py`, so a single-pair sweep could invoke it directly
-  instead of this plan's `run_screening.py` + `--skip-task` workaround.
+  instead of this plan's `run_screening.py` + `--max-pairs` prefix.
+- Fixing `schedule()` so `--skip-task` filtering preserves original pair
+  indices (assign the index before the skip check, not after) and so
+  `TASKS`'s duplicate ids can be skipped selectively (by occurrence, not
+  just by id) — either would let a future sweep target a true non-prefix
+  subset like {1, 4} directly instead of paying for the filler pairs a
+  `--max-pairs` prefix runs along the way.
 - Whether to fold the sweep report format back into
   `qwen38-agentic-coding-tuning-research.md`'s existing tables, or keep it
   as a separate artifact under `pi/evals/battery-results/` — decide once
