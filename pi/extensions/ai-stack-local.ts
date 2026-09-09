@@ -144,7 +144,15 @@ export default function (pi: ExtensionAPI) {
         // because DEFAULT_QWEN_MAX_KV_SIZE was separately raised 65536 ->
         // 81920 on 2026-08-21 (ai-stack commit 8007af0), taking this from
         // 49152 to 65536, and again 81920 -> 147456 on 2026-09-07 (ai-stack
-        // commit 7f969a1), taking this to 131072. That last raise also
+        // commit 7f969a1). Corrected 131072 -> 124518 on 2026-09-08: the
+        // proxy does not reject at the budget, it rejects at
+        // BUDGET_THRESHOLD (0.95) x budget, so 131072 sat 6554 tokens ABOVE
+        // the real rejection line. Nothing broke only because reserveTokens
+        // happens to be 16384, which kept the compaction trigger under it --
+        // the safety came from an unrelated constant, not the derivation.
+        // Derive it, do not copy it:
+        //   python3 ~/code/ai-stack/scripts/proxy_config.py qwen_context_window
+        // and ai-stack's tests/test_serve_launchers.py now fails on drift. That last raise also
         // dropped the route to concurrency 1 to pay for the KV. The old
         // ~46694-49152 empirical rejection line has not been re-measured at
         // either new budget; the proxy's own soft threshold now sits at
@@ -157,7 +165,7 @@ export default function (pi: ExtensionAPI) {
         // local-model-bench/STATUS.md's 2026-08-07 entry for the failure
         // this caused and pi-harness-validation-status.md's
         // context-budget-awareness finding.
-        contextWindow: 131072,
+        contextWindow: 124518,
         maxTokens: 16384,
       },
     ],
