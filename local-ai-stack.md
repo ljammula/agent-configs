@@ -1,7 +1,7 @@
 # Local ai-stack model endpoints
 
-Operational snapshot: 2026-08-21 (`ai-stack` pulled to `d0ef43a`, superseding
-the 2026-08-19 `953c540` snapshot below). The owning runtime repository is
+Operational snapshot: 2026-09-09 (`ai-stack` pulled to `8cd16f8`, superseding
+the 2026-08-21 `d0ef43a` snapshot below). The owning runtime repository is
 `~/code/ai-stack`; its `PLAN.md`, launchers, exact package locks, and
 `mlx-vlm-rollback.md` remain the source of truth. This file records only the
 facts agent configurations need when choosing or calling a local route.
@@ -12,18 +12,41 @@ decode-throughput tables further down in this file predate the swap and
 describe the retired 8-bit route, kept for the rollback path and historical
 comparison, not the currently-serving model.
 
-## Reaching this host off-LAN
+**2026-09-07/08: `:8080` KV budget, concurrency, and idle-cache-clear TTL
+retuned after a context-size sweep.** See "`:8080` context sweep and proxy
+robustness fixes (2026-09-07/08)" below — supersedes the concurrency and KV
+figures in the sections that follow it.
 
-`kannasmacstudio.lan` (the `AI_STACK_HOST` default for LAN clients) only
-resolves on the local network. For a client outside the LAN but on the same
-Tailscale tailnet, the equivalent address is this machine's Tailscale
-MagicDNS name: `kannas-mac-studio.tailfb69fc.ts.net`. Tailscale routes all
-ports between tailnet devices by default (no `tailscale serve`/funnel setup
-needed for tailnet-internal reachability) as long as Tailscale is running on
-both ends. The tailnet name segment (`tailfb69fc`) is stable in practice but
-tied to the Tailscale account/org identity, not guaranteed permanent --
-re-verify with `tailscale status` after any login/org change before trusting
-a hardcoded copy of it.
+## Reaching this host
+
+**Default `AI_STACK_HOST` is now the Tailscale MagicDNS short name**,
+`kannas-mac-studio` (set in `~/.zshenv`:
+`AI_STACK_HOST="${AI_STACK_HOST:-kannas-mac-studio}"`), not the LAN mDNS
+name. Confirmed live 2026-09-09: `tailscale status --json` shows MagicDNS
+enabled (`tailfb69fc.ts.net`), `dscacheutil` resolves the short name to
+`kannas-mac-studio.tailfb69fc.ts.net` / `100.120.23.7`, and
+`curl http://kannas-mac-studio:8080/v1/models` returns 200 — short-name
+resolution works because Tailscale's own resolver (`100.100.100.100`) is
+this Mac's active DNS nameserver, so the full `.tailfb69fc.ts.net` suffix
+isn't required on this machine. On a client where MagicDNS isn't the active
+resolver, use the full FQDN `kannas-mac-studio.tailfb69fc.ts.net` instead —
+that always works regardless of local resolver config. Either form resolves
+whether the caller is on the LAN or off it, as long as Tailscale is running
+on both ends — one value works everywhere instead of switching hosts by
+location. Tailscale routes all ports between tailnet devices by default (no
+`tailscale serve`/funnel setup needed for tailnet-internal reachability), so
+plain `http://<name>:8080/...` calls work the same as they would against
+the LAN name — this is distinct from the separate HTTPS `/models/<name>/v1`
+routes under "Tailnet HTTPS access" in `ai-stack`'s README, which go through
+the `com.aistack.tailscale-serve` reverse-proxy LaunchAgent instead. The
+tailnet name segment (`tailfb69fc`) is stable in practice but tied to the
+Tailscale account/org identity, not guaranteed permanent -- re-verify with
+`tailscale status` after any login/org change before trusting a hardcoded
+copy of it.
+
+`kannasmacstudio.lan` (the router-assigned LAN mDNS name) still works as a
+fallback when Tailscale is down or not installed on the calling machine, but
+only resolves on the local network — prefer the Tailscale name by default.
 
 ## Resident routes
 
@@ -31,6 +54,52 @@ a hardcoded copy of it.
 |---|---|---|---:|
 | `:8080/v1` | `Qwen3.8-27B-MTPLX-Optimized-Quality`, coding, blind same-model review, and triage (swapped 2026-08-21 from a dedicated `Qwen3.8-27B-8bit` mlx-vlm instance -- see below) | mtplx v2.9.0, native MTP draft head (depth 3), shared backend on internal port 18084 (also fronted `:8083` until that route was retired the same day) | ~46-49 tok/s decode on a 400-token story prompt under native `mtplx serve` (2026-08-21 native-runtime eval); the block-5 mlx-vlm table below is the retired 8-bit route's number, not this route's |
 | `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05, 118.1 tok/s solo short-context (2026-08-16) |
+
+## `:8080` context sweep and proxy robustness fixes (2026-09-07/08)
+
+`ai-stack`'s `bench/context_sweep.py` swept prompt size against TTFT/prefill/
+decode through the live `:8080` proxy, `bench/RESULTS.md` has the full data.
+Three changes to `scripts/proxy_config.py` came out of it (commits `7f969a1`,
+`32c9c36`, `8cd16f8`):
+
+- **KV budget raised**: `DEFAULT_QWEN_MAX_KV_SIZE` 81920 → **147456**
+  (128K usable at the default `max_tokens=16384`).
+- **Concurrency dropped 2 → 1** (`DEFAULT_QWEN_MAX_CONCURRENT`) to
+  compensate — at the new, larger KV size two concurrent generations no
+  longer fit the memory budget, and mtplx already runs
+  `--scheduler-mode serial` underneath (real concurrency was always 1
+  regardless of what the proxy admitted), so this just makes the proxy's
+  own admission limit match backend reality rather than losing capacity.
+- **Admission boundary confirmed by probe: exactly 124,518 prompt tokens**
+  at `max_tokens=16384` (124,519 gets a 400). The line is
+  `0.95 × (max_kv_size − max_tokens)` and moves with the request's own
+  `max_tokens` — a smaller `max_tokens` buys a higher prompt ceiling.
+- **mtplx idle-cache-clear TTL raised 20s → 120s**
+  (`DEFAULT_MTPLX_IDLE_CACHE_CLEAR_TTL_S`). A 2026-09-08 A/B
+  (`bench/cache_ab_idle_clear.jsonl`) caught the bug directly: once mlx
+  active memory crosses the 45GB soft threshold, the old 20s TTL cleared
+  the prefix cache within one normal human-thinking pause between agent
+  turns, turning what should be a 0.4s warm prefill into a ~190s cold one
+  — silently, no error, just a slow turn. 120s covers realistic
+  between-turn gaps while still reclaiming memory during genuine idle
+  periods.
+- **Backward-compatible model alias added** (`91918ca`): the proxy now
+  accepts both the short stable ID `qwen38-mtplx-quality` and the full
+  legacy filesystem-shaped ID
+  (`/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality`)
+  in the `model` field, rewriting either to the filesystem ID before
+  forwarding. Discovering the id from `/v1/models` (see "Client rules"
+  below) still works and is still the robust choice, but a hardcoded short
+  id from before this change no longer 400s.
+
+Practical read for agent use: **TTFT, not memory, is the real constraint**
+near the raised ceiling — 11.7 minutes to first token at the 124,518-token
+admission line, cost-per-1K-prompt-tokens nearly doubling across the range
+(3.26 s/1K at 5K → 5.63 s/1K at 124.5K). None of this is a concern for an
+agent loop that grows context incrementally, though — a warm, cached prefix
+pays prefill only on the new tail (a repeat 50K prompt dropped from 188.3s
+cold to 0.4s warm, ~470x, as long as the idle-cache-clear hasn't fired
+since).
 
 ## `:8080` swap to mtplx (2026-08-21)
 
@@ -184,9 +253,10 @@ re-check `/v1/models` before assuming the configured id still matches.
   Pi settings whenever a route changes. The public proxy returns HTTP 400
   `model_mismatch` for an omitted or stale id so mlx-vlm cannot dynamically
   replace the configured checkpoint.
-- The route allows two active generations. Use `GET /proxy/health` to inspect
-  activity, completed/rejected requests, queue timeouts, upstream failures, and
-  request timeouts.
+- The route allows **one** active generation as of 2026-09-08 (dropped from
+  two — see "`:8080` context sweep and proxy robustness fixes" above). Use
+  `GET /proxy/health` to inspect activity, completed/rejected requests,
+  queue timeouts, upstream failures, and request timeouts.
 - APC is enabled. Preserve stable prefixes when practical; a repeated live
   check reused 41 prompt tokens and reduced 27B end-to-end latency from
   1.108s to 0.493s.
