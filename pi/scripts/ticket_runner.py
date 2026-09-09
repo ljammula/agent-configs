@@ -97,6 +97,15 @@ STAGED_EXTENSIONS = {
 	".mod": "acceptance",
 	".sum": "acceptance",
 	".dart": "app/test",
+	# Found via a code-review pass on the notes-app-driven Python
+	# acceptance-suite additions to /contract-plan's own conventions
+	# (2026-09-06): the prompt template started producing .py slices +
+	# helpers.py long before this line existed, so a Python pilot's
+	# acceptance suite was silently never staged into the workspace at
+	# all under this script's own drift-protection gate -- it could
+	# neither test the implementation as part of a ticket_runner.py-
+	# driven build nor be protected as frozen oracle content.
+	".py": "acceptance",
 }
 TICKET_RE = re.compile(r"^(\d{3})-(.+)\.md$")
 COMMIT_RE_TEMPLATE = r"^ticket\({nnn}\):"
@@ -458,7 +467,15 @@ def prior_boundary_sha(workspace: Path, tickets: list[Ticket], ticket: Ticket) -
 	return None
 
 
-SHARED_MODULE_FILENAMES = {"go.mod", "go.sum"}
+# Filenames that keep their literal name when staged instead of the usual
+# per-ticket `NNN_` prefix: they must be importable/loadable under one
+# fixed name to work at all (a Go module file, a shared Python helpers
+# module later slices `from helpers import ...`), and /contract-plan's
+# own convention is that only the first slice provides one -- if it did
+# get the NNN_ treatment, "from helpers import ..." in every later slice
+# would silently reference a module that was never actually staged under
+# that name.
+SHARED_MODULE_FILENAMES = {"go.mod", "go.sum", "helpers.py"}
 
 
 def staged_pairs(pilot_dir: Path, workspace: Path, upto: int) -> list[tuple[Path, Path]]:

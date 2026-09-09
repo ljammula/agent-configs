@@ -45,6 +45,7 @@ what happened.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -57,10 +58,13 @@ from pathlib import Path
 PI_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PI_ROOT.parent
 CONTAINMENT_DIR = PI_ROOT / "containment"
-# Swapped 2026-08-21: :8080 now serves the mtplx runtime's
-# Qwen3.8-27B-MTPLX-Optimized-Quality, not the prior dedicated 8-bit mlx-vlm
-# instance -- see local-ai-stack.md's ":8080 swap to mtplx" section.
-MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
+# Unset by default: pi_invocation() below omits --provider/--model entirely
+# unless these are set, so the installed settings.json (or ~/.pi/agent's
+# `/model` selection) applies -- same "omit the flag, let the configured
+# default apply" pattern already used for --thinking. Set PI_HARNESS_PROVIDER
+# and PI_HARNESS_MODEL to pin a specific route instead.
+PROVIDER = os.environ.get("PI_HARNESS_PROVIDER")
+MODEL = os.environ.get("PI_HARNESS_MODEL")
 SONNET_MODEL = "claude-sonnet-5"
 VERIFY_RESOLVER = PI_ROOT / "scripts" / "resolve-verification.ts"
 TSX = PI_ROOT / "node_modules" / ".bin" / "tsx"
@@ -209,8 +213,13 @@ def round_blockers(
 	traces: list[dict],
 	review_policy: str,
 	turn_errors: tuple[int, int] = (0, 0),
+	no_changes: bool = False,
 ) -> tuple[list[str], ReviewSignal]:
 	blockers: list[str] = []
+	if no_changes:
+		# See workspace_fingerprint's docstring: verify passing against
+		# an untouched workspace is not evidence of anything this round did.
+		blockers.append("no changes made to the workspace")
 	if pi_timed_out:
 		blockers.append("pi invocation timed out")
 	elif pi_failed:
@@ -236,25 +245,85 @@ def round_blockers(
 
 
 def parse_usage(output: str) -> dict | None:
+	"""Sum token usage across every assistant message a round's own
+	agent_end event carries.
+
+	Found live, 2026-09-09 (the notes-app-ticket-013 doctor/pip hardening
+	pass, closing CLAIMS.md's "usage is null on every real run" remaining
+	gap): a real `pi --print --mode json` agent_end event has no
+	top-level "usage" key at all -- a live capture shows one against a
+	real ai-stack-local invocation with `"messages": [...]` instead,
+	usage living per-message inside each assistant entry's own "usage"
+	dict. `"usage" in event` could therefore never be true against a real
+	invocation; this function has silently returned None on every real
+	round on record since it was written, the exact class of bug
+	agent_turn_errors' own doc comment already found and fixed for a
+	different function against the same real wire shape.
+
+	Summed across every assistant message with a usage dict, not just the
+	last: a round can carry more than one assistant turn (tool calls
+	interleaved with text) before this round's own agent_end event fires,
+	and the round's real total consumption is what the caller (this
+	round's own BUILD_EVIDENCE.json entry) needs, not just its final
+	turn's. Only numeric top-level fields (input/output/cacheRead/
+	cacheWrite/reasoning/totalTokens in a real capture) are summed; the
+	nested "cost" sub-object is intentionally left out of the summed
+	result rather than incorrectly flattened or overwritten -- it was
+	all-zero in every real capture this fix was checked against (a local,
+	uncosted model), and correctly summing a nested dict is more
+	complexity than that field's own current usefulness here justifies.
+	"""
+	totals: dict[str, int | float] = {}
 	for line in output.splitlines():
 		try:
 			event = json.loads(line)
 		except json.JSONDecodeError:
 			continue
-		if event.get("type") == "agent_end" and "usage" in event:
-			return event["usage"]
-	return None
+		if event.get("type") != "agent_end":
+			continue
+		for message in event.get("messages") or []:
+			if message.get("role") != "assistant":
+				continue
+			usage = message.get("usage")
+			if not isinstance(usage, dict):
+				continue
+			for key, value in usage.items():
+				if isinstance(value, (int, float)) and not isinstance(value, bool):
+					totals[key] = totals.get(key, 0) + value
+	return totals or None
 
 
 def agent_turn_errors(output: str) -> tuple[int, int]:
 	"""Count assistant turns whose model call errored out (e.g. the local
-	route being unreachable) vs. the total assistant turns in this round.
+	route being unreachable, or the local model's own context budget
+	exhausted) vs. the total assistant turns in this round.
 
 	`pi -p` exits 0 and `verify` legitimately fails in this case -- from
 	round_blockers' other signals alone this is indistinguishable from the
 	model actually trying and producing bad code, which silently burns
 	real round budget against an outage instead of surfacing it distinctly
-	(observed live: budget-pilot ticket 005, 2026-08-20)."""
+	(observed live: budget-pilot ticket 005, 2026-08-20).
+
+	Found live, 2026-09-07 (notes-app ticket 007): this function's own
+	entry_appended-wrapped shape assumption never matches real `pi --print
+	--mode json` stdout -- a live capture against an actually-installed pi
+	binary shows every message-lifecycle event (message_start, message_end,
+	turn_start, turn_end, agent_start, agent_end) emitted as its own flat
+	top-level event, never wrapped in `{"type": "entry_appended", "entry":
+	...}`. That wrapper shape is real, but only for the *custom* trace
+	events pi-harness's own extensions emit (parse_pi_traces above, which
+	does see them) -- not for native message events. The practical result:
+	`total` was always 0 in production, `if total and errored == total`
+	(round_blockers' own route-unreachable short-circuit) could never
+	fire, and a real model-route outage -- including a local model's
+	context budget getting exhausted mid-round, which then makes every
+	`--continue` round after it error out immediately with zero tokens --
+	silently counted as ordinary "no changes" rounds all the way to
+	max_rounds instead of being surfaced distinctly, exactly the failure
+	mode this function exists to catch. `message_end` (not `message_start`,
+	which fires before `stopReason` is known, and not `turn_end`, which
+	duplicates the same assistant message and would double-count) is the
+	one event per real assistant turn this function now keys off."""
 	total = 0
 	errored = 0
 	for line in output.splitlines():
@@ -262,16 +331,9 @@ def agent_turn_errors(output: str) -> tuple[int, int]:
 			event = json.loads(line)
 		except json.JSONDecodeError:
 			continue
-		# pi --mode json emits every session entry wrapped as
-		# {"type": "entry_appended", "entry": {...}} (agent-session.js's
-		# `_emit`); the entry itself carries "type": "message" and, for the
-		# assistant side, "message": {"role": "assistant", "stopReason": ...}.
-		if event.get("type") != "entry_appended":
+		if event.get("type") != "message_end":
 			continue
-		entry = event.get("entry") or {}
-		if entry.get("type") != "message":
-			continue
-		message = entry.get("message") or {}
+		message = event.get("message") or {}
 		if message.get("role") != "assistant":
 			continue
 		total += 1
@@ -324,13 +386,16 @@ def pi_invocation(
 	# ...` inside the container -- an extra positional argument pi rejects.
 	pi_args = [
 		"--print", "--mode", "json",
-		"--provider", "ai-stack-local",
-		"--model", MODEL,
 		"--session-dir", str(session_dir),
 	]
-	# Omit the flag by default so the installed settings.json policy applies
-	# (currently medium). An explicit override remains available for controlled
-	# experiments and reproductions.
+	# Omit these flags by default so the installed settings.json policy (or a
+	# `/model` selection made through it) applies. An explicit override remains
+	# available via PI_HARNESS_PROVIDER/PI_HARNESS_MODEL/--thinking for
+	# controlled experiments and reproductions.
+	if PROVIDER is not None:
+		pi_args += ["--provider", PROVIDER]
+	if MODEL is not None:
+		pi_args += ["--model", MODEL]
 	if thinking is not None:
 		pi_args += ["--thinking", thinking]
 	if continue_session:
@@ -385,20 +450,85 @@ def ensure_git_repo(workspace: Path) -> None:
 		if not gitignore.exists():
 			gitignore.write_text("node_modules/\ndist/\nbuild/\n.dart_tool/\n")
 
-	# This orchestrator's own bookkeeping -- the session transcript and the
-	# report it writes after the build -- is not app source and must never
-	# land in the app's own history. Written before the first pi invocation
-	# so the model's own `git add -A`/commit never picks these up; appending
-	# even if a project .gitignore already exists, since a fresh scaffold's
-	# .gitignore has no reason to know about this script.
+	# This orchestrator's own bookkeeping -- the session transcript, the
+	# report it writes after the build, and the structured evidence file
+	# alongside it -- is not app source and must never land in the app's
+	# own history. Written before the first pi invocation so the model's
+	# own `git add -A`/commit never picks these up; appending even if a
+	# project .gitignore already exists, since a fresh scaffold's
+	# .gitignore has no reason to know about this script. BUILD_EVIDENCE.json
+	# is listed here too even though write_evidence_json() doesn't run
+	# until main() returns -- it's a fixed, known filename, so there's no
+	# reason to wait.
 	gitignore = workspace / ".gitignore"
 	existing = gitignore.read_text() if gitignore.exists() else ""
-	needed = [line for line in (".pi-build-session/", "BUILD_REPORT.md") if line not in existing]
+	needed = [line for line in (".pi-build-session/", "BUILD_REPORT.md", "BUILD_EVIDENCE.json") if line not in existing]
 	if needed:
 		with gitignore.open("a") as handle:
 			if existing and not existing.endswith("\n"):
 				handle.write("\n")
 			handle.write("\n".join(needed) + "\n")
+
+
+def workspace_fingerprint(workspace: Path) -> tuple | None:
+	"""A comparable snapshot of the workspace's current git state: HEAD's
+	sha, sorted `git status --porcelain` output (every untracked file
+	listed individually, not collapsed into its parent directory), a
+	patch of every tracked/staged change, and a content hash per
+	untracked file. Two snapshots comparing equal means nothing in the
+	workspace changed between them.
+
+	The untracked-file hashes exist because `git status --porcelain`
+	alone only reports *that* an untracked path exists, never its
+	content -- a round that edits the same still-uncommitted new file a
+	prior round already created (the common case before the ticket's
+	final commit) would otherwise show an identical status line both
+	times and read as a no-op.
+
+	Deliberately scoped to *the moment this is called*, not the ticket's
+	overall starting commit: an earlier version of this check compared
+	against review_base_sha instead, which a real Codex review of PR #4
+	caught as broken two ways -- ticket_runner.py's own stage() call runs
+	before build_app.py is invoked at all, so newly staged
+	acceptance/contract files already make a same-round no-op look
+	"changed"; and any real work a *prior* round in this same build_app.py
+	invocation did remains in the diff too, so a later no-op round (or an
+	escalated Sonnet pass that itself does nothing) inherits that earlier
+	round's credit and reports success for work it didn't do. Comparing
+	round-start to round-end instead of ticket-start to round-end catches
+	both: it needs no review_base_sha (so ticket 1, whose review base is
+	intentionally None, is covered too) and correctly treats each round on
+	its own.
+
+	Returns None on any git error -- callers only use this to withhold
+	success, never to force failure, so a git hiccup here should not
+	itself block a real success.
+	"""
+	head = sh(["git", "rev-parse", "HEAD"], cwd=workspace)
+	if head.returncode != 0:
+		return None
+	status = sh(["git", "status", "--porcelain", "--untracked-files=all"], cwd=workspace)
+	if status.returncode != 0:
+		return None
+	diff = sh(["git", "diff", "HEAD"], cwd=workspace)
+	if diff.returncode not in (0, 1):
+		return None
+	untracked_hashes = []
+	for line in status.stdout.splitlines():
+		if not line.startswith("?? "):
+			continue
+		rel_path = line[3:]
+		try:
+			content = (workspace / rel_path).read_bytes()
+		except OSError:
+			content = b""
+		untracked_hashes.append((rel_path, hashlib.sha256(content).hexdigest()))
+	return (
+		head.stdout.strip(),
+		"\n".join(sorted(status.stdout.splitlines())),
+		diff.stdout,
+		tuple(sorted(untracked_hashes)),
+	)
 
 
 def check_containment_can_reach_model(containment: bool) -> None:
@@ -512,6 +642,12 @@ def run_build(
 			containment=containment, continue_session=continue_session,
 			thinking=thinking,
 		)
+		# Captured immediately before the round's own agent invocation --
+		# not the ticket's overall starting commit -- so the no-changes
+		# check below only ever credits (or blames) *this* round. See
+		# workspace_fingerprint's own docstring for why comparing against
+		# the ticket boundary instead was wrong.
+		fingerprint_before = workspace_fingerprint(workspace)
 		started = time.monotonic()
 		try:
 			completed = sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=env)
@@ -524,6 +660,12 @@ def run_build(
 			timed_out = False
 		duration = time.monotonic() - started
 		stdout = completed.stdout if completed else ""
+		# Snapshotted here, before run_verification() below -- verify/build
+		# steps can leave untracked build artifacts in their wake (compiled
+		# binaries, __pycache__, etc.) that would otherwise read as "the
+		# round changed something" even when the agent itself touched
+		# nothing.
+		fingerprint_after = workspace_fingerprint(workspace)
 
 		verify_command, verify_passed, verify_timed_out, verify_tail = run_verification(workspace)
 
@@ -538,6 +680,11 @@ def run_build(
 		pi_failed = timed_out or pi_returncode != 0
 		traces = parse_pi_traces(stdout)
 		turn_errors = agent_turn_errors(stdout)
+		# None on either side means the fingerprint itself couldn't be
+		# trusted (a git hiccup) -- treated as "no confirmed change" rather
+		# than guessing either way, which only ever costs an extra round,
+		# never a false failure.
+		no_changes = fingerprint_before is None or fingerprint_after is None or fingerprint_before == fingerprint_after
 		blockers, reviewer = round_blockers(
 			verify_passed=verify_passed,
 			pi_failed=pi_failed,
@@ -545,6 +692,7 @@ def run_build(
 			traces=traces,
 			review_policy=review_policy,
 			turn_errors=turn_errors,
+			no_changes=no_changes,
 		)
 
 		rnd = Round(
@@ -565,9 +713,6 @@ def run_build(
 		)
 		result.rounds.append(rnd)
 
-		if verify_command is None:
-			result.stopped_reason = "no canonical verification command resolvable"
-			break
 		errored, total = turn_errors
 		if total and errored == total:
 			# The model route was unreachable for every assistant turn this
@@ -577,9 +722,29 @@ def run_build(
 			# (observed live: budget-pilot ticket 005 burned all 3 rounds this
 			# way before the outage was noticed). Stop immediately instead of
 			# looping to max_rounds; ticket_runner.py's own build-attempt
-			# retry is the layer that should recover once the route is back.
+			# retry is the layer that should recover once the route is back
+			# -- checked (and left with no escalation_prompt) before the
+			# verify_command-is-None branch below, since a full route
+			# outage produces that exact symptom (nothing got a chance to
+			# create anything) and must not be spent as a billed Sonnet
+			# pass that can only repeat the same outage (found via Codex
+			# review of PR #5).
 			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
 			break
+		# Deliberately no special early-break for verify_command is None
+		# (a brand-new ticket 1 with nothing created yet, e.g.): unlike the
+		# route-outage case just above, this is not unrecoverable, and this
+		# module's own documented contract is that --sonnet-fallback only
+		# runs "after the local corrective-round budget is exhausted" --
+		# an unconditional break here after round 1 would spend a billed
+		# Sonnet pass before that budget was used, contradicting it (found
+		# via Codex review of PR #5). round_blockers already adds
+		# "canonical verification failed" whenever verify_passed is not
+		# True (None here, same as any other unresolvable/failing check),
+		# so this falls through to the same corrective-prompt/max_rounds
+		# flow as every other verify failure, and a Sonnet pass still gets
+		# escalation_prompt (built fresh every round below) once that
+		# budget really is exhausted.
 		if not blockers:
 			result.succeeded = True
 			if reviewer.outcome == "clean":
@@ -611,8 +776,20 @@ def run_build(
 			result.stopped_reason = f"local round budget ({max_rounds}) exhausted; escalation required: {', '.join(blockers)}"
 			break
 
-	if not result.succeeded and sonnet_fallback and escalation_prompt and resolve_verify_command(workspace):
+	# Deliberately does not also require resolve_verify_command(workspace)
+	# to already succeed here: that would make this unreachable in exactly
+	# the "nothing exists yet" case above, where creating the verify
+	# surface is itself part of what the Sonnet pass is being asked to do.
+	# run_verification() a few lines down re-resolves fresh against
+	# whatever this round actually produces, so a still-unresolvable
+	# command after the Sonnet pass simply fails verify_passed normally.
+	if not result.succeeded and sonnet_fallback and escalation_prompt:
 		command = sonnet_invocation(escalation_prompt)
+		# Same round-scoped comparison as the local rounds above: baseline
+		# is the workspace as the sonnet round finds it (i.e. after
+		# whatever the local rounds already did or didn't do), not the
+		# ticket's overall starting commit.
+		fingerprint_before = workspace_fingerprint(workspace)
 		started = time.monotonic()
 		try:
 			completed = sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=env)
@@ -624,6 +801,7 @@ def run_build(
 			completed = subprocess.CompletedProcess(command, 127, "", str(exc))
 			timed_out = False
 		duration = time.monotonic() - started
+		fingerprint_after = workspace_fingerprint(workspace)
 		verify_command, verify_passed, verify_timed_out, verify_tail = run_verification(workspace)
 		returncode = completed.returncode if completed else -1
 		result.rounds.append(Round(
@@ -641,9 +819,14 @@ def run_build(
 			verify_output_tail=verify_tail,
 			duration_s=duration,
 		))
-		if not timed_out and returncode == 0 and verify_passed is True:
+		sonnet_no_changes = (
+			fingerprint_before is None or fingerprint_after is None or fingerprint_before == fingerprint_after
+		)
+		if not timed_out and returncode == 0 and verify_passed is True and not sonnet_no_changes:
 			result.succeeded = True
 			result.stopped_reason = "Sonnet fallback passed canonical verification"
+		elif sonnet_no_changes:
+			result.stopped_reason = "Sonnet fallback made no changes to the workspace"
 		else:
 			result.stopped_reason = "Sonnet fallback did not pass canonical verification"
 
@@ -735,6 +918,71 @@ def write_report(result: BuildResult) -> Path:
 	return report_path
 
 
+def write_evidence_json(result: BuildResult) -> Path:
+	"""Structured counterpart to write_report's own prose: the same
+	per-round data (usage, reviewer verdict/detail, verify outcome,
+	timing), shaped to match software-factory's own run.AgentEvidence/
+	AgentEvidenceRound Go structs (internal/run/run.go) field-for-field
+	so cmd/factoryd's loadAgentEvidence can json.Unmarshal this file
+	directly, no translation layer on that side.
+
+	Closes a real, currently-open gap (CLAIMS.md's Remaining gaps,
+	`software-factory`): BUILD_EVIDENCE.json was never actually written by
+	any version of this script on record, so run.AgentEvidence has been
+	nil on every real accepted run to date -- loadAgentEvidence's own
+	warning ("could not read BUILD_EVIDENCE.json") fires on every single
+	run rather than only a build_app.py version genuinely too old to emit
+	one, which is the only case that warning's own doc comment describes
+	as expected.
+
+	provider/model are always null here, matching AgentEvidence's own doc
+	comment ("preserve JSON null when build_app.py inherited its
+	configured defaults instead of explicitly pinning an identity") --
+	this script has no --provider/--model flag of its own; only
+	--sonnet-fallback pins a distinct identity, and that already shows up
+	per-round via Round.agent (rnd.agent below), not as a single
+	whole-build value.
+
+	schema_version's literal value (1) must always equal
+	software-factory's own run.AgentEvidenceSchemaVersion constant
+	(internal/run/run.go) -- bump both together, in the same change, when
+	this payload's shape changes. loadAgentEvidence warns (never fails a
+	run on it -- this evidence is best-effort by design) on a mismatch,
+	so a future shape drift on either side of this two-repo, unversioned-
+	file contract surfaces as a visible warning on the very next real run
+	instead of silently misparsing or dropping fields, the way two real
+	bugs already did before this field existed.
+	"""
+	SCHEMA_VERSION = 1
+	evidence_path = result.workspace / "BUILD_EVIDENCE.json"
+	payload = {
+		"schema_version": SCHEMA_VERSION,
+		"generated": datetime.now(timezone.utc).isoformat(),
+		"review_policy": result.review_policy,
+		"provider": None,
+		"model": None,
+		"succeeded": result.succeeded,
+		"stopped_reason": result.stopped_reason,
+		"rounds": [
+			{
+				"index": rnd.index,
+				"agent": rnd.agent,
+				"pi_returncode": rnd.pi_returncode,
+				"pi_timed_out": rnd.pi_timed_out,
+				"usage": rnd.pi_usage,
+				"reviewer_outcome": rnd.reviewer.outcome,
+				"reviewer_detail": rnd.reviewer.detail,
+				"verify_passed": rnd.verify_passed,
+				"verify_timed_out": rnd.verify_timed_out,
+				"duration_s": rnd.duration_s,
+			}
+			for rnd in result.rounds
+		],
+	}
+	evidence_path.write_text(json.dumps(payload, indent=2) + "\n")
+	return evidence_path
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--workspace", required=True, type=Path)
@@ -785,6 +1033,8 @@ def main() -> int:
 	)
 	report_path = write_report(result)
 	print(f"Report written to {report_path}")
+	evidence_path = write_evidence_json(result)
+	print(f"Evidence written to {evidence_path}")
 	print(f"Outcome: {'SUCCEEDED' if result.succeeded else 'DID NOT SUCCEED'} -- {result.stopped_reason}")
 	return 0 if result.succeeded else 1
 
