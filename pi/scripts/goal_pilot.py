@@ -34,6 +34,8 @@ escalating to any cloud model. This holds even under `auto-rescue` -- see
 from __future__ import annotations
 
 import argparse
+import ast
+import errno
 import json
 import os
 import re
@@ -312,6 +314,365 @@ def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 	return scratch
 
 
+# --------------------------------------------------------------------------
+# internal/ticketspec key injection -- bridges gap 1 of software-factory's
+# lights-off-agent-factory-plan.md (2026-08-30 entries have the full
+# account). /spec-plan's generated tickets satisfy software-factory's
+# policy.TicketStructure (## Goal/## Required changes/## Verification/
+# ## Commit) but never declared the separate Verify-Command:/
+# Allowed-Files:/Required-Changed-Files: keys internal/ticketspec parses
+# -- the format policy.EvaluateRun's real per-run gates (diff_scope,
+# canonical_verify, required_files_changed, required_content_present)
+# actually read. A generated ticket could pass every structural check
+# and still be useless to the gates that decide accept/quarantine.
+#
+# This is deliberately NOT a prompt instruction to the model (spec-plan.md
+# does still ask for it too, as a harmless belt-and-braces attempt for a
+# different/future model) -- three real validation runs against this
+# pipeline's own local Qwen3.8-27B route showed the model reliably names
+# correct file paths in every generated ## Required changes list, but
+# does not reliably restate them in the new key format regardless of how
+# firmly the prompt asks or whether a worked example is included. The
+# paths are already right; only a mechanical restatement was missing, so
+# that restatement belongs in code, not in a request to the model --
+# matching this whole ecosystem's own standing principle that a judgment
+# a model won't reliably repeat belongs behind a real check.
+# --------------------------------------------------------------------------
+
+# spec/contract.md and spec/spec.md are this pipeline's own frozen,
+# read-only reference documents -- every ticket after 001 names them in
+# its own context line ("Read ARCHITECTURE.md, PROGRESS.md, and
+# spec/contract.md before changing anything"), and `## Required changes`
+# prose routinely cites them again ("...per `spec/contract.md`") purely
+# as a citation, never as a file this ticket edits. Found live (2026-08-30
+# end-to-end validation run): without this exclusion, a ticket whose
+# `## Required changes` cited `spec/contract.md` for its expected error
+# text got it listed in `Allowed-Files:`/`Required-Changed-Files:` as if
+# this ticket were supposed to modify the frozen contract itself.
+#
+# ARCHITECTURE.md/PROGRESS.md/README.md deliberately do NOT belong here,
+# despite an earlier version of this set including all three. Found via
+# review: that was a real, more severe bug than the one it looked like it
+# fixed -- software-factory's own harnessByproducts exemption list
+# (internal/policy/policy.go) is only [".gitignore", "BUILD_REPORT.md",
+# "BUILD_EVIDENCE.json", ".pi-build-session/"]; ARCHITECTURE.md and
+# PROGRESS.md are NOT in it. Every ticket after 001 ends its own `##
+# Required changes` with the mandatory, verbatim instruction "Update
+# `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing" --
+# a real, required edit `diff_scope` genuinely checks for -- so excluding
+# them here meant every single generated ticket's own injected
+# `Allowed-Files:` omitted two files its own agent is instructed to
+# change, quarantining every one of them on diff_scope in practice.
+# README.md was excluded on the same (wrong) assumption; unlike the
+# other two it isn't even universally edited, so a ticket that
+# explicitly names it as a real required change (e.g. "update README.md
+# to document the new flag") had it silently stripped from scope for no
+# reason at all.
+TICKETSPEC_EXCLUDED_FILES = frozenset({"spec/contract.md", "spec/spec.md"})
+BACKTICK_SPAN_RE = re.compile(r"`([^`\s]+)`")
+# A file's real extension never starts with a digit -- a version number or
+# numeric example (`3.5`, illustrating a non-integer CLI argument) does.
+# This is deliberately a shape check, not a fixed allowlist of known
+# extensions: an allowlist silently misses a real extension it didn't
+# happen to name (found via review: `schema.graphql`), while this still
+# correctly excludes `3.5` the same way the allowlist version did.
+FILE_EXTENSION_RE = re.compile(r"\.[A-Za-z][A-Za-z0-9+]*$")
+# Mixed-case conventional filenames with no extension at all -- tools that
+# name their own config file this way use TitleCase, not SCREAMING_CASE,
+# so the shape rule below (ALL_CAPS_FILENAME_RE) doesn't cover them.
+EXTENSIONLESS_FILENAMES = frozenset(
+	{"Makefile", "Dockerfile", "Rakefile", "Gemfile", "Procfile", "Vagrantfile", "Justfile", "Podfile", "Brewfile", "Guardfile"}
+)
+# A SCREAMING_CASE bare filename (WORKSPACE, BUILD, CODEOWNERS, LICENSE,
+# NOTICE, AUTHORS, ...) is a real, established convention (Bazel build
+# files, repo metadata) that a fixed name list can never enumerate
+# exhaustively (found via review). What actually distinguishes these
+# from a bare non-file token in the same prose -- a CLI-argument or
+# error-message example like `abc`, `3.5`, `-4` -- is exactly this shape:
+# those are never SCREAMING_CASE. A 2-letter minimum avoids matching
+# single/double-letter placeholders (`N`, `OK`) that read more like prose
+# than a filename.
+ALL_CAPS_FILENAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+TICKET_NUMBER_RE = re.compile(r"^(\d+)-")
+
+
+def is_valid_workspace_relative_path(candidate: str) -> bool:
+	"""Mirrors `software-factory`'s own `internal/ticketspec.
+	isValidWorkspaceRelativePath` exactly (see that function's doc
+	comment for the full reasoning): a path that can never match a real
+	workspace-relative git diff path -- absolute, containing a `..`/`.`
+	segment, or an internal empty segment from a doubled `//` -- would
+	make the injected declaration itself unsatisfiable, quarantining an
+	otherwise-correct run forever (`required_files_changed` can never be
+	satisfied by a path that can't appear in a real diff). Also rejects a
+	URL (`://`) -- `internal/ticketspec`'s own check doesn't need this,
+	since a ticket author would never hand-write one, but a naive
+	backtick-span extractor can pick one up straight from prose (found
+	via review: `` `https://example.com/schema` ``)."""
+	if not candidate or candidate.startswith("/") or "://" in candidate:
+		return False
+	segments = candidate.split("/")
+	for i, seg in enumerate(segments):
+		if seg in ("..", "."):
+			return False
+		if seg == "" and i != len(segments) - 1:
+			return False
+	return True
+
+
+def looks_like_file_path(candidate: str) -> bool:
+	"""True for a backtick span from a ticket's own text that plausibly
+	names a real file this ticket touches, not prose (a shell command, a
+	commit-message template, a numeric or CLI-argument example, a
+	route/URL/directory reference, a reference document already excluded
+	above) that happens to also be backtick-quoted."""
+	if candidate in TICKETSPEC_EXCLUDED_FILES:
+		return False
+	if candidate.startswith(("ticket(", "STATUS:")) or " " in candidate:
+		return False
+	if not is_valid_workspace_relative_path(candidate):
+		return False
+	basename = candidate.rsplit("/", 1)[-1]
+	return (
+		bool(FILE_EXTENSION_RE.search(candidate))
+		or basename in EXTENSIONLESS_FILENAMES
+		or bool(ALL_CAPS_FILENAME_RE.match(basename))
+	)
+
+
+def extract_markdown_section(content: str, heading: str) -> tuple[str, int, int]:
+	"""Returns (text, start_line, end_line) for the body of a `## <heading>`
+	section -- from the line after that heading up to (not including) the
+	next `## ` heading, or end of file. (text, -1, -1) if the heading isn't
+	found. Line indices are into content.splitlines(keepends=True), so a
+	caller can both read the section and later splice content back in at
+	its boundary without re-scanning.
+	"""
+	lines = content.splitlines(keepends=True)
+	start = None
+	for i, line in enumerate(lines):
+		if line.strip() == f"## {heading}":
+			start = i + 1
+			break
+	if start is None:
+		return "", -1, -1
+	end = len(lines)
+	for j in range(start, len(lines)):
+		if lines[j].startswith("## "):
+			end = j
+			break
+	return "".join(lines[start:end]), start, end
+
+
+def extract_required_change_paths(ticket_content: str) -> list[str]:
+	"""The file paths this ticket's own `## Required changes` list already
+	names -- the one part of this whole exercise that real validation
+	showed the model reliably gets right on its own. Order-preserving,
+	de-duplicated."""
+	section_text, _, _ = extract_markdown_section(ticket_content, "Required changes")
+	paths: list[str] = []
+	seen: set[str] = set()
+	for candidate in BACKTICK_SPAN_RE.findall(section_text):
+		if looks_like_file_path(candidate) and candidate not in seen:
+			seen.add(candidate)
+			paths.append(candidate)
+	return paths
+
+
+def verify_command_for_ticket(ticket_content: str) -> str:
+	"""`ticket_runner.py`'s own gate (`run_ticket`) requires BOTH `make
+	verify` and `make verify-full` to pass, and every generated ticket's
+	own `## Verification` prose already promises both ("`make verify`
+	must pass. Confirm `make verify-full` still passes."). Found via
+	review: declaring only `make verify` here reports `factoryd`'s
+	canonical_verify as passing even when `make verify-full` alone would
+	fail -- a materially weaker bar than what this same ticket already
+	requires of `ticket_runner.py`'s own gate. Join both with `&&` so
+	they decide `Verify-Command` the same way they decide the ticket's
+	own pass/fail; `sh -c` (how `canonical_verify` invokes this) accepts
+	`&&` directly, no ticket seen in real validation runs needed a
+	different command."""
+	del ticket_content  # not yet needed; kept as a parameter for a future ticket that legitimately needs a different command
+	return "make verify && make verify-full"
+
+
+# Prefix, not the trailing colon+value: matching just the key name is
+# what lets a partially-declared ticket (found via review -- a hand-edit
+# or a future caller that adds `Verify-Command:` on its own but not the
+# other two) be detected as such per-key, not lumped into "already fully
+# declared" by the presence of any one of the three.
+TICKETSPEC_KEY_PREFIXES = ("Verify-Command:", "Allowed-Files:", "Required-Changed-Files:")
+
+# Every ticket's mandatory closing instruction ("Update `ARCHITECTURE.md`
+# and append a `PROGRESS.md` entry before finishing") always contributes
+# these two paths to extract_required_change_paths, regardless of whether
+# the ticket's own "## Required changes" list names any real implementation
+# path at all. inject_ticketspec_keys' "nothing concrete to declare, skip"
+# fallback therefore never actually triggers on `not paths` alone -- a
+# ticket describing its changes by package/endpoint/directory name rather
+# than a literal backtick-quoted file path (calculator-app tickets 002-003,
+# 2026-09-05; notes-app tickets 002-005, 2026-09-06 -- both needed hand
+# correction after the fact) gets Allowed-Files: ARCHITECTURE.md,
+# PROGRESS.md injected anyway, which then quarantines any correct
+# implementation the moment it touches real source files. Used below to
+# extend the skip to "found nothing beyond the boilerplate two" as well --
+# not to exclude these two paths from extraction generally: a ticket that
+# *also* names real paths must still declare them (see
+# ExtractRequiredChangePathsTests.test_finds_real_paths_including_the_
+# mandatory_state_files -- excluding them outright was tried and reverted
+# as a real P1 review finding, since it silently dropped ARCHITECTURE.md/
+# PROGRESS.md from Allowed-Files even when the ticket legitimately touches
+# both, quarantining on diff_scope instead).
+MANDATORY_CLOSING_PATHS = frozenset({"ARCHITECTURE.md", "PROGRESS.md"})
+
+
+def inject_ticketspec_keys(pilot_dir: Path) -> list[Path]:
+	"""Adds whichever of Verify-Command:/Allowed-Files:/
+	Required-Changed-Files: a ticket is missing to the end of its `##
+	Verification` section, except: ticket 001 (the walking-skeleton
+	exemption -- see spec-plan.md's own doc comment: a brand-new repo has
+	no real paths yet to name honestly), a ticket that already declares
+	all three (hand-edited, or a prior run of this same function --
+	idempotent, never double-injects), and a ticket whose `## Required
+	changes` names no extractable path at all (nothing concrete to
+	declare; leaving it undeclared skips diff_scope/required_files_changed
+	cleanly rather than risk a wrong, guessed declaration causing a false
+	quarantine later).
+
+	Checks each key independently (found via review): a ticket declaring
+	only `Verify-Command:` by hand used to be treated as "already fully
+	declared" and skipped entirely, silently leaving Allowed-Files:/
+	Required-Changed-Files: undeclared -- the scope gates skip cleanly on
+	an absent declaration, but that's not what a caller who added one key
+	by hand was asking for.
+
+	Returns the ticket paths actually modified, for the caller to log.
+	"""
+	tickets_dir = pilot_dir / "spec" / "tickets"
+	if not tickets_dir.exists():
+		return []
+	modified: list[Path] = []
+	for ticket_path in sorted(tickets_dir.glob("*.md")):
+		content = ticket_path.read_text()
+		missing_prefixes = [p for p in TICKETSPEC_KEY_PREFIXES if p not in content]
+		if not missing_prefixes:
+			continue
+		number_match = TICKET_NUMBER_RE.match(ticket_path.name)
+		if number_match and int(number_match.group(1)) == 1:
+			continue
+		paths = extract_required_change_paths(content)
+		# Verify-Command: doesn't depend on knowing any file path -- only
+		# Allowed-Files:/Required-Changed-Files: do. A ticket with nothing
+		# concrete to declare for those two must still get Verify-Command:
+		# injected if it's missing (found via Codex review of this same
+		# PR): omitting it lets a direct `factoryd` run skip canonical_verify
+		# entirely, accepting code that fails `make verify`/`make
+		# verify-full`.
+		keys_to_inject = list(missing_prefixes)
+		if not paths or set(paths) <= MANDATORY_CLOSING_PATHS:
+			keys_to_inject = [p for p in keys_to_inject if p == "Verify-Command:"]
+		if not keys_to_inject:
+			continue
+		_, _, verification_end = extract_markdown_section(content, "Verification")
+		if verification_end < 0:
+			continue  # no ## Verification heading at all -- TicketStructure will already reject this ticket on its own terms
+		joined = ", ".join(paths)
+		candidate_lines = {
+			"Verify-Command:": f"Verify-Command: {verify_command_for_ticket(content)}",
+			"Allowed-Files:": f"Allowed-Files: {joined}",
+			"Required-Changed-Files:": f"Required-Changed-Files: {joined}",
+		}
+		new_lines = [candidate_lines[p] for p in TICKETSPEC_KEY_PREFIXES if p in keys_to_inject]
+		declaration = "\n" + "\n".join(new_lines) + "\n\n"
+		lines = content.splitlines(keepends=True)
+		updated = "".join(lines[:verification_end]) + declaration + "".join(lines[verification_end:])
+		ticket_path.write_text(updated)
+		modified.append(ticket_path)
+	return modified
+
+
+# --------------------------------------------------------------------------
+# ARCHITECTURE.md bootstrap -- closes a second, distinct bridging gap found
+# via review (2026-08-30 end-to-end validation): software-factory's own
+# `factoryd init` scaffolds ARCHITECTURE.md as a structural stub precisely
+# so a new project has something for the mandatory project-bootstrap
+# preflight to validate before ticket 001 ever runs (ticket 001 is what
+# creates ARCHITECTURE.md's *real* content -- the preflight can't wait for
+# that without a chicken-and-egg problem). But `factoryd init` refuses to
+# write any of its three files if even one already exists, and /spec-plan's
+# own step 1 always writes spec/spec.md for real content immediately after
+# its own step-0 scaffold -- so there is no point in this pipeline's own
+# flow where `factoryd init` could run and still find spec/spec.md absent,
+# short of invoking it as a completely separate step no one currently
+# does. Rather than couple goal_pilot.py to the software-factory Go binary
+# being installed at all (this pipeline's own stated design is zero
+# dependencies beyond `pi` itself), this writes the same structural stub
+# directly, in Python, once /spec-plan's own tickets already exist.
+# --------------------------------------------------------------------------
+
+
+def write_architecture_stub(pilot_dir: Path) -> bool:
+	"""Writes `<pilot_dir>/ARCHITECTURE.md` with the three headings, in the
+	required order, that software-factory's `policy.ArchitectureStructure`
+	checks for (`Repo layout`, `Verification`, `Known deviations`) -- the
+	exact same stub shape `factoryd init` itself writes, so a project this
+	pipeline drives passes `factoryd check-project`'s mandatory preflight
+	before ticket 001 ever runs, the same way an operator-run `factoryd
+	init` would have provided for a hand-authored project. Never
+	overwrites an existing ARCHITECTURE.md (ticket 001's own real content,
+	or a prior run of this same function) -- returns False in that case,
+	True if it wrote the stub.
+
+	Creates the file with `os.open(..., O_CREAT | O_EXCL | O_NOFOLLOW)`
+	rather than a `Path.exists()` (or `os.path.lexists()`) check followed
+	by a separate `write_text()`: a check-then-write pair leaves a race
+	between the check and the write where another process could create,
+	replace, or plant a symlink at this path in between, and a plain
+	`write_text()` follows a symlink -- writing the stub to whatever it
+	points at, outside `pilot_dir`, despite this function's own contract
+	never to touch an existing path (found via review, in two rounds: the
+	first fix replaced `Path.exists()`, which reports False for a
+	*dangling* symlink, with `os.path.lexists()`, but that still left the
+	check and the write as two separate syscalls). `O_EXCL` fails the
+	open if a regular file is already there; `O_NOFOLLOW` fails it if a
+	symlink -- dangling or not -- is there instead; either failure means
+	"already there," so both are treated as this function's normal
+	no-write return path.
+	"""
+	path = pilot_dir / "ARCHITECTURE.md"
+	title = pilot_dir.name.replace("-", " ").replace("_", " ").strip().title() or "Project"
+	content = (
+		f"# {title} — Architecture\n\n"
+		"## Repo layout\n\n"
+		"- Describe the repo layout here.\n\n"
+		"## Verification\n\n"
+		"- Describe how `make verify` (or an equivalent canonical command) proves this app works.\n\n"
+		"## Known deviations\n\n"
+		"- None yet.\n"
+	)
+	try:
+		fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644)
+	except FileExistsError:
+		# A regular file is already there -- this function's own contract
+		# for returning False without touching the existing path.
+		return False
+	except OSError as exc:
+		if exc.errno == errno.ELOOP:
+			# A symlink -- dangling or not -- is already there: same
+			# "already there, leave it" contract as FileExistsError above.
+			return False
+		# A real failure (e.g. ENOENT: pilot_dir itself doesn't exist;
+		# EACCES: no permission to write here) must not be swallowed as
+		# "already present" -- found via review: doing so let callers like
+		# --inject-only report success while never actually writing the
+		# artifact, silently deferring the failure to a much later,
+		# harder-to-diagnose `factoryd` preflight rejection instead.
+		raise
+	with os.fdopen(fd, "w") as f:
+		f.write(content)
+	return True
+
+
 def step2_draft_spec(pilot_dir: Path, spec_input: Path) -> bool:
 	print(f"\n=== step 2: drafting spec + tickets via /spec-plan ({spec_input}) ===")
 	# Deliberately a `pilot_dir` *sibling*, not something written inside it
@@ -340,6 +701,19 @@ def step2_draft_spec(pilot_dir: Path, spec_input: Path) -> bool:
 		append_execution_log(pilot_dir, "step 2 FAILED: /spec-plan ran but spec/spec.md was not written")
 		print("/spec-plan completed but spec/spec.md does not exist -- see logs/spec-plan-output.jsonl", file=sys.stderr)
 		return False
+	modified = inject_ticketspec_keys(pilot_dir)
+	if modified:
+		append_execution_log(
+			pilot_dir,
+			f"step 2: injected internal/ticketspec keys into {len(modified)} ticket(s)",
+			"\n".join(str(p) for p in modified),
+		)
+	if write_architecture_stub(pilot_dir):
+		append_execution_log(
+			pilot_dir,
+			"step 2: wrote ARCHITECTURE.md structural stub",
+			"so a later factoryd <run>'s mandatory project-bootstrap preflight has something to validate before ticket 001 creates its real content",
+		)
 	append_execution_log(pilot_dir, "step 2 complete: spec + tickets drafted via /spec-plan")
 	return True
 
@@ -389,6 +763,116 @@ def staged_ticket_count(pilot_dir: Path) -> int:
 	return sum(1 for p in acceptance_dir.iterdir() if p.is_dir() and p.name.isdigit())
 
 
+# A parent-directory "climb" of at least this many levels above __file__
+# is treated as "computing an app-root-like path", the shape of the real
+# bug (3 levels: NNN -> acceptance -> spec -> pilot_dir). 2 is the
+# threshold rather than 3 so a slightly different guess (e.g. landing on
+# `spec/` instead of the pilot dir root, or on `workspace/` one level
+# short of where the real bug landed) is still caught -- a single level
+# (finding a sibling file next to the slice itself) is normal and not
+# flagged.
+_MIN_SUSPICIOUS_FILE_CLIMB = 2
+
+
+def _file_dunder_referenced(node: ast.AST) -> bool:
+	return any(isinstance(sub, ast.Name) and sub.id == "__file__" for sub in ast.walk(node))
+
+
+def _climb_count(node: ast.AST) -> int:
+	"""How many directory levels an expression climbs above wherever it
+	starts: each `".."` path-join argument, each `os.path.dirname(...)`
+	call, and each pathlib `.parent` access counts as one level. Only
+	meaningful when combined with `_file_dunder_referenced` -- climbing
+	from some other root (a fixture directory, a temp dir) is unrelated
+	to this check's concern."""
+	count = 0
+	for sub in ast.walk(node):
+		if isinstance(sub, ast.Constant) and sub.value == "..":
+			count += 1
+		elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "dirname":
+			count += 1
+		elif isinstance(sub, ast.Attribute) and sub.attr == "parent":
+			count += 1
+	return count
+
+
+def _file_relative_app_root_lines(content: str) -> list[int]:
+	"""Line numbers of a top-level assignment whose value expression
+	references `__file__` and climbs at least `_MIN_SUSPICIOUS_FILE_CLIMB`
+	directory levels above it -- the shape of computing "where the app
+	under test lives" from a slice's own file location, per-flow-fragile
+	for the reason `check_acceptance_suite_paths` documents.
+
+	AST-based, not regex, and not a literal-string match against
+	"workspace" (an earlier version of this check looked for exactly
+	that): the real bug is the *computation*, not any particular string
+	it happens to land on -- a different wrong guess (`spec/`, or a
+	`workspace/` reached by one different `..` count) is an equally real
+	instance of the same mistake, just spelled differently, and a
+	literal-string check would miss all of them (found via a code-review
+	pass: the specific bug this check was built for turned out not to be
+	the general problem at all -- see that function's own docstring).
+	"""
+	try:
+		tree = ast.parse(content)
+	except SyntaxError:
+		return []
+	lines: list[int] = []
+	for node in ast.walk(tree):
+		if not isinstance(node, ast.Assign):
+			continue
+		if _file_dunder_referenced(node.value) and _climb_count(node.value) >= _MIN_SUSPICIOUS_FILE_CLIMB:
+			lines.append(node.lineno)
+	return lines
+
+
+def check_acceptance_suite_paths(pilot_dir: Path) -> list[str]:
+	"""Deterministic, mechanical guard against the exact bug a real build
+	hit live (notes-app, 2026-09-06): an acceptance slice computed "where
+	the app under test lives" as a fixed number of `__file__`-relative
+	parent-directory hops (`<this file's own location>/../../../workspace`)
+	-- which has no single correct answer, because this pipeline has more
+	than one way to actually build a ticket (`factoryd`'s own default
+	merges an isolated worktree into the pilot dir's own root; a pilot
+	dir's `make run` invokes `ticket_runner.py`'s own standalone flow,
+	which builds directly inside `<pilot-dir>/workspace/` for real), and a
+	slice has no reliable way to know in advance which one produced the
+	checkout it's about to test. The one answer that's correct in every
+	flow -- `os.getcwd()`, since `make verify`/`make verify-full` always
+	runs with its working directory already set to wherever the app
+	actually is -- needs no `__file__` arithmetic at all. The template's
+	own prompt (contract-plan.md) now says so, but a prompt is
+	probabilistic; this check is not.
+
+	Scans every `.py` file under `spec/acceptance/*/` for the shape
+	`_file_relative_app_root_lines` recognizes. Returns one human-readable
+	warning per match (empty if none); does not attempt to fix anything --
+	this is a mechanical self-check in the same spirit as step4_compile's
+	own Go/Dart/Python compile check, not a substitute for the human/cloud
+	review the acceptance suite still requires either way.
+
+	Known gap, left as residual risk rather than chased further here:
+	Python-only -- an identical bug in a Go or Dart slice is caught only
+	by contract-plan.md's own prose, the same probabilistic path this
+	check exists to stop relying on for Python.
+	"""
+	acceptance_dir = pilot_dir / "spec" / "acceptance"
+	if not acceptance_dir.exists():
+		return []
+	warnings: list[str] = []
+	for path in sorted(acceptance_dir.rglob("*.py")):
+		content = path.read_text(errors="ignore")
+		for lineno in _file_relative_app_root_lines(content):
+			warnings.append(
+				f"{path.relative_to(pilot_dir)}:{lineno}: computes a path by climbing multiple "
+				f"directory levels above __file__ -- this pipeline has more than one way to "
+				f"build a ticket, and no fixed number of parent hops is correct for all of "
+				f"them. Use os.getcwd() instead: make verify/make verify-full always runs "
+				f"with its working directory already set to the real app root, in every flow."
+			)
+	return warnings
+
+
 def step4_compile(pilot_dir: Path) -> bool:
 	print("\n=== step 4: compiling contract + acceptance suite via /contract-plan ===")
 	# Same sibling-not-inside placement as step2_draft_spec() -- pilot_dir is
@@ -414,6 +898,25 @@ def step4_compile(pilot_dir: Path) -> bool:
 		return False
 	count = staged_ticket_count(pilot_dir)
 	write_compile_complete_marker(pilot_dir, count)
+	path_warnings = check_acceptance_suite_paths(pilot_dir)
+	if path_warnings:
+		# Not a hard failure: step 5's own mandatory human/cloud checkpoint
+		# exists precisely to catch semantic problems like this one, and an
+		# AST-shape guard can only be conservative, never exhaustive --
+		# surfaced prominently (the execution log here, plus
+		# step5_checkpoint recomputing and reprinting this same check right
+		# at the human's actual decision point, since a cloud-review edit
+		# between step 4 and step 5's confirmation can change the answer)
+		# rather than silently blocking the pipeline on a check that might
+		# itself have a false positive.
+		print("\n*** acceptance-suite path check found likely bugs -- see below ***")
+		for warning in path_warnings:
+			print(f"  - {warning}")
+		append_execution_log(
+			pilot_dir,
+			f"step 4: acceptance-suite path check found {len(path_warnings)} likely bug(s)",
+			"\n".join(path_warnings),
+		)
 	append_execution_log(pilot_dir, "step 4 complete: contract + acceptance suite compiled", f"staged ticket slices: {count}")
 	return True
 
@@ -436,6 +939,30 @@ def step5_checkpoint(pilot_dir: Path, checkpoint_mode: str, *, non_interactive: 
 		if spec_output.exists():
 			print("\n--- /contract-plan's real output (self-check transcript included) ---")
 			print(spec_output.read_text()[-8000:])
+		# Recomputed here, not just read from whatever step4_compile logged
+		# earlier: this is the human's actual decision point, and the
+		# "bring spec/acceptance/ to a cloud session for review-and-correct"
+		# instruction just below means the on-disk content can have changed
+		# since step 4 ran -- printing a stale step-4 result here would let
+		# a bug introduced (or left unfixed) during that edit go unseen
+		# right where it matters most (found via a code-review pass: step
+		# 4's own print/log was easy to have scrolled past, and nothing
+		# re-checked after the cloud-review edit this banner asks for).
+		path_warnings = check_acceptance_suite_paths(pilot_dir)
+		if path_warnings:
+			print("\n*** acceptance-suite path check found likely bugs -- see below ***")
+			for warning in path_warnings:
+				print(f"  - {warning}")
+			# Logged here too, not just printed: this is the state that was
+			# live at the moment of human sign-off below, which the
+			# execution log should be able to show even if the human
+			# answers "y" anyway (found via a code-review pass -- step 4's
+			# own identical block already logs, this one hadn't).
+			append_execution_log(
+				pilot_dir,
+				f"step 5: acceptance-suite path check found {len(path_warnings)} likely bug(s) at review time",
+				"\n".join(path_warnings),
+			)
 		print(
 			"\nThis is the highest-stakes artifact in the pipeline "
 			'(/contract-plan\'s own words) -- "a wrong contract or test '
@@ -836,8 +1363,27 @@ def run_build_loop_until_settled(
 
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-	parser.add_argument("--spec-input", required=True, help="Path to a rough-input file, or literal rough-input text.")
-	parser.add_argument("--pilot-dir", required=True, type=Path)
+	parser.add_argument("--spec-input", help="Path to a rough-input file, or literal rough-input text. Required unless --inject-only is used.")
+	parser.add_argument("--pilot-dir", type=Path, help="Required unless --inject-only is used.")
+	parser.add_argument(
+		"--inject-only",
+		type=Path,
+		metavar="PILOT_DIR",
+		help=(
+			"Run only inject_ticketspec_keys() and write_architecture_stub() "
+			"against an existing pilot dir, then exit. For a /spec-plan "
+			"invocation run standalone (see prompts/spec-plan.md's own step "
+			"2), outside goal_pilot.py's usual orchestration, which already "
+			"calls both itself after every /spec-plan run -- found via "
+			"review: the standalone entry point README.md documents "
+			"(`/spec-plan <rough-input> <pilot-dir>` on its own, with no "
+			"goal_pilot.py process ever running) had no way to reach either "
+			"one at all before this flag existed, so a later `factoryd` run "
+			"against a standalone /spec-plan pilot would still fail its "
+			"mandatory ARCHITECTURE.md preflight even after that gap was "
+			"first closed for --inject-only's ticketspec-key half alone."
+		),
+	)
 	parser.add_argument("--checkpoint", choices=("review", "skip"), default=DEFAULT_CHECKPOINT)
 	parser.add_argument("--on-halt", choices=("report", "auto-rescue"), default=DEFAULT_ON_HALT)
 	parser.add_argument(
@@ -852,6 +1398,24 @@ def main() -> int:
 		help="Refuse every checkpoint instead of prompting (for CI/dry-run use) -- never auto-approves.",
 	)
 	args = parser.parse_args()
+
+	if args.inject_only:
+		inject_only_dir = args.inject_only.resolve()
+		modified = inject_ticketspec_keys(inject_only_dir)
+		if modified:
+			print(f"inject-ticketspec-keys: modified {len(modified)} ticket(s):")
+			for path in modified:
+				print(f"  {path}")
+		else:
+			print("inject-ticketspec-keys: no tickets modified (already declared, ticket 001, or no extractable path)")
+		if write_architecture_stub(inject_only_dir):
+			print(f"write-architecture-stub: wrote {inject_only_dir / 'ARCHITECTURE.md'}")
+		else:
+			print("write-architecture-stub: ARCHITECTURE.md already present, left untouched")
+		return 0
+
+	if not args.spec_input or not args.pilot_dir:
+		parser.error("--spec-input and --pilot-dir are required unless --inject-only is used")
 
 	pilot_dir = args.pilot_dir.resolve()
 	pilot_dir.mkdir(parents=True, exist_ok=True)
@@ -887,6 +1451,23 @@ def main() -> int:
 			append_execution_log(pilot_dir, "run started", run_started_note)
 		if not step3_freeze_checkpoint(pilot_dir, non_interactive=args.non_interactive):
 			return 1
+
+	# Bootstrap ARCHITECTURE.md unconditionally, not just inside
+	# step2_draft_spec() -- a pilot already FROZEN on entry (a resume, or
+	# one whose spec/tickets were produced by an earlier version of this
+	# script, or by a standalone /spec-plan invocation outside
+	# goal_pilot.py entirely) skips step2_draft_spec() above and so would
+	# never call write_architecture_stub(), leaving the later mandatory
+	# `factoryd` preflight to fail on a missing ARCHITECTURE.md that
+	# nothing in this run would otherwise create (found via review). The
+	# function is idempotent -- a no-op once ARCHITECTURE.md exists -- so
+	# calling it again here for the fresh-pilot path too is harmless.
+	if write_architecture_stub(pilot_dir):
+		append_execution_log(
+			pilot_dir,
+			"wrote ARCHITECTURE.md structural stub",
+			"so a later factoryd <run>'s mandatory project-bootstrap preflight has something to validate before ticket 001 creates its real content",
+		)
 
 	# --- step 4: compile ---
 	if not is_compile_complete(pilot_dir):

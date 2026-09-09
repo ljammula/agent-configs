@@ -212,7 +212,7 @@ class InfraHaltRetryTests(unittest.TestCase):
 
 	def test_auto_rescue_sets_ai_stack_host_fallback(self):
 		with tempfile.TemporaryDirectory() as d:
-			with mock.patch.dict("os.environ", {"AI_STACK_HOST": "kannasmacstudio.lan"}, clear=False):
+			with mock.patch.dict("os.environ", {"AI_STACK_HOST": "example-lan-host.local"}, clear=False):
 				goal_pilot.handle_infra_halt(Path(d), "auto-rescue", attempt_count=0)
 				import os
 				self.assertEqual(os.environ["AI_STACK_HOST"], goal_pilot.AI_STACK_HOST_FALLBACK)
@@ -236,11 +236,16 @@ class ImplementationGapRescueBoundTests(unittest.TestCase):
 
 
 def pi_output_with_turn_errors(errored: int, total: int) -> str:
+	# Shape matches a real, live `pi --print --mode json` capture -- see
+	# build_app.agent_turn_errors' own doc comment (found live, 2026-09-07):
+	# message_end is a flat top-level event, never wrapped in
+	# {"type": "entry_appended", "entry": ...} the way this fixture (and
+	# the function it exercises) wrongly assumed until that fix.
 	events = []
 	for i in range(total):
 		events.append({
-			"type": "entry_appended",
-			"entry": {"type": "message", "message": {"role": "assistant", "stopReason": "error" if i < errored else "end_turn"}},
+			"type": "message_end",
+			"message": {"role": "assistant", "stopReason": "error" if i < errored else "end_turn"},
 		})
 	return "\n".join(json.dumps(e) for e in events)
 
@@ -527,6 +532,620 @@ class MainScaffoldOrderingTests(unittest.TestCase):
 			# dir, and EXECUTION_LOG.md must exist by now (written once
 			# scaffolding was confirmed).
 			self.assertTrue((pilot_dir / "EXECUTION_LOG.md").exists())
+
+
+class WriteArchitectureStubTests(unittest.TestCase):
+	"""Coverage for a second, distinct bridging gap found via a real
+	end-to-end validation run (2026-08-30): factoryd's own mandatory
+	project-bootstrap preflight requires ARCHITECTURE.md to already exist
+	and pass policy.ArchitectureStructure before ticket 001 ever runs, but
+	`factoryd init` (the tool that normally provides this stub) refuses
+	once spec/spec.md already exists -- which /spec-plan's own step 1
+	always does, immediately, before this pipeline has any other chance
+	to invoke it."""
+
+	def test_writes_stub_with_required_headings_in_order(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d) / "my-project"
+			pilot_dir.mkdir()
+			wrote = goal_pilot.write_architecture_stub(pilot_dir)
+			self.assertTrue(wrote)
+			content = (pilot_dir / "ARCHITECTURE.md").read_text()
+			# Order matters to software-factory's own
+			# policy.ArchitectureStructure -- pin it, not just presence.
+			self.assertLess(content.index("## Repo layout"), content.index("## Verification"))
+			self.assertLess(content.index("## Verification"), content.index("## Known deviations"))
+
+	def test_never_overwrites_an_existing_architecture_md(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			real_content = "# Real Architecture\n\nWritten by ticket 001's own agent.\n"
+			(pilot_dir / "ARCHITECTURE.md").write_text(real_content)
+			wrote = goal_pilot.write_architecture_stub(pilot_dir)
+			self.assertFalse(wrote)
+			self.assertEqual((pilot_dir / "ARCHITECTURE.md").read_text(), real_content)
+
+	def test_does_not_follow_a_dangling_architecture_md_symlink(self):
+		"""Regression for a real P1 review finding: `Path.exists()` follows
+		symlinks and reports False for a *dangling* one, so the old
+		`path.exists()` check fell through to `write_text()`, which also
+		follows the link -- writing the stub to whatever the link points
+		at, outside `pilot_dir`, despite this function's own contract
+		never to touch an existing path."""
+		with tempfile.TemporaryDirectory() as d:
+			outside_dir = Path(d) / "outside"
+			outside_dir.mkdir()
+			pilot_dir = Path(d) / "pilot"
+			pilot_dir.mkdir()
+			target = outside_dir / "escaped.md"
+			(pilot_dir / "ARCHITECTURE.md").symlink_to(target)  # dangling: target doesn't exist
+
+			wrote = goal_pilot.write_architecture_stub(pilot_dir)
+
+			self.assertFalse(wrote)
+			self.assertFalse(target.exists(), "stub must not be written through a dangling symlink")
+
+	def test_propagates_a_real_write_failure_instead_of_reporting_success(self):
+		"""Regression for a real P2 review finding: catching every OSError
+		from the exclusive-create open() -- not just EEXIST/ELOOP -- meant a
+		real failure like a missing parent directory was also swallowed as
+		"already there," so a caller like --inject-only would report
+		success without the artifact ever having been written, deferring
+		the failure to a much later, harder-to-diagnose `factoryd`
+		preflight rejection instead."""
+		with tempfile.TemporaryDirectory() as d:
+			missing_pilot_dir = Path(d) / "does-not-exist"  # never created
+			with self.assertRaises(OSError):
+				goal_pilot.write_architecture_stub(missing_pilot_dir)
+
+
+class ArchitectureBootstrapOnResumeTests(unittest.TestCase):
+	"""Regression for a real P2 review finding: a pilot already FROZEN on
+	entry -- a resume, or one whose spec/tickets were produced by an
+	earlier version of this script or a standalone /spec-plan invocation
+	-- skips step2_draft_spec() entirely, so write_architecture_stub()
+	(called only from inside step2_draft_spec() at the time) never ran,
+	leaving the later mandatory `factoryd` preflight to fail on a missing
+	ARCHITECTURE.md that nothing in the resumed run would otherwise
+	create."""
+
+	def test_bootstraps_architecture_md_on_a_frozen_resume_that_lacks_it(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			(pilot_dir / "Makefile").write_text("run:\n\t@true\n")
+			(pilot_dir / "spec").mkdir()
+			(pilot_dir / "spec" / "spec.md").write_text("STATUS: FROZEN -- reviewed 2026-08-01T00:00:00+00:00\n")
+			self.assertFalse((pilot_dir / "ARCHITECTURE.md").exists())
+
+			argv = [
+				"goal_pilot.py", "--spec-input", "irrelevant, spec already frozen",
+				"--pilot-dir", str(pilot_dir), "--non-interactive",
+			]
+			with mock.patch.object(sys, "argv", argv), \
+				mock.patch.object(goal_pilot, "step4_compile", return_value=False):
+				exit_code = goal_pilot.main()
+
+			# step4_compile was mocked to refuse (return False), so the run
+			# halts right after the bootstrap -- but ARCHITECTURE.md must
+			# already exist by then, not only on a fresh /spec-plan path.
+			self.assertEqual(exit_code, 1)
+			self.assertTrue((pilot_dir / "ARCHITECTURE.md").exists())
+
+
+class InjectOnlyCLITests(unittest.TestCase):
+	"""Regression coverage for a real P1 review finding: a /spec-plan
+	invocation run standalone (the entry point README.md documents,
+	outside goal_pilot.py's own orchestration) had no way to reach
+	inject_ticketspec_keys() at all before this flag existed."""
+
+	def test_inject_only_runs_injector_and_exits_without_requiring_other_args(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-x.md"
+			ticket_path.write_text(
+				"## Required changes\n\n1. Edit `isprime.py`.\n\n"
+				"## Verification\n\n`make verify` must pass.\n\n## Commit\n\nx\n"
+			)
+
+			argv = ["goal_pilot.py", "--inject-only", str(pilot_dir)]
+			with mock.patch.object(sys, "argv", argv):
+				exit_code = goal_pilot.main()
+
+			self.assertEqual(exit_code, 0)
+			self.assertIn("Allowed-Files: isprime.py", ticket_path.read_text())
+
+	def test_inject_only_also_bootstraps_architecture_stub(self):
+		"""Regression for a real P2 review finding: a standalone /spec-plan
+		invocation reaches this flag but not step2_draft_spec()/main()'s own
+		frozen-resume bootstrap, so write_architecture_stub() being called
+		only from those two places left standalone runs still missing
+		ARCHITECTURE.md, and the later mandatory `factoryd` preflight would
+		still fail for exactly the audience --inject-only exists for."""
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			(pilot_dir / "spec" / "tickets").mkdir(parents=True)
+
+			argv = ["goal_pilot.py", "--inject-only", str(pilot_dir)]
+			with mock.patch.object(sys, "argv", argv):
+				exit_code = goal_pilot.main()
+
+			self.assertEqual(exit_code, 0)
+			self.assertTrue((pilot_dir / "ARCHITECTURE.md").exists())
+
+	def test_missing_required_args_without_inject_only_errors(self):
+		argv = ["goal_pilot.py"]
+		with mock.patch.object(sys, "argv", argv):
+			with self.assertRaises(SystemExit):
+				goal_pilot.main()
+
+
+TICKET_002_TEMPLATE = """This is an existing repo. Read `ARCHITECTURE.md`, `PROGRESS.md`, and `spec/contract.md` before changing anything, and preserve all existing functionality and passing tests -- this is an extension, not a rewrite.
+
+## Goal
+
+Harden the CLI against invalid input.
+
+## Required changes
+
+1. Extend `isprime.py`'s argument handling so every invalid invocation is a usage error.
+2. Add unit tests in `test_isprime.py` for the new parsing behavior.
+
+Update `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.
+
+## Verification
+
+- `make verify` must pass
+- Confirm `make verify-full` still passes.
+
+## Commit
+
+Commit once both pass. Commit message must be exactly: `ticket(002): input-validation`
+"""
+
+
+class ExtractRequiredChangePathsTests(unittest.TestCase):
+	def test_finds_real_paths_including_the_mandatory_state_files(self):
+		# ARCHITECTURE.md/PROGRESS.md are included, not skipped: a real P1
+		# found via review -- they are NOT in software-factory's own
+		# harnessByproducts exemption list (only .gitignore/BUILD_REPORT.md/
+		# BUILD_EVIDENCE.json/.pi-build-session/ are), and every ticket
+		# after 001 edits both via this mandatory closing instruction. An
+		# earlier version of this exclusion list wrongly treated them as
+		# already-exempted and stripped them from every generated ticket's
+		# own Allowed-Files, which would have quarantined every one of them
+		# on diff_scope in practice.
+		paths = goal_pilot.extract_required_change_paths(TICKET_002_TEMPLATE)
+		self.assertEqual(paths, ["isprime.py", "test_isprime.py", "ARCHITECTURE.md", "PROGRESS.md"])
+
+	def test_ignores_prose_and_commit_template(self):
+		content = (
+			"## Required changes\n\n"
+			"1. Run `make verify` first (not a real path).\n"
+			"2. Edit `internal/prime/prime.go`.\n\n"
+			"## Commit\n\n"
+			"Commit message must be exactly: `ticket(002): x`\n"
+		)
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["internal/prime/prime.go"])
+
+	def test_ignores_spec_contract_reference_citations(self):
+		# Real bug found in a live end-to-end /spec-plan run (2026-08-30):
+		# a ticket's own prose routinely cites `spec/contract.md` as the
+		# source of an expected error message or exit code -- a reference,
+		# not a file this ticket edits -- and the earlier version of this
+		# function had no exclusion for it.
+		content = (
+			"## Required changes\n\n"
+			"1. Edit `isprime.py` so it matches the error text `spec/contract.md` specifies.\n"
+		)
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["isprime.py"])
+
+	def test_ignores_numeric_examples_that_look_like_extensions(self):
+		# Real bug found in the same live run: a non-integer CLI-argument
+		# example like `3.5` matched the earlier, looser "any 1-6 alnum
+		# chars after a dot" extension check and was extracted as if it
+		# were a file.
+		content = (
+			"## Required changes\n\n"
+			"1. Edit `isprime.py` to reject non-integer input such as `3.5` or `abc`.\n"
+		)
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["isprime.py"])
+
+	def test_recognizes_extensionless_conventional_filenames(self):
+		content = (
+			"## Required changes\n\n"
+			"1. Add a `Makefile` target.\n"
+			"2. Update `Dockerfile` to install the new dependency.\n"
+		)
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["Makefile", "Dockerfile"])
+
+	def test_recognizes_screaming_case_extensionless_files_not_on_any_fixed_list(self):
+		# Real finding via review: a fixed filename allowlist can never be
+		# exhaustive (Bazel's WORKSPACE/BUILD, git's CODEOWNERS, LICENSE,
+		# none of which this repo's own list happened to name). The shape
+		# rule (SCREAMING_CASE) recognizes them without enumerating them.
+		content = (
+			"## Required changes\n\n"
+			"1. Add a `WORKSPACE` file.\n"
+			"2. Add a `BUILD` file alongside it.\n"
+			"3. Add `CODEOWNERS` for this directory.\n"
+			"4. Add a `LICENSE` file.\n"
+			"5. Reject a bare CLI-argument example like `abc` or `OK` (too short to count).\n"
+		)
+		self.assertEqual(
+			goal_pilot.extract_required_change_paths(content),
+			["WORKSPACE", "BUILD", "CODEOWNERS", "LICENSE"],
+		)
+
+	def test_recognizes_readme_when_explicitly_named(self):
+		# Real finding via review: README.md was unconditionally excluded
+		# on the same wrong assumption as ARCHITECTURE.md/PROGRESS.md --
+		# but unlike those two, it's not universally edited, so a ticket
+		# that explicitly names it as a real required change had it
+		# silently stripped from scope for no reason at all.
+		content = "## Required changes\n\n1. Update `README.md` to document the new flag.\n"
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["README.md"])
+
+	def test_recognizes_long_and_unusual_extensions(self):
+		content = "## Required changes\n\n1. Add `schema.graphql`.\n"
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["schema.graphql"])
+
+	def test_ignores_routes_urls_and_traversal(self):
+		# Real bug found via review: a bare "/" in candidate" check
+		# classified a route, URL, or directory reference as a file this
+		# ticket edits, even though none of them can ever match a real
+		# workspace-relative changed-file path -- required_files_changed
+		# can then never be satisfied, quarantining an otherwise-correct
+		# run forever.
+		content = (
+			"## Required changes\n\n"
+			"1. Expose a new `/health` endpoint.\n"
+			"2. See `docs/` for the existing convention.\n"
+			"3. Do not touch `../outside.py`.\n"
+			"4. Follow the schema at `https://example.com/schema`.\n"
+			"5. Edit `internal/prime/prime.go`.\n"
+		)
+		self.assertEqual(goal_pilot.extract_required_change_paths(content), ["internal/prime/prime.go"])
+
+	def test_no_required_changes_section_is_empty(self):
+		self.assertEqual(goal_pilot.extract_required_change_paths("## Goal\n\nx\n"), [])
+
+
+class InjectTicketspecKeysTests(unittest.TestCase):
+	def test_injects_keys_into_ticket_with_real_paths(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-input-validation.md"
+			ticket_path.write_text(TICKET_002_TEMPLATE)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [ticket_path])
+			updated = ticket_path.read_text()
+			# make verify && make verify-full, not make verify alone --
+			# ticket_runner.py's own gate requires both, and the ticket's
+			# own prose already promises both.
+			self.assertIn("Verify-Command: make verify && make verify-full", updated)
+			self.assertIn("Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
+			self.assertIn("Required-Changed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
+			# The declaration must land inside ## Verification, before ##
+			# Commit -- not after it, which would silently become part of
+			# the commit-message section instead.
+			self.assertLess(updated.index("Verify-Command:"), updated.index("## Commit"))
+
+	def test_skips_ticket_001_walking_skeleton_exemption(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "001-walking-skeleton.md"
+			ticket_path.write_text(TICKET_002_TEMPLATE.replace("ticket(002)", "ticket(001)"))
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [])
+			self.assertNotIn("Verify-Command:", ticket_path.read_text())
+
+	def test_skips_ticket_already_declaring_all_three_keys(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-already-declared.md"
+			ticket_path.write_text(
+				TICKET_002_TEMPLATE
+				+ "\nVerify-Command: make verify-full\n"
+				+ "Allowed-Files: isprime.py\n"
+				+ "Required-Changed-Files: isprime.py\n"
+			)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			# Not modified, and the hand-declared Verify-Command is not
+			# overwritten with the fixed default -- an existing declaration
+			# (hand-edited, or from a prior run of this function) always
+			# wins, once all three keys are already present.
+			self.assertEqual(modified, [])
+			self.assertIn("Verify-Command: make verify-full", ticket_path.read_text())
+
+	def test_fills_only_missing_keys_when_partially_declared(self):
+		# Real bug found via review: a ticket declaring only
+		# Verify-Command: by hand used to be treated as "already fully
+		# declared" and skipped entirely, silently leaving Allowed-Files:/
+		# Required-Changed-Files: undeclared.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-partially-declared.md"
+			ticket_path.write_text(TICKET_002_TEMPLATE + "\nVerify-Command: make verify-full\n")
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [ticket_path])
+			updated = ticket_path.read_text()
+			# The hand-declared Verify-Command survives untouched...
+			self.assertIn("Verify-Command: make verify-full", updated)
+			self.assertNotIn("Verify-Command: make verify &&", updated)
+			# ...but the two missing keys are now filled in.
+			self.assertIn("Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
+			self.assertIn("Required-Changed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
+
+	def test_still_injects_verify_command_with_no_extractable_path_at_all(self):
+		# Verify-Command: doesn't depend on knowing any file path, so it's
+		# injected even for a ticket this vague -- only Allowed-Files:/
+		# Required-Changed-Files: (which do need real paths to be
+		# meaningful) are skipped.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-vague.md"
+			content = (
+				"## Required changes\n\n1. Improve error handling generally.\n\n"
+				"## Verification\n\n`make verify` must pass.\n\n## Commit\n\nx\n"
+			)
+			ticket_path.write_text(content)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [ticket_path])
+			updated = ticket_path.read_text()
+			self.assertIn("Verify-Command: make verify && make verify-full", updated)
+			self.assertNotIn("Allowed-Files:", updated)
+			self.assertNotIn("Required-Changed-Files:", updated)
+
+	def test_skips_allowed_files_but_still_injects_verify_command_with_only_boilerplate_paths(self):
+		# Real bug found live, twice: calculator-app tickets 002-003
+		# (2026-09-05) and notes-app tickets 002-005 (2026-09-06) each
+		# described their real changes by package/endpoint/directory name
+		# ("Implement the list-notes endpoint per spec/contract.md") rather
+		# than a literal backtick-quoted file path -- so the only paths
+		# extract_required_change_paths found were the two the mandatory
+		# closing instruction always contributes. `if not paths: continue`
+		# never fires in that case (paths is ["ARCHITECTURE.md",
+		# "PROGRESS.md"], not empty), so Allowed-Files/Required-Changed-Files
+		# got injected as just those two -- which then quarantines any
+		# correct implementation the moment it touches real source files,
+		# exactly the failure the "nothing concrete to declare" skip exists
+		# to prevent. Both projects needed hand correction after the fact
+		# (calculator-app commit c1ca6b4, notes-app ticket 001's spec-freeze
+		# commit) before this fix.
+		#
+		# Verify-Command: is unaffected by any of this -- it doesn't depend
+		# on knowing a file path at all (found via Codex review of this
+		# same fix's first version, which wrongly skipped it too): omitting
+		# it lets a direct `factoryd` run skip canonical_verify entirely.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-list-notes.md"
+			content = (
+				"## Required changes\n\n"
+				"1. Implement the list-notes endpoint per `spec/contract.md`.\n"
+				"2. Extend the frontend to render the list.\n\n"
+				"Update `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n"
+				"## Verification\n\n`make verify` must pass.\n\n## Commit\n\nx\n"
+			)
+			ticket_path.write_text(content)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [ticket_path])
+			updated = ticket_path.read_text()
+			self.assertIn("Verify-Command: make verify && make verify-full", updated)
+			self.assertNotIn("Allowed-Files:", updated)
+			self.assertNotIn("Required-Changed-Files:", updated)
+
+	def test_already_declared_verify_command_is_left_alone_with_only_boilerplate_paths(self):
+		# The other half of the same fix: if Verify-Command: is already
+		# present (hand-edited, or injected by a prior run), a ticket with
+		# only the boilerplate paths has nothing left to inject at all.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-list-notes.md"
+			content = (
+				"## Required changes\n\n"
+				"1. Implement the list-notes endpoint per `spec/contract.md`.\n\n"
+				"Update `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n"
+				"## Verification\n\n`make verify` must pass.\n\n"
+				"Verify-Command: make verify && make verify-full\n\n"
+				"## Commit\n\nx\n"
+			)
+			ticket_path.write_text(content)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [])
+			self.assertNotIn("Allowed-Files:", ticket_path.read_text())
+
+	def test_still_injects_when_real_paths_accompany_the_mandatory_closing_ones(self):
+		# The fix above must not regress the ordinary case: a ticket that
+		# does name a real path alongside the mandatory two still gets the
+		# full set injected, ARCHITECTURE.md/PROGRESS.md included.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			tickets_dir = pilot_dir / "spec" / "tickets"
+			tickets_dir.mkdir(parents=True)
+			ticket_path = tickets_dir / "002-input-validation.md"
+			ticket_path.write_text(TICKET_002_TEMPLATE)
+
+			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
+
+			self.assertEqual(modified, [ticket_path])
+			self.assertIn(
+				"Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md",
+				ticket_path.read_text(),
+			)
+
+	def test_no_tickets_dir_returns_empty(self):
+		with tempfile.TemporaryDirectory() as d:
+			self.assertEqual(goal_pilot.inject_ticketspec_keys(Path(d)), [])
+
+
+class CheckAcceptanceSuitePathsTests(unittest.TestCase):
+	def test_no_acceptance_dir_returns_no_warnings(self):
+		with tempfile.TemporaryDirectory() as d:
+			self.assertEqual(goal_pilot.check_acceptance_suite_paths(Path(d)), [])
+
+	def test_flags_the_exact_notes_app_regression(self):
+		# The real bug (notes-app, 2026-09-06): every one of 5 acceptance
+		# slices computed "where the app lives" as a fixed __file__-relative
+		# parent-directory climb, which has no single correct answer across
+		# this pipeline's different build flows -- see the function's own
+		# docstring. Confirmed this was NOT actually about the literal word
+		# "workspace" (a code-review pass showed a correct-looking
+		# `os.getcwd()`-free repo-root guess is equally wrong in the flow
+		# where it isn't): the check now flags the climb itself.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001_create.py").write_text(
+				"import os\n"
+				"WORKSPACE = os.path.abspath(\n"
+				'    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "workspace")\n'
+				")\n"
+			)
+			warnings = goal_pilot.check_acceptance_suite_paths(pilot_dir)
+			self.assertEqual(len(warnings), 1)
+			self.assertIn("test_001_create.py", warnings[0])
+			self.assertIn("os.getcwd()", warnings[0])
+
+	def test_flags_a_fixed_repo_root_guess_too_not_just_workspace(self):
+		# The check's own first version only flagged a literal "workspace"
+		# segment, on the theory that the pilot dir's own root was always
+		# the correct answer instead -- a real code-review pass showed
+		# that's equally wrong in the flow where ticket_runner.py's own
+		# `make run` builds directly inside workspace/ for real. Neither
+		# fixed guess is correct in every flow; only os.getcwd() is.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001_create.py").write_text(
+				"import os\n"
+				"WORKSPACE = os.path.abspath(\n"
+				'    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")\n'
+				")\n"
+			)
+			self.assertEqual(len(goal_pilot.check_acceptance_suite_paths(pilot_dir)), 1)
+
+	def test_reports_every_slice_independently(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			bad = 'WORKSPACE = os.path.join(os.path.dirname(__file__), "..", "..", "..", "workspace")\n'
+			for n in ("001", "002"):
+				slice_dir = pilot_dir / "spec" / "acceptance" / n
+				slice_dir.mkdir(parents=True)
+				(slice_dir / f"test_{n}.py").write_text(bad)
+			warnings = goal_pilot.check_acceptance_suite_paths(pilot_dir)
+			self.assertEqual(len(warnings), 2)
+
+	def test_flags_pathlib_division_and_parent_chains(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				'WORKSPACE = Path(__file__).resolve().parent.parent.parent / "workspace"\n'
+			)
+			self.assertEqual(len(goal_pilot.check_acceptance_suite_paths(pilot_dir)), 1)
+
+	def test_flags_joinpath_call(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				'WORKSPACE = Path(__file__).parent.parent.parent.joinpath("workspace")\n'
+			)
+			self.assertEqual(len(goal_pilot.check_acceptance_suite_paths(pilot_dir)), 1)
+
+	def test_flags_regardless_of_join_being_imported_bare(self):
+		# The climb-count is what matters, not which name a join-style
+		# function is called through -- unlike the check's own prior
+		# version, nothing here needs to specifically recognize
+		# `os.path.join` vs. a bare `join` from `from os.path import
+		# join`: the ".." string constants are counted either way.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				"from os.path import dirname, abspath, join\n"
+				'WORKSPACE = join(dirname(abspath(__file__)), "..", "..", "..", "workspace")\n'
+			)
+			self.assertEqual(len(goal_pilot.check_acceptance_suite_paths(pilot_dir)), 1)
+
+	def test_does_not_flag_a_single_level_sibling_lookup(self):
+		# Finding a file next to the slice itself (one level, no farther)
+		# is a normal, unrelated use of __file__ -- not the app-root
+		# computation this check exists to catch.
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				'FIXTURE = os.path.join(os.path.dirname(__file__), "fixture.json")\n'
+			)
+			self.assertEqual(goal_pilot.check_acceptance_suite_paths(pilot_dir), [])
+
+	def test_does_not_flag_the_recommended_os_getcwd_pattern(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				"import os\n"
+				"APP_ROOT = os.getcwd()\n"
+			)
+			self.assertEqual(goal_pilot.check_acceptance_suite_paths(pilot_dir), [])
+
+	def test_does_not_flag_unrelated_code_with_no_file_dunder(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text(
+				'CONFIG = os.path.join(BASE_DIR, "config.json")\n'
+				'IGNORE_DIRS = ("node_modules", "workspace")\n'
+			)
+			self.assertEqual(goal_pilot.check_acceptance_suite_paths(pilot_dir), [])
+
+	def test_syntax_error_returns_no_warnings_rather_than_raising(self):
+		with tempfile.TemporaryDirectory() as d:
+			pilot_dir = Path(d)
+			slice_dir = pilot_dir / "spec" / "acceptance" / "001"
+			slice_dir.mkdir(parents=True)
+			(slice_dir / "test_001.py").write_text("def broken(:\n")
+			self.assertEqual(goal_pilot.check_acceptance_suite_paths(pilot_dir), [])
 
 
 if __name__ == "__main__":

@@ -31,6 +31,45 @@ def pi_output(review_outcome: str, findings: str = "") -> str:
 	return "\n".join(json.dumps(event) for event in events)
 
 
+def agent_invocation_calls(sh_mock) -> list:
+	"""The subset of a mocked sh()'s calls that are actual agent
+	invocations (pi/claude), excluding workspace_fingerprint's own git
+	rev-parse/status calls -- run_build now calls sh() for those around
+	every round too, so a bare call_count on a blanket-mocked sh no longer
+	says how many agent rounds ran."""
+	return [call for call in sh_mock.call_args_list if call.args and call.args[0] and call.args[0][0] in ("pi", "claude")]
+
+
+def real_git_and_scripted_agent(workspace: Path, completions, writes=None):
+	"""Build an sh() side_effect for run_build tests: routes any git argv
+	to the real subprocess (against `workspace`, a real repo the test set
+	up) -- so workspace_fingerprint's rev-parse/status calls see the
+	workspace's actual state around each round -- and pops the next
+	canned CompletedProcess from `completions` for every other call (the
+	scripted pi/claude invocations).
+
+	`writes` is an optional list of no-arg callables, one per entry in
+	`completions` (use a no-op lambda for a round that makes no real
+	change): called just before returning that entry's CompletedProcess,
+	so a "successful" round in the test actually changes the workspace --
+	required now that a round's success also depends on
+	workspace_fingerprint seeing a real difference, not just on the
+	canned review/verify signals.
+	"""
+	real_sh = build_app.sh
+	iterator = iter(completions)
+	write_iterator = iter(writes) if writes is not None else None
+
+	def side_effect(args, cwd=None, timeout=None, env=None):
+		if args and args[0] == "git":
+			return real_sh(args, cwd=cwd, timeout=timeout, env=env)
+		if write_iterator is not None:
+			next(write_iterator)()
+		return next(iterator)
+
+	return side_effect
+
+
 class BuildAppTests(unittest.TestCase):
 	def test_pi_invocation_inherits_thinking_unless_explicitly_overridden(self):
 		base = dict(
@@ -165,17 +204,18 @@ class BuildAppTests(unittest.TestCase):
 		self.assertNotIn("stale diff", prompt)
 
 	def test_advisory_build_logs_flagged_comments_and_completes_on_verification(self):
-		with tempfile.TemporaryDirectory() as directory:
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
-			spec = root / "spec.md"
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
+			completions = [subprocess.CompletedProcess([], 0, pi_output("flagged", "stale diff"), "")]
+			writes = [lambda: (root / "cache.go").write_text("fixed\n")]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
 				mock.patch.object(
-					build_app,
-					"sh",
-					return_value=subprocess.CompletedProcess([], 0, pi_output("flagged", "stale diff"), ""),
+					build_app, "sh", side_effect=real_git_and_scripted_agent(root, completions, writes),
 				),
 			):
 				result = build_app.run_build(
@@ -248,7 +288,7 @@ class BuildAppTests(unittest.TestCase):
 				)
 		self.assertFalse(result.succeeded)
 		self.assertEqual(len(result.rounds), 1)
-		self.assertEqual(run.call_count, 1)
+		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("empty-diff", result.stopped_reason)
 
 	def test_review_base_sha_is_threaded_to_the_pi_invocation_env(self):
@@ -269,21 +309,102 @@ class BuildAppTests(unittest.TestCase):
 					root, spec, max_rounds=1, containment=False, timeout_minutes=1,
 					review_base_sha="deadbeef",
 				)
-			self.assertEqual(run.call_args.kwargs["env"]["AI_REVIEW_BASE_SHA"], "deadbeef")
+			# workspace_fingerprint's own git rev-parse/status calls now run
+			# around every round too, so the pi invocation is no longer
+			# reliably sh's first (or last) call -- pick it out specifically.
+			self.assertEqual(agent_invocation_calls(run)[0].kwargs["env"]["AI_REVIEW_BASE_SHA"], "deadbeef")
 
 	def test_agent_turn_errors_counts_errored_assistant_messages(self):
+		# Shape matches a real, live `pi --print --mode json` capture (not
+		# the entry_appended-wrapped shape this function wrongly assumed
+		# until 2026-09-07 -- see its own doc comment): message_start,
+		# message_end, turn_end etc. are flat top-level events, and only
+		# message_end (one per real assistant turn) is counted.
 		output = "\n".join([
-			json.dumps({"type": "entry_appended", "entry": {
-				"type": "message", "message": {"role": "user", "content": []},
-			}}),
-			json.dumps({"type": "entry_appended", "entry": {
-				"type": "message", "message": {"role": "assistant", "stopReason": "error"},
-			}}),
-			json.dumps({"type": "entry_appended", "entry": {
-				"type": "message", "message": {"role": "assistant", "stopReason": "stop"},
-			}}),
+			json.dumps({"type": "message_start", "message": {"role": "user", "content": []}}),
+			json.dumps({"type": "message_end", "message": {"role": "user", "content": []}}),
+			json.dumps({"type": "message_start", "message": {"role": "assistant", "content": []}}),
+			json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error"}}),
+			json.dumps({"type": "turn_end", "message": {"role": "assistant", "stopReason": "error"}}),
+			json.dumps({"type": "message_start", "message": {"role": "assistant", "content": []}}),
+			json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}),
+			json.dumps({"type": "turn_end", "message": {"role": "assistant", "stopReason": "stop"}}),
 		])
 		self.assertEqual(build_app.agent_turn_errors(output), (1, 2))
+
+	def test_agent_turn_errors_recognizes_context_budget_exceeded(self):
+		# Found live, 2026-09-07 (notes-app ticket 007): a local model's own
+		# context budget exhausted mid-build, and every subsequent
+		# `--continue` round then errors out on its single assistant turn
+		# with exactly this shape -- captured verbatim from a real
+		# reproduction against the installed local model route.
+		output = json.dumps({
+			"type": "message_end",
+			"message": {
+				"role": "assistant",
+				"content": [],
+				"stopReason": "error",
+				"errorMessage": (
+					'400: {"message":"Request rejected: prompt_tokens=66829 '
+					'max_tokens=16384 budget=65536 threshold=62259 '
+					'max_kv_size=81920. Reduce prompt size or start a new '
+					'session.","type":"context_length_budget_exceeded"}'
+				),
+			},
+		})
+		self.assertEqual(build_app.agent_turn_errors(output), (1, 1))
+
+	def test_parse_usage_reads_a_real_agent_end_event_shape(self):
+		# Captured verbatim from a real `pi --print --mode json` invocation
+		# against the installed ai-stack-local route, 2026-09-09: agent_end
+		# has no top-level "usage" key at all -- usage lives inside each
+		# assistant entry of the event's own "messages" list. The original
+		# `"usage" in event` check could never be true against this real
+		# shape, so BUILD_EVIDENCE.json's own usage field was null on
+		# every real run on record (CLAIMS.md's "usage is null" remaining
+		# gap) until this fix.
+		output = json.dumps({
+			"type": "agent_end",
+			"messages": [
+				{"role": "user", "content": [{"type": "text", "text": "say hi"}]},
+				{
+					"role": "assistant",
+					"content": [{"type": "text", "text": "Hi!"}],
+					"usage": {
+						"input": 2273, "output": 61, "cacheRead": 4096,
+						"cacheWrite": 0, "reasoning": 27, "totalTokens": 6430,
+						"cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+					},
+					"stopReason": "stop",
+				},
+			],
+			"willRetry": False,
+		})
+		usage = build_app.parse_usage(output)
+		self.assertEqual(usage["input"], 2273)
+		self.assertEqual(usage["output"], 61)
+		self.assertEqual(usage["totalTokens"], 6430)
+		self.assertNotIn("cost", usage)
+
+	def test_parse_usage_sums_across_multiple_assistant_turns_in_one_round(self):
+		# A round can carry more than one assistant turn (e.g. a tool call
+		# then a text response) before its own agent_end event fires; the
+		# round's real total consumption is the sum across all of them,
+		# not just the final turn's.
+		output = json.dumps({
+			"type": "agent_end",
+			"messages": [
+				{"role": "user", "content": []},
+				{"role": "assistant", "content": [], "usage": {"input": 100, "output": 20}},
+				{"role": "tool", "content": []},
+				{"role": "assistant", "content": [], "usage": {"input": 150, "output": 30}},
+			],
+		})
+		self.assertEqual(build_app.parse_usage(output), {"input": 250, "output": 50})
+
+	def test_parse_usage_returns_none_without_a_real_agent_end_event(self):
+		output = json.dumps({"type": "message_end", "message": {"role": "assistant"}})
+		self.assertIsNone(build_app.parse_usage(output))
 
 	def test_round_blockers_flags_a_fully_errored_round_as_route_unreachable(self):
 		blockers, _ = build_app.round_blockers(
@@ -312,9 +433,9 @@ class BuildAppTests(unittest.TestCase):
 			root = Path(directory)
 			spec = root / "spec.md"
 			spec.write_text("Fix the cache")
-			errored_output = json.dumps({"type": "entry_appended", "entry": {
-				"type": "message", "message": {"role": "assistant", "stopReason": "error"},
-			}})
+			errored_output = json.dumps({
+				"type": "message_end", "message": {"role": "assistant", "stopReason": "error"},
+			})
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "")),
@@ -325,22 +446,27 @@ class BuildAppTests(unittest.TestCase):
 				)
 		self.assertFalse(result.succeeded)
 		self.assertEqual(len(result.rounds), 1)
-		self.assertEqual(run.call_count, 1)
+		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
 
 	def test_flagged_review_drives_a_corrective_round(self):
-		with tempfile.TemporaryDirectory() as directory:
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
-			spec = root / "spec.md"
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
 			completed = [
 				subprocess.CompletedProcess([], 0, pi_output("flagged", "cache.go: evicts by value"), ""),
 				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
 			]
+			writes = [
+				lambda: (root / "cache.go").write_text("draft\n"),
+				lambda: (root / "cache.go").write_text("fixed\n"),
+			]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
-				mock.patch.object(build_app, "sh", side_effect=completed),
+				mock.patch.object(build_app, "sh", side_effect=real_git_and_scripted_agent(root, completed, writes)),
 			):
 				result = build_app.run_build(
 					root, spec, max_rounds=2, containment=False, timeout_minutes=1,
@@ -370,23 +496,28 @@ class BuildAppTests(unittest.TestCase):
 				)
 		self.assertFalse(result.succeeded)
 		self.assertEqual(len(result.rounds), 1)
-		self.assertEqual(run.call_count, 1)
+		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("missing-configuration", result.stopped_reason)
 
 	def test_opt_in_sonnet_fallback_runs_once_after_local_budget(self):
-		with tempfile.TemporaryDirectory() as directory:
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
-			spec = root / "spec.md"
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
 			completed = [
 				subprocess.CompletedProcess([], 0, pi_output("flagged", "cache.go: evicts by value"), ""),
 				subprocess.CompletedProcess([], 0, json.dumps({"usage": {}, "total_cost_usd": 0.1}), ""),
 			]
+			writes = [
+				lambda: None,  # the flagged local round makes no real change
+				lambda: (root / "cache.go").write_text("fixed\n"),  # the sonnet pass does
+			]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "resolve_verify_command", return_value="make verify"),
 				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
-				mock.patch.object(build_app, "sh", side_effect=completed),
+				mock.patch.object(build_app, "sh", side_effect=real_git_and_scripted_agent(root, completed, writes)),
 			):
 				result = build_app.run_build(
 					root, spec, max_rounds=1, containment=False, timeout_minutes=1,
@@ -394,6 +525,171 @@ class BuildAppTests(unittest.TestCase):
 				)
 		self.assertTrue(result.succeeded)
 		self.assertEqual([round.agent for round in result.rounds], ["pi-local", "claude-sonnet-5"])
+
+	def test_a_no_op_round_is_not_reported_as_success_and_escalates_to_sonnet(self):
+		# Regression: calculator-app ticket 004 (2026-09-06) ran 3 local
+		# rounds that each reported "verify passed" against a workspace no
+		# round had actually touched (base_sha == result_sha) -- `pi`
+		# stalled/produced nothing, but the *pre-existing* code still
+		# trivially passed verification, so `round_blockers` saw no
+		# blockers and run_build declared SUCCEEDED. Because
+		# result.succeeded was already True, --sonnet-fallback's own `if
+		# not result.succeeded` guard never fired -- the one designed
+		# recovery for exactly this case never got a chance to run.
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			base_sha = init_repo_with_commit(root)
+			# Deliberately outside the workspace repo (as factoryd's real
+			# spec.snapshot.md is, under data/runs/<id>/) -- a spec file
+			# left untracked *inside* the repo would itself make
+			# workspace_unchanged_since see a dirty tree and invalidate
+			# this test.
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Add a feature")
+			# Two local rounds that touch nothing (git status/diff stay
+			# clean) but still "pass" verification against the untouched
+			# tree; the sonnet-fallback round is the one that actually
+			# writes a file and commits.
+			local_completions = [
+				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
+				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
+			]
+			sonnet_completion = subprocess.CompletedProcess(
+				[], 0, json.dumps({"usage": {}, "total_cost_usd": 0.1}), "",
+			)
+			original_sh = build_app.sh
+
+			def fake_sh(args, cwd=None, timeout=None, env=None):
+				# workspace_unchanged_since's own `git diff`/`git status`
+				# calls must hit real git, not the simulated agent rounds
+				# below -- only "pi"/"claude" are the simulated invocations.
+				if args and args[0] == "git":
+					return original_sh(args, cwd=cwd, timeout=timeout, env=env)
+				if args and args[0] == "claude":
+					(root / "feature.txt").write_text("done\n")
+					subprocess.run(["git", "add", "feature.txt"], cwd=root, check=True, capture_output=True)
+					subprocess.run(
+						["git", "-c", "commit.gpgsign=false", "commit", "-m", "add feature"],
+						cwd=root, check=True, capture_output=True,
+					)
+					return sonnet_completion
+				return local_completions.pop(0)
+
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "resolve_verify_command", return_value="make verify"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "")),
+				mock.patch.object(build_app, "sh", side_effect=fake_sh),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=2, containment=False, timeout_minutes=1,
+					sonnet_fallback=True, review_base_sha=base_sha,
+				)
+
+			self.assertEqual([r.agent for r in result.rounds], ["pi-local", "pi-local", "claude-sonnet-5"])
+			self.assertTrue(result.succeeded)
+			self.assertEqual(result.stopped_reason, "Sonnet fallback passed canonical verification")
+			self.assertNotEqual(head_of(root), base_sha)
+
+	def test_unresolvable_verify_command_still_escalates_to_sonnet_after_the_local_budget(self):
+		# Regression: notes-app ticket 001 (2026-09-06), the walking-skeleton
+		# ticket for a brand-new repo. The local round stalled and created
+		# nothing at all -- no Makefile, no manifest -- so
+		# resolve_verify_command() returned None and the loop broke
+		# immediately via a special "no canonical verification command
+		# resolvable" branch *before* escalation_prompt was ever built --
+		# and, per a second Codex finding, that branch broke unconditionally
+		# after round 1 regardless of max_rounds, contradicting this
+		# module's own documented "Sonnet only after the local budget is
+		# exhausted" contract. Uses max_rounds=2 to prove both: two local
+		# rounds actually run (the budget is honored) before falling
+		# through to the sonnet fallback, which does create the missing
+		# Makefile and succeeds.
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Scaffold the app and its Makefile")
+
+			verify_results = iter([
+				(None, None, False, ""),  # local round 1: still stalled
+				(None, None, False, ""),  # local round 2: still stalled
+				("make verify", True, False, ""),  # after the sonnet pass
+			])
+			real_sh = build_app.sh
+
+			def fake_sh(args, cwd=None, timeout=None, env=None):
+				if args and args[0] == "git":
+					return real_sh(args, cwd=cwd, timeout=timeout, env=env)
+				if args and args[0] == "claude":
+					(root / "Makefile").write_text("verify:\n\t@true\n")
+				return subprocess.CompletedProcess([], 0, pi_output("clean"), "")
+
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", side_effect=lambda ws: next(verify_results)),
+				mock.patch.object(build_app, "sh", side_effect=fake_sh),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=2, containment=False, timeout_minutes=1,
+					sonnet_fallback=True,
+				)
+
+		self.assertEqual([r.agent for r in result.rounds], ["pi-local", "pi-local", "claude-sonnet-5"])
+		self.assertTrue(result.succeeded)
+		self.assertEqual(result.stopped_reason, "Sonnet fallback passed canonical verification")
+
+	def test_route_outage_with_no_verify_command_does_not_burn_a_sonnet_pass(self):
+		# Codex review of PR #5: a full route outage (every assistant turn
+		# errored) produces the exact same symptom as a stalled-but-live
+		# round -- no code ever got a chance to run, so verify_command is
+		# also None. That must still report "model route unreachable" and
+		# stop with no escalation, the same as before the no-verify-command
+		# branch existed -- not spend a billed Sonnet pass repeating an
+		# outage ticket_runner.py's own bounded retry is meant to recover
+		# from once the route is back.
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Scaffold the app and its Makefile")
+			errored_output = json.dumps({
+				"type": "message_end", "message": {"role": "assistant", "stopReason": "error"},
+			})
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=(None, None, False, "")),
+				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, errored_output, "")) as run,
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=3, containment=False, timeout_minutes=1,
+					sonnet_fallback=True,
+				)
+
+		self.assertEqual([r.agent for r in result.rounds], ["pi-local"])
+		self.assertEqual(len(agent_invocation_calls(run)), 1)
+		self.assertFalse(result.succeeded)
+		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
+
+	def test_workspace_fingerprint_is_stable_when_clean_and_detects_real_changes(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			init_repo_with_commit(root)
+
+			clean = build_app.workspace_fingerprint(root)
+			self.assertIsNotNone(clean)
+			self.assertEqual(build_app.workspace_fingerprint(root), clean)
+
+			(root / "seed.txt").write_text("seed\nmore\n")
+			self.assertNotEqual(build_app.workspace_fingerprint(root), clean)
+
+			subprocess.run(["git", "checkout", "--", "seed.txt"], cwd=root, check=True, capture_output=True)
+			self.assertEqual(build_app.workspace_fingerprint(root), clean)
+			(root / "untracked.txt").write_text("new\n")
+			self.assertNotEqual(build_app.workspace_fingerprint(root), clean)
+
+	def test_workspace_fingerprint_returns_none_on_a_non_repo(self):
+		with tempfile.TemporaryDirectory() as directory:
+			self.assertIsNone(build_app.workspace_fingerprint(Path(directory)))
 
 
 def init_repo_with_commit(path: Path) -> str:
@@ -518,6 +814,107 @@ class EnsureGitRepoTests(unittest.TestCase):
 			build_app.ensure_git_repo(workspace)
 
 			self.assertIn("custom/", (workspace / ".gitignore").read_text())
+
+	def test_gitignores_build_evidence_json_too(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "work"
+			workspace.mkdir()
+			init_repo_with_commit(workspace)
+
+			build_app.ensure_git_repo(workspace)
+
+			self.assertIn("BUILD_EVIDENCE.json", (workspace / ".gitignore").read_text())
+
+
+class WriteEvidenceJSONTests(unittest.TestCase):
+	"""BUILD_EVIDENCE.json's shape is a contract with software-factory's own
+	run.AgentEvidence/AgentEvidenceRound Go structs (internal/run/run.go) --
+	these tests pin the exact field set and null-preservation behavior that
+	side actually relies on (cmd/factoryd's loadAgentEvidence
+	json.Unmarshal's this file directly, no translation layer)."""
+
+	def test_writes_evidence_json_matching_run_agent_evidence_shape(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			result = build_app.BuildResult(
+				workspace=workspace,
+				spec_path=workspace / "spec.md",
+				review_policy="advisory",
+				succeeded=True,
+				stopped_reason="canonical verification passed",
+				rounds=[
+					build_app.Round(
+						index=1, agent="pi-local", command=["pi"],
+						pi_returncode=0, pi_timed_out=False,
+						pi_usage={"input_tokens": 100, "output_tokens": 50},
+						traces=[],
+						reviewer=build_app.ReviewSignal("clean", "no issues"),
+						verify_command="make verify", verify_passed=True,
+						verify_timed_out=False, verify_output_tail="",
+						duration_s=12.5,
+					),
+				],
+			)
+
+			evidence_path = build_app.write_evidence_json(result)
+			payload = json.loads(evidence_path.read_text())
+
+		self.assertEqual(evidence_path, workspace / "BUILD_EVIDENCE.json")
+		self.assertEqual(payload["schema_version"], 1)
+		self.assertEqual(payload["review_policy"], "advisory")
+		self.assertIsNone(payload["provider"])
+		self.assertIsNone(payload["model"])
+		self.assertTrue(payload["succeeded"])
+		self.assertEqual(payload["stopped_reason"], "canonical verification passed")
+		self.assertEqual(len(payload["rounds"]), 1)
+		rnd = payload["rounds"][0]
+		self.assertEqual(rnd["index"], 1)
+		self.assertEqual(rnd["agent"], "pi-local")
+		self.assertEqual(rnd["pi_returncode"], 0)
+		self.assertFalse(rnd["pi_timed_out"])
+		self.assertEqual(rnd["usage"], {"input_tokens": 100, "output_tokens": 50})
+		self.assertEqual(rnd["reviewer_outcome"], "clean")
+		self.assertEqual(rnd["reviewer_detail"], "no issues")
+		self.assertTrue(rnd["verify_passed"])
+		self.assertFalse(rnd["verify_timed_out"])
+		self.assertEqual(rnd["duration_s"], 12.5)
+
+	def test_preserves_null_usage_and_null_verify_passed_rather_than_omitting_or_defaulting(self):
+		# run.AgentEvidenceRound's own doc comment: Usage preserves null when
+		# no token-usage event was available (never an empty object standing
+		# in for "unknown"), and VerifyPassed preserves null when no
+		# canonical command was resolvable (never coerced to false).
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			result = build_app.BuildResult(
+				workspace=workspace,
+				spec_path=workspace / "spec.md",
+				rounds=[
+					build_app.Round(
+						index=1, agent="pi-local", command=["pi"],
+						pi_returncode=1, pi_timed_out=True, pi_usage=None,
+						traces=[], reviewer=build_app.ReviewSignal("unavailable", ""),
+						verify_command=None, verify_passed=None,
+						verify_timed_out=False, verify_output_tail="",
+						duration_s=0.0,
+					),
+				],
+			)
+
+			payload = json.loads(build_app.write_evidence_json(result).read_text())
+
+		rnd = payload["rounds"][0]
+		self.assertIsNone(rnd["usage"])
+		self.assertIsNone(rnd["verify_passed"])
+
+	def test_empty_rounds_writes_an_empty_list_not_an_error(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			result = build_app.BuildResult(workspace=workspace, spec_path=workspace / "spec.md")
+
+			payload = json.loads(build_app.write_evidence_json(result).read_text())
+
+		self.assertEqual(payload["rounds"], [])
 
 
 if __name__ == "__main__":

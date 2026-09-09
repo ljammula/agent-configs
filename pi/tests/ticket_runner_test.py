@@ -687,6 +687,55 @@ class StagedPairsTests(unittest.TestCase):
 				"package acceptance // 002\n",
 			)
 
+	def test_python_slices_are_staged_and_ticket_prefixed(self):
+		# Regression found via Codex review of PR #8: STAGED_EXTENSIONS
+		# only ever listed Go/Dart extensions, so a Python pilot's
+		# acceptance suite -- .py slices existed as a real, documented
+		# /contract-plan convention well before this test -- was silently
+		# never staged into the workspace at all under this script's own
+		# gate, and so could neither test the implementation as part of a
+		# ticket_runner.py-driven build nor be protected as frozen oracle
+		# content the way Go/Dart slices already are.
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_2 = pilot_dir / "spec" / "acceptance" / "002"
+			slice_1.mkdir(parents=True)
+			slice_2.mkdir(parents=True)
+			(slice_1 / "test_001_create.py").write_text("# 001\n")
+			(slice_2 / "test_002_list.py").write_text("# 002\n")
+
+			pairs = ticket_runner.staged_pairs(pilot_dir, workspace, upto=2)
+			staged_paths = sorted(str(staged.relative_to(workspace)) for _, staged in pairs)
+
+			self.assertEqual(
+				staged_paths,
+				["acceptance/001_test_001_create.py", "acceptance/002_test_002_list.py"],
+			)
+
+	def test_helpers_py_keeps_its_literal_name_like_go_mod(self):
+		# `from helpers import ...` in every later slice depends on the
+		# staged file being named exactly `helpers.py` -- the usual
+		# `NNN_` prefix would silently break every one of those imports.
+		with tempfile.TemporaryDirectory() as directory:
+			pilot_dir = Path(directory)
+			workspace = pilot_dir / "workspace"
+			workspace.mkdir(parents=True)
+			slice_1 = pilot_dir / "spec" / "acceptance" / "001"
+			slice_1.mkdir(parents=True)
+			(slice_1 / "helpers.py").write_text("def api(): ...\n")
+			(slice_1 / "test_001.py").write_text("from helpers import api\n")
+
+			pairs = ticket_runner.staged_pairs(pilot_dir, workspace, upto=1)
+			staged_paths = sorted(str(staged.relative_to(workspace)) for _, staged in pairs)
+
+			self.assertEqual(
+				staged_paths,
+				["acceptance/001_test_001.py", "acceptance/helpers.py"],
+			)
+
 
 class PriorBoundaryShaTests(unittest.TestCase):
 	"""Real git, no mocks: the bug guarded here is git's own traversal into
