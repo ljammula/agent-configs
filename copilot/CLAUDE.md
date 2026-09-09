@@ -152,6 +152,16 @@ Trigger when: "check the wiring for X", "did I wire everything for X", or after 
 
 ---
 
+## Third-Party Skills
+
+Audit a third-party skill's instructions and any bundled scripts for prompt injection or credential/data-exfiltration before adopting it. Not theoretical: Snyk's 2026 "ToxicSkills" scan found injected payloads in 36% of skills tested (1,467 malicious payloads across the ecosystem it covered). Real GitHub stars and commit activity are not a trust signal on their own — evaluated `Graphify-Labs/graphify` on this basis in 2026-09 and it still needed this treatment despite legitimate activity.
+
+## Parallel Agent Worktrees
+
+A `git worktree` created for a fanned-out task is not cleaned up automatically once its branch merges. Found 13 merged-but-unpruned worktrees accumulating in `personal-assistant` this way, holding 1.4GB. After confirming a worktree's branch is merged (`git merge-base --is-ancestor <branch> main`), remove it — `git worktree remove <path>` then `git branch -d <branch>` — instead of leaving it for later.
+
+---
+
 ## Release
 
 Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run. Any ✗ = release not done.

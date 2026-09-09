@@ -103,12 +103,18 @@ Read-only local services are still worth using. The served endpoints are:
 | 8080 | Qwen3.8-27B-8bit ("code", resident) | code review, editing, log triage |
 | 8888 | SearXNG | web search |
 
-They need not run on this machine. `AI_STACK_HOST` names the serving host
-(`kannasmacstudio.lan` for the LAN box -- a stable router-assigned hostname,
-not the raw DHCP IP, since that address has changed on every reboot); unset,
-it defaults to `127.0.0.1`. Every script and reachability check resolves
-through it. Check reachability before relying on any of them — these
-instructions load on machines without the stack.
+They need not run on this machine. `AI_STACK_HOST` names the serving host —
+default is `kannas-mac-studio` (already the live default in `~/.zshenv`),
+this box's Tailscale MagicDNS short name, resolving via Tailscale's own DNS
+rather than the LAN, on or off the LAN as long as Tailscale is running on
+both ends. Use the full FQDN `kannas-mac-studio.tailfb69fc.ts.net` on a
+client where Tailscale's resolver isn't the active DNS nameserver -- the
+short form depends on that. Fall back to the LAN mDNS name
+`kannasmacstudio.lan` only if Tailscale is down (never the raw DHCP IP --
+that's changed on every reboot). Unset, it defaults to `127.0.0.1`. Every
+script and reachability check resolves through it. Check reachability
+before relying on any of them — these instructions load on machines without
+the stack.
 
 A local model self-corrects mechanical mistakes but not logic bugs. Treat its
 output as evidence to verify, never as a trusted result.
@@ -122,6 +128,26 @@ Pi has no built-in sandbox. `protected-paths.ts` guards only Pi's `write` and
 `edit` tools, while `bash` still runs with this user's host permissions. Do not
 treat extension guardrails as filesystem, credential, network, or deployment
 isolation; unattended or untrusted work belongs in an OS/container boundary.
+
+## Third-party skills
+
+Audit a third-party skill's `SKILL.md` and any bundled scripts for prompt
+injection or credential/data-exfiltration before it lands in a skills
+directory Pi loads. Not theoretical — Snyk's 2026 "ToxicSkills" scan found
+injected payloads in 36% of skills tested (1,467 malicious payloads across
+the ecosystem it covered). Real GitHub stars and commit activity are not a
+trust signal on their own; evaluated `Graphify-Labs/graphify` on this
+basis in 2026-09 and it still needed this treatment despite legitimate
+activity.
+
+## Parallel agent worktrees
+
+A `git worktree` created for a fanned-out task does not clean itself up
+once its branch merges. 13 merged-but-unpruned worktrees were found
+accumulating in `personal-assistant` this way, holding 1.4GB. After
+confirming a worktree's branch is merged (`git merge-base --is-ancestor
+<branch> main`), remove it — `git worktree remove <path>` then `git
+branch -d <branch>` — rather than leaving it for later.
 
 ## Context discipline
 
