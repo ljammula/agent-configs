@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -22,7 +22,12 @@ test("skill root follows the extension symlink back to repository source", async
 	const source = join(import.meta.dirname, "..", "extensions", "stack-skill-overlay.ts");
 	const link = join(installed, "stack-skill-overlay.ts");
 	await symlink(source, link);
-	assert.equal(await resolveStackSkillsRoot(link), join(import.meta.dirname, "..", "skills"));
+	// `source` itself may be a symlink now (pi-harness-hardening is this
+	// extension's authoritative source; agent-configs/pi/extensions/ links
+	// into it) -- resolve to where the file actually lives before deriving
+	// the expected skills root, same as resolveStackSkillsRoot itself does.
+	const realSource = await realpath(source);
+	assert.equal(await resolveStackSkillsRoot(link), join(realSource, "..", "..", "skills"));
 });
 
 test("a repo with no stack evidence receives no skill paths", async () => {

@@ -152,4 +152,16 @@ link "$REPO_ROOT/copilot/CLAUDE.md" "$HOME/.copilot/CLAUDE.md"
 link "$REPO_ROOT/copilot/copilot-instructions.md" "$HOME/.copilot-instructions.md"
 link "$REPO_ROOT/copilot/github-copilot-instructions.md" "$HOME/.github/copilot-instructions.md"
 
+# pi-harness-hardening is now the authoritative source for everything
+# pi-specific that's portable (no hardcoded machine paths or accounts). Most
+# of pi/skills and pi/extensions above are themselves symlinks into that
+# repo now, so the loops above already resolve through it. This machine's
+# own private config -- ai-stack-local.ts's real provider registration,
+# self-review's real account names, settings.json, project-skill-overlay.ts
+# + its daytrix-*/testflight-cut skills, evals/, this AGENTS.md -- stays
+# real (not symlinked) right here, deliberately never in pi-harness-hardening
+# itself: that repo is meant to be publicly redistributable (see its own
+# README's "Global vs. local"), and a symlink or a commit there would hand
+# this machine's real config to anyone who clones or `pi install`s it.
+
 echo "done."

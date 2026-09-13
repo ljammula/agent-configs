@@ -54,6 +54,16 @@ const QWEN38_SAMPLING_PARAMS = {
 export default function (pi: ExtensionAPI) {
   const host = process.env.AI_STACK_HOST || "127.0.0.1";
 
+  // cross-model-review.ts's resolveReviewerConfig() needs AI_PRIMARY_MODEL
+  // to detect a same-model (blind-self-review) reviewer; the public
+  // extension deliberately carries no hardcoded fallback id (nothing there
+  // is "the" primary model repo-wide) and fails safe toward
+  // independent-review without it. This machine's primary model is exactly
+  // the one this file registers, so set it here rather than reintroducing a
+  // personal model path into the public extension. `??=` so an explicit
+  // override (a different eval's own env) still wins.
+  process.env.AI_PRIMARY_MODEL ??= QWEN38_MODEL_ID;
+
   // before_provider_request fires for every provider/model this harness
   // calls, not just this one -- so this must check the model id before
   // touching the payload. Mutates in place (same convention documented for
