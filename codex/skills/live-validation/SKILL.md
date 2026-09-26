@@ -42,7 +42,10 @@ green suite is evidence the *logic* is right, not that the *system* works.
    at the same spot again is a bug to investigate, not flakiness.
 6. **Record it.** Dated write-up in the project's notes repo: setup, timed
    step list (mm:ss), pass/fail, numbered findings. Carry the numbers forward
-   so the next run says "#6, #7 confirmed fixed".
+   so the next run says "#6, #7 confirmed fixed". If the harness deletes its
+   scratch data after a pass, keep the evidence without editing the harness:
+   point its binary variable (e.g. `FACTORYD_BIN`) at a small wrapper that
+   runs the real binary, then copies each run record aside.
 7. **Serialise shared resources.** One live run at a time against any
    single-instance dependency (local model server, device, shared DB),
    including runs started by parallel agents.

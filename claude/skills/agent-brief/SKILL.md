@@ -85,10 +85,16 @@ stall. Check whether the command is still running (`ps aux | grep '[g]o test'`
 or equivalent). If nothing is running and the worktree is dirty, send the exact
 foreground command to run next.
 
+The foreground rule lowers the odds of a stall; it does not prevent one. An
+agent's "finished" notice is a claim too: before trusting a report, confirm
+the branch has a commit and the worktree is clean.
+
 ## Why
 
 - 2026-09-11: five Sonnet agents stalled 15-25 min each waiting on background
-  test monitors; briefs carrying the foreground rule never stalled.
+  test monitors. Later briefs carried the foreground rule and stalled less,
+  but on 2026-09-26 an agent with the rule verbatim still went idle
+  "waiting on its own background work" with a dirty, uncommitted worktree.
 - 2026-09-22: two parallel agents each drove a live run against the
   single-instance local model at once; caught only because the user asked.
 - Sonnet-tier review passes caught a self-referential hash bug and a

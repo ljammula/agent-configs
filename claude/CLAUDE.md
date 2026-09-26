@@ -50,7 +50,8 @@ before pushing.
   self-contained HTML committed in the repo (not a hosted Artifact).
 - Agent customisation (hooks, skills, extensions, prompts for Claude, Codex,
   Copilot, pi) is edited in `~/code/agent-configs`, never at the symlinked
-  destination; rerun `./install.sh` after adding a file.
+  destination; after merge, rerun `./install.sh` from the main checkout,
+  never from a worktree (its links dangle once the worktree is removed).
 
 ## Code Quality
 

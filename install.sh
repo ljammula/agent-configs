@@ -34,7 +34,7 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 # the guardrail's already-unconditional coverage, for guidance the session
 # already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
 # same pattern as PI_STACK_SKILLS's global-unlink list above.
-PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
+PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify pre-pr-review live-validation)
 # Claude-only global skills: agent-brief (Copilot has its own adapted copy)
 # and harvest-learnings (reads Claude Code's transcript format).
 CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings)
