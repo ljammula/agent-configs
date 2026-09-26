@@ -8,7 +8,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORCE="${1:-}"
 
-PORTABLE_SKILLS=(karpathy-guidelines local-search local-summarize docs-verify)
+PORTABLE_SKILLS=(karpathy-guidelines local-search local-summarize docs-verify pre-pr-review live-validation project-bootstrap)
 # Pi-only global skills: no claude/skills or codex/skills counterpart exists,
 # so these aren't in PORTABLE_SKILLS (link_skills silently skips a name whose
 # source dir is missing, but calling them "portable" when they're not would
@@ -35,9 +35,9 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 # already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
 # same pattern as PI_STACK_SKILLS's global-unlink list above.
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
-# Claude-only global skills: workflow lessons harvested from software-factory
-# (pre-PR review, subagent briefs, live validation, new-project setup).
-CLAUDE_ONLY_SKILLS=(pre-pr-review agent-brief live-validation project-bootstrap harvest-learnings)
+# Claude-only global skills: they depend on Claude Code's Agent tool
+# (agent-brief) or its transcript format (harvest-learnings).
+CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 
