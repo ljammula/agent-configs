@@ -38,8 +38,14 @@ the project directory.
 ## Repo layout           <!-- table: path | what it is; flag runtime-state dirs -->
 ## Build, test, verify   <!-- exact commands per toolchain -->
 ## Live validation       <!-- when live-smoke is required before merge -->
+## Patterns that affect how you write code  <!-- the 5-6 non-obvious cross-cutting rules -->
+## Adding a <recurring feature type>        <!-- numbered wiring checklist an agent can self-verify -->
 ## Conventions           <!-- only what the code and config don't already say -->
 ```
+
+One canonical instruction file: `CLAUDE.md` is `@AGENTS.md`; another CLI's
+file (Copilot, Codex) points at it and adds only its own quirks. If the app
+is localised, one line: every user-facing string goes into *all* locale files.
 
 `AGENTS.md` may be read by sandboxed or offline agents, so it holds only what is
 true for every reader; host-only tooling notes go in the README's dev section.
@@ -88,5 +94,12 @@ judgement; re-audit it periodically — software-factory found two
   say why.
 - **Surface the real error.** Every failed step keeps its actual log output;
   multi-check failures report all failing checks, not the first.
+- **Record and gate are separate.** A step that records evidence does not
+  also decide pass/fail unless that is an explicit design choice.
+- **Watch the human half of the loop.** A pipeline with a human-approval step
+  alerts when the human side goes stale; its own metrics stay green forever
+  otherwise. Scheduled jobs are judged by their own state file, not by a
+  notification having been posted, and write a `BLOCKED:` artifact and stop
+  when required input is missing.
 - **A `doctor` command** checks the same config and state the real run will
   use, shares code with the real gate, and offers a fix.

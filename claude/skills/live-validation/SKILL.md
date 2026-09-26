@@ -23,7 +23,9 @@ green suite is evidence the *logic* is right, not that the *system* works.
    fixtures are shaped to pass.
 2. **Check preconditions first.** Probe that each dependency is reachable
    and ask it what it offers (list available models, versions, endpoints)
-   instead of assuming. Then do one small scoped run before the big one.
+   instead of assuming. A stale hostname or DNS entry looks exactly like a
+   dead service; try the alternate route before calling it down. Then do one
+   small scoped run before the big one.
 3. **Script it.** One command (`make live-smoke`, `scripts/<name>-walk`) that
    drives the real entry point end to end and reports pass/fail per step. Keep
    it out of the fast unit suite; it needs real services and takes minutes.
@@ -33,8 +35,11 @@ green suite is evidence the *logic* is right, not that the *system* works.
    is a recurring bug class.
 5. **Judge the outcome, not the exit code.** Check the artifact the user wants
    exists and is right (the PR opened, the file written, the row stored, the
-   page renders). Exit 0 from a verify step that re-ran pre-existing tests is
-   not success.
+   page renders), and confirm from the run's own echoed state (printed
+   config, labels, its state file) which variant actually ran; a mistyped
+   config key can silently fall back to defaults. Exit 0 from a verify step that re-ran pre-existing tests is
+   not success. For UI, look at the screenshots yourself. A retry that fails
+   at the same spot again is a bug to investigate, not flakiness.
 6. **Record it.** Dated write-up in the project's notes repo: setup, timed
    step list (mm:ss), pass/fail, numbered findings. Carry the numbers forward
    so the next run says "#6, #7 confirmed fixed".
@@ -51,6 +56,17 @@ check: "N/N walk steps pass", "time to first PR < 15 min", "0 hand edits",
 "16/16 accepted, 0 false accepts". Track the rate over dated runs; a rising
 number is the signal the system is improving, since review alone has no
 natural stopping point.
+
+## Controls and comparisons
+
+- Before trusting a new check, harness, or container pipeline, push a
+  known-good and a known-bad input through the *real* environment. A missing
+  binary inside the container can fail silently and read as "the fix was
+  wrong".
+- An A/B comparison (two configs, models, or harness arms) needs a confound
+  check: make sure nothing shared (the repo's own AGENTS.md, a global hook)
+  already forces the behaviour you are isolating. Claim a guardrail works only
+  with a with/without ablation, not one run.
 
 ## Test oracles
 

@@ -43,7 +43,12 @@ is in "Why" at the bottom.
      sites? Collapse it; partial updates to copies have shipped real gaps.
 5. **Fix-regression pass.** Re-read your own fixes hunting one thing: did the
    fix for A introduce B.
-6. Push only when steps 1-5 are clean.
+6. **Trust check on automated verdicts.** A clean result from an LLM
+   reviewer, second tool, or CI job counts only if it demonstrably ran on the
+   current diff and produced real output. Reasoning-budget exhaustion or a
+   quota notice looks exactly like "no issues"; when in doubt, probe the
+   reviewer with a known-answer prompt through the same pipeline.
+7. Push only when steps 1-6 are clean.
 
 ## Triage rule
 
