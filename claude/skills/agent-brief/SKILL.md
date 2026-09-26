@@ -27,7 +27,10 @@ A brief is complete when a fresh agent could finish without asking a question:
    (tests green, file X contains Y, command Z exits 0), plus "commit on your
    branch and report the SHA".
 2. **Decided design** — files to touch, interfaces, what is out of scope.
-3. **Exact commands** — build, test, reproduce, with paths.
+3. **Exact commands** — build, test, reproduce, with paths. End the brief
+   with the literal verify command and "stop only when it passes". Tell the
+   agent to derive domain facts (key names, config fields, API shapes) from
+   the source by grep, not from memory.
 4. **Foreground rule**, verbatim: "Run tests and any long command in the
    FOREGROUND with a 600000 ms timeout on the Bash call; do not use a
    background monitor. To wait on external state, use a foreground `until`
@@ -46,8 +49,19 @@ accepting delegated work:
   while pre-existing tests still pass.
 - The diff stays inside the brief's scope; unrelated files riding along get
   reverted or explained.
+- "Diagnosed but not fixed" is a failed task, not partial credit.
 - New tests assert against an independently known expected value, not a value
   the same change just computed.
+
+## Delegating to Codex CLI
+
+Only when the user asks, and only for a large, mechanical task extending an
+existing pattern (e.g. seven tool families shaped like one that exists).
+Run `codex exec -C <dir> --sandbox workspace-write` in the background with a
+long self-contained prompt: what is done, what remains in dependency order,
+constraints ("don't commit or push"). Then rebuild and test from scratch and
+read the whole diff before committing; its summary is a claim. It shares the
+Codex budget, so confirm budget first.
 
 ## Running several agents
 

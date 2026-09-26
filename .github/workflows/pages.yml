@@ -1,0 +1,38 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      # Publish only the site: the root pages, the root docs they link to, and
+      # reports/. pi/ holds absolute symlinks into a local pi-harness-hardening
+      # checkout that do not resolve on the runner and break the artifact tar.
+      - name: Stage site
+        run: |
+          mkdir _site
+          cp ./*.html ./*.md .nojekyll _site/
+          cp -r reports _site/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5

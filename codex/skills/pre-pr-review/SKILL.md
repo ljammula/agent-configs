@@ -14,7 +14,7 @@ is in "Why" at the bottom.
 
 ## Steps
 
-1. **Diff pass.** Run `/code-review --level high` on the change. Fix every
+1. **Diff pass.** Run your strongest available review pass on the change (a fresh-context reviewer, or `codex review` when budget allows). Fix every
    finding with a concrete failure scenario. Done when a re-run finds nothing
    new of that kind.
 2. **Subsystem pass.** When the change wires into existing code, review the
@@ -64,8 +64,8 @@ drive another round.
   anything later becomes a follow-up item.
 - The Codex budget (GitHub App + local `codex` CLI, one shared $20/mo account)
   is usually gone. Leave the App's auto-trigger on, never wait on it or block a
-  merge on it, and run the local `codex` CLI only when the user confirms budget
-  for a specific change.
+  merge on it, and spend a local `codex review` only when the user confirms
+  budget for a specific change.
 - When Codex is live, put this in the PR body: "Review budget — Round 1 of 2.
   Two rounds maximum; nothing is triaged into a third. Report every real,
   high-confidence finding now — correctness, integration seams with existing
@@ -81,10 +81,10 @@ drive another round.
   previous round's own fix introduced (a reused Temporal `GetVersion` id).
 - PR #42: five rounds of P1s, all in untouched adjacent code, missed because
   every local review after round 1 was delta-only.
-- PR #61: one `/code-review --level high` pass missed two P1s in a new
+- PR #61: one high-effort review pass missed two P1s in a new
   mechanism — a worker could forge the relay's spend log line and inflate the
-  log unboundedly. `/code-review` is the best available pass, not a Codex
-  equivalent; step 4 is what closes that gap.
+  log unboundedly. A single general pass is not enough here; step 4 is what
+  closes that gap.
 - PR #52 review swarm (2026-09-05): a sandbox identity check ran only in the
   CLI, never in the daemon that executes; a `uid != 0 && gid != 0` guard
   rejected valid users; resource-limit defaults copied across six sites

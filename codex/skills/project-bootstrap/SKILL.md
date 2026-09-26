@@ -1,7 +1,6 @@
 ---
 name: project-bootstrap
 description: Set up a new (or newly adopted) repo with the working conventions proven on software-factory — AGENTS.md, verify/live-smoke targets, notes repo, plan and follow-up templates.
-disable-model-invocation: true
 ---
 
 # Project bootstrap
@@ -14,7 +13,7 @@ the project directory.
 
 1. **Read first.** Inspect the repo: languages, existing build/test commands,
    CI, docs. Everything below adapts to what exists; nothing overwrites it.
-2. **`AGENTS.md`** (with `CLAUDE.md` containing only `@AGENTS.md`), from the
+2. **`AGENTS.md`** (with `CLAUDE.md` containing only `@AGENTS.md` for Claude Code), from the
    skeleton below. Done when every command in it has been run once and works.
 3. **One verify command.** A `make verify` (or the stack's equivalent) running
    format-check, lint/vet, and the full unit suite. If the repo spans several

@@ -45,7 +45,7 @@ green suite is evidence the *logic* is right, not that the *system* works.
    so the next run says "#6, #7 confirmed fixed".
 7. **Serialise shared resources.** One live run at a time against any
    single-instance dependency (local model server, device, shared DB),
-   including runs started by parallel subagents.
+   including runs started by parallel agents.
 
 Done when the scripted run passes on the current commit and the write-up exists.
 
@@ -80,8 +80,8 @@ natural stopping point.
 
 ## Background processes
 
-Launch long runs with the Bash tool's `run_in_background: true` and no trailing
-`&`. Verify the real process by PID or container, not by the tool's
+Launch long runs through your tool's own background mechanism, not a shell
+`&` on top of it. Verify the real process by PID or container, not by the tool's
 "completed" status. On failure, read the actual log or exception before
 theorising; if the failure left no evidence (empty log, lost artifact), fix
 that first.

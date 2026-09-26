@@ -1,5 +1,27 @@
 Always use the `karpathy-guidelines` skill by default for coding tasks in every session.
 
+## Working defaults
+
+- Merge with `gh pr merge --squash`, run from the main checkout. A rebased
+  branch already on origin: push it as `<name>-rebased` instead of
+  force-pushing.
+- Write commit messages and PR bodies to a file and pass `git commit -F` /
+  `gh ... --body-file`; inline `-m "..."` runs backtick spans as command
+  substitution. Read the message back before pushing.
+- Before creating or pushing a PR: `pre-pr-review` skill.
+- Done means a test covers the changed behaviour and you exercised the
+  feature in the running app. For pipeline, integration, CLI, or UI-flow
+  changes: `live-validation` skill.
+- After fixing a bug, name what stops it recurring (a regression test, a
+  check, a rule).
+- Triage findings by concrete failure scenario: correctness and usability bugs
+  first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
+- Docs describe the current state only: concise, tables and lists, flows as
+  plain-ASCII diagrams. History goes to the project's notes repo. Paths use
+  `~/`, never a user-specific absolute path.
+- Agent customisation is edited in `~/code/agent-configs`, never at the
+  symlinked destination.
+
 ## Local execution harness
 
 Do not delegate code edits to a local model via Aider — benchmarked in

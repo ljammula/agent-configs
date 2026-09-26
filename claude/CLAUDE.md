@@ -32,13 +32,25 @@ before pushing.
   PR from that (force-push is blocked by the permission classifier).
 - Before creating or pushing a PR: `pre-pr-review` skill.
 - Before delegating to a subagent: `agent-brief` skill.
-- "Done" for pipeline, integration, CLI, or UI-flow changes means a live run
-  passed: `live-validation` skill.
+- Done means a test covers the changed behaviour and you exercised the
+  feature in the running app; a clean build or analyzer run is not done. For
+  pipeline, integration, CLI, or UI-flow changes: `live-validation` skill.
 - Triage findings by concrete failure scenario: correctness and usability bugs
   first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
+- After fixing a bug, name what stops it recurring (a regression test, a
+  check, a rule) in the same report.
+- When you have the access to do a step, do it; hand the user a `! ...`
+  command only when a permission or the classifier blocks you.
 - Docs describe the current state only: concise, tables and lists, flows as
   plain-ASCII diagrams in `text` code blocks. History goes to the project's notes
-  repo.
+  repo. Names say plainly what a thing does. Paths use `~/`, never a
+  user-specific absolute path.
+- Investigations get three doc tiers, kept in sync: a README pointer, a
+  dated append-only history plus a current-status file, and a colleague-facing
+  self-contained HTML committed in the repo (not a hosted Artifact).
+- Agent customisation (hooks, skills, extensions, prompts for Claude, Codex,
+  Copilot, pi) is edited in `~/code/agent-configs`, never at the symlinked
+  destination; rerun `./install.sh` after adding a file.
 
 ## Code Quality
 

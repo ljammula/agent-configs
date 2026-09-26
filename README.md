@@ -74,6 +74,7 @@ agent-configs/
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
 │       ├── feature-dev/       # Spec-to-ship feature workflow: spec, branch, l10n, PR, roadmap
 │       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
+│       ├── harvest-learnings/ # Promote a project's lessons into global CLAUDE.md/skills/hooks (user-invoked)
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
 │       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud WebSearch, machine-conditional
 │       ├── live-validation/   # "Done" = a live end-to-end run passed; exit bars, oracles, dated records
@@ -97,6 +98,9 @@ agent-configs/
 │       ├── karpathy-guidelines/
 │       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud search, machine-conditional
 │       ├── local-summarize/   # Triage large logs via local model before reading into context, machine-conditional
+│       ├── live-validation/
+│       ├── pre-pr-review/
+│       ├── project-bootstrap/
 │       ├── pr-remediate/
 │       ├── release/
 │       ├── self-review/       # + optional local second opinion
@@ -176,6 +180,11 @@ scope:
   `local-summarize` are useful across projects. `docs-verify` is also broadly
   applicable, though its helper-script path is installation-specific. Keep
   these in this machine-config repository and install them globally.
+- **Harvested workflow skills:** `pre-pr-review`, `live-validation`, and
+  `project-bootstrap` hold lessons promoted from project work; Claude and
+  Codex each get a copy (Codex's is agent-neutral) and Copilot a condensed
+  runbook in `copilot/CLAUDE.md`. `agent-brief` and `harvest-learnings` are
+  Claude-only: they depend on its Agent tool and transcript format.
 - **Portable workflow cores with project overlays:** `before-done` and
   `wiring-verify` express useful general workflows. A shared core should keep
   generic checks (diff review, formatting, linting, tests, worktree/CI checks),
