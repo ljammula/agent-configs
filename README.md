@@ -65,8 +65,10 @@ agent-configs/
 │   ├── settings.json          # Model, plugins, hook config
 │   ├── hooks/
 │   │   ├── rtk-rewrite.sh    # PreToolUse hook: rewrites Bash commands via rtk
-│   │   └── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
+│   │   ├── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
+│   │   └── bash-guard.sh     # PreToolUse hook: blocks backticks in inline commit/PR text, bg + trailing &
 │   └── skills/
+│       ├── agent-brief/       # Subagent briefs: model tier, foreground tests, shared resources, result checks
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
 │       ├── before-done/       # Completion gate: local review, lint, fmt, l10n, spec, CI, review threads (+ scripts/)
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
@@ -74,8 +76,11 @@ agent-configs/
 │       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
 │       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud WebSearch, machine-conditional
+│       ├── live-validation/   # "Done" = a live end-to-end run passed; exit bars, oracles, dated records
 │       ├── local-summarize/   # Triage large logs via local model before reading into context, machine-conditional
 │       ├── pr-remediate/      # Force-push rebase recovery (user-triggered only)
+│       ├── pre-pr-review/     # Self-review passes before a PR + 2-round post-PR review cap
+│       ├── project-bootstrap/ # New-repo setup: AGENTS.md, verify/live-smoke, notes repo, templates (user-invoked)
 │       ├── release/           # Tag-driven deploy: verify, semver tag, watch CI, smoke prod
 │       ├── self-review/       # Two-account PR review via narsimha-j + optional local second opinion, guaranteed switch-back
 │       └── wiring-verify/    # N-step feature wiring completeness checker

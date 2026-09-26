@@ -35,6 +35,9 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 # already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
 # same pattern as PI_STACK_SKILLS's global-unlink list above.
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
+# Claude-only global skills: workflow lessons harvested from software-factory
+# (pre-PR review, subagent briefs, live validation, new-project setup).
+CLAUDE_ONLY_SKILLS=(pre-pr-review agent-brief live-validation project-bootstrap)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 
@@ -94,8 +97,9 @@ link "$REPO_ROOT/claude/RTK.md" "$HOME/.claude/RTK.md"
 link "$REPO_ROOT/claude/settings.json" "$HOME/.claude/settings.json"
 link "$REPO_ROOT/claude/hooks/rtk-rewrite.sh" "$HOME/.claude/hooks/rtk-rewrite.sh"
 link "$REPO_ROOT/claude/hooks/format-on-edit.sh" "$HOME/.claude/hooks/format-on-edit.sh"
+link "$REPO_ROOT/claude/hooks/bash-guard.sh" "$HOME/.claude/hooks/bash-guard.sh"
 unlink_managed_skills "$HOME/.claude/skills" "$REPO_ROOT/claude/skills" "${PROJECT_SKILLS[@]}"
-link_skills "$REPO_ROOT/claude/skills" "$HOME/.claude/skills" "${PORTABLE_SKILLS[@]}"
+link_skills "$REPO_ROOT/claude/skills" "$HOME/.claude/skills" "${PORTABLE_SKILLS[@]}" "${CLAUDE_ONLY_SKILLS[@]}"
 unlink_legacy_core_skill "$HOME/.claude/skills/before-done" "$REPO_ROOT/claude/skills/before-done"
 unlink_legacy_core_skill "$HOME/.claude/skills/wiring-verify" "$REPO_ROOT/claude/skills/wiring-verify"
 link "$REPO_ROOT/pi/skills/before-done" "$HOME/.claude/skills/before-done"
