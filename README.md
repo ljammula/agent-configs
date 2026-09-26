@@ -109,7 +109,10 @@ agent-configs/
 ├── copilot/                   # GitHub Copilot CLI — ~/.copilot/ + ~/.github/
 │   ├── CLAUDE.md              # Karpathy + before-done + release + self-review guidelines (+ machine-conditional local second-opinion notes)
 │   ├── copilot-instructions.md         # ~/.copilot-instructions.md (global)
-│   └── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
+│   ├── github-copilot-instructions.md  # ~/.github/copilot-instructions.md
+│   └── skills/                # ~/.copilot/skills/ (Copilot CLI SKILL.md format)
+│       ├── agent-brief/       # Adapted: fleet subagents, /tasks
+│       └── pre-pr-review/     # Adapted: /review + /rubber-duck
 │
 └── pi/                        # pi coding agent — ~/.pi/agent/  (see pi/README.md)
     ├── AGENTS.md              # Global instructions, tuned for the local model (96K window)
@@ -160,6 +163,7 @@ agent-configs/
 | `copilot/CLAUDE.md` | `~/.copilot/CLAUDE.md` |
 | `copilot/copilot-instructions.md` | `~/.copilot-instructions.md` |
 | `copilot/github-copilot-instructions.md` | `~/.github/copilot-instructions.md` |
+| `copilot/skills/<name>/`, `codex/skills/{live-validation,project-bootstrap}/` | `~/.copilot/skills/<name>` |
 | `pi/AGENTS.md` | `~/.pi/agent/AGENTS.md` |
 | `pi/extensions/<name>.ts`, `pi/extensions/<name>/` | `~/.pi/agent/extensions/<name>` |
 | `pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
@@ -183,8 +187,10 @@ scope:
 - **Harvested workflow skills:** `pre-pr-review`, `live-validation`, and
   `project-bootstrap` hold lessons promoted from project work; Claude and
   Codex each get a copy (Codex's is agent-neutral) and Copilot a condensed
-  runbook in `copilot/CLAUDE.md`. `agent-brief` and `harvest-learnings` are
-  Claude-only: they depend on its Agent tool and transcript format.
+  Copilot CLI gets real skills in `~/.copilot/skills/`: adapted copies of
+  `pre-pr-review` and `agent-brief` in `copilot/skills/`, plus the Codex
+  copies of `live-validation` and `project-bootstrap`. `harvest-learnings` is
+  Claude-only: it reads Claude Code's transcript format.
 - **Portable workflow cores with project overlays:** `before-done` and
   `wiring-verify` express useful general workflows. A shared core should keep
   generic checks (diff review, formatting, linting, tests, worktree/CI checks),

@@ -35,9 +35,11 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 # already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
 # same pattern as PI_STACK_SKILLS's global-unlink list above.
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
-# Claude-only global skills: they depend on Claude Code's Agent tool
-# (agent-brief) or its transcript format (harvest-learnings).
+# Claude-only global skills: agent-brief (Copilot has its own adapted copy)
+# and harvest-learnings (reads Claude Code's transcript format).
 CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings)
+COPILOT_SKILLS=(pre-pr-review agent-brief)
+COPILOT_SHARED_SKILLS=(live-validation project-bootstrap)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 
@@ -155,6 +157,12 @@ done
 link "$REPO_ROOT/copilot/CLAUDE.md" "$HOME/.copilot/CLAUDE.md"
 link "$REPO_ROOT/copilot/copilot-instructions.md" "$HOME/.copilot-instructions.md"
 link "$REPO_ROOT/copilot/github-copilot-instructions.md" "$HOME/.github/copilot-instructions.md"
+# Copilot CLI reads ~/.copilot/skills/<name>/SKILL.md. pre-pr-review and
+# agent-brief are adapted to Copilot's own commands (/review, /rubber-duck,
+# fleet subagents); live-validation and project-bootstrap reuse the
+# agent-neutral Codex copies rather than keeping a third copy.
+link_skills "$REPO_ROOT/copilot/skills" "$HOME/.copilot/skills" "${COPILOT_SKILLS[@]}"
+link_skills "$REPO_ROOT/codex/skills" "$HOME/.copilot/skills" "${COPILOT_SHARED_SKILLS[@]}"
 
 # pi-harness-hardening is now the authoritative source for everything
 # pi-specific that's portable (no hardcoded machine paths or accounts). Most
