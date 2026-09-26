@@ -15,6 +15,10 @@
           {
             "type": "command",
             "command": "jq -r '.tool_input.command' | { read -r cmd; cmd=\"${cmd#rtk }\"; echo \"$cmd\" | grep -qE '^git (commit|add)' && git_dir=$(git rev-parse --git-dir 2>/dev/null) && [ -n \"$git_dir\" ] && [ -f \"$git_dir/index.lock\" ] && rm -f \"$git_dir/index.lock\"; } 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "/Users/kanna/.claude/hooks/bash-guard.sh"
           }
         ]
       }
