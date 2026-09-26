@@ -189,8 +189,10 @@ scope:
   Codex each get a copy (Codex's is agent-neutral) and Copilot a condensed
   Copilot CLI gets real skills in `~/.copilot/skills/`: adapted copies of
   `pre-pr-review` and `agent-brief` in `copilot/skills/`, plus the Codex
-  copies of `live-validation` and `project-bootstrap`. `harvest-learnings` is
-  Claude-only: it reads Claude Code's transcript format.
+  copies of `live-validation` and `project-bootstrap`. pi gets
+  `pre-pr-review` and `live-validation` from pi-harness-hardening (linked via
+  `pi/skills/`). `harvest-learnings` is Claude-only: it reads Claude Code's
+  transcript format.
 - **Portable workflow cores with project overlays:** `before-done` and
   `wiring-verify` express useful general workflows. A shared core should keep
   generic checks (diff review, formatting, linting, tests, worktree/CI checks),
