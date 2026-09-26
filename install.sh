@@ -37,7 +37,7 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify)
 # Claude-only global skills: workflow lessons harvested from software-factory
 # (pre-PR review, subagent briefs, live validation, new-project setup).
-CLAUDE_ONLY_SKILLS=(pre-pr-review agent-brief live-validation project-bootstrap)
+CLAUDE_ONLY_SKILLS=(pre-pr-review agent-brief live-validation project-bootstrap harvest-learnings)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
 DISABLED_PI_EXTENSIONS=(co-change-suggest.ts continuation-nudge.ts)
 

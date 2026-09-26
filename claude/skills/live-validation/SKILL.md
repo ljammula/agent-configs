@@ -21,21 +21,24 @@ green suite is evidence the *logic* is right, not that the *system* works.
    git, a real (disposable) target repo or dataset — not fixtures. A new
    heuristic or check runs against at least one real, messy input; synthetic
    fixtures are shaped to pass.
-2. **Script it.** One command (`make live-smoke`, `scripts/<name>-walk`) that
+2. **Check preconditions first.** Probe that each dependency is reachable
+   and ask it what it offers (list available models, versions, endpoints)
+   instead of assuming. Then do one small scoped run before the big one.
+3. **Script it.** One command (`make live-smoke`, `scripts/<name>-walk`) that
    drives the real entry point end to end and reports pass/fail per step. Keep
    it out of the fast unit suite; it needs real services and takes minutes.
-3. **Run the user's path, not yours.** Start from what a user would type or
+4. **Run the user's path, not yours.** Start from what a user would type or
    click: copy-paste every command the help text, README, or error message
    tells them to run. A documented command, flag, or target that doesn't exist
    is a recurring bug class.
-4. **Judge the outcome, not the exit code.** Check the artifact the user wants
+5. **Judge the outcome, not the exit code.** Check the artifact the user wants
    exists and is right (the PR opened, the file written, the row stored, the
    page renders). Exit 0 from a verify step that re-ran pre-existing tests is
    not success.
-5. **Record it.** Dated write-up in the project's notes repo: setup, timed
+6. **Record it.** Dated write-up in the project's notes repo: setup, timed
    step list (mm:ss), pass/fail, numbered findings. Carry the numbers forward
    so the next run says "#6, #7 confirmed fixed".
-6. **Serialise shared resources.** One live run at a time against any
+7. **Serialise shared resources.** One live run at a time against any
    single-instance dependency (local model server, device, shared DB),
    including runs started by parallel subagents.
 

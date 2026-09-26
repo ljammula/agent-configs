@@ -74,6 +74,7 @@ agent-configs/
 │       ├── docs-verify/       # Doc edits verified: link liveness, rename sweeps (+ scripts/)
 │       ├── feature-dev/       # Spec-to-ship feature workflow: spec, branch, l10n, PR, roadmap
 │       ├── frontend-dev/      # Flutter discipline: red/green TDD, list ordering, l10n, visual verify
+│       ├── harvest-learnings/ # Promote a project's lessons into global CLAUDE.md/skills/hooks (user-invoked)
 │       ├── karpathy-guidelines/ # Coding discipline: surgical changes, simplicity
 │       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud WebSearch, machine-conditional
 │       ├── live-validation/   # "Done" = a live end-to-end run passed; exit bars, oracles, dated records
