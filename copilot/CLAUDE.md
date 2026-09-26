@@ -182,30 +182,7 @@ Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run. Any ✗
 - After fixing a bug, name what stops it recurring.
 - Fix correctness and usability bugs first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
 - Docs: current state only, concise, ASCII diagrams, `~/` paths. History goes to the notes repo.
-
-## Pre-PR Review
-
-The first push should already be correct. Before creating or pushing a PR:
-1. Review the diff with your strongest pass; fix every finding with a concrete failure scenario.
-2. Review the touched files as they now stand, not only the diff — bugs hide in adjacent untouched code.
-3. Re-derive each documented invariant (replay determinism, crash-safety ordering, fail-closed gates) for this edit.
-4. If an untrusted party (sandboxed worker, API caller, uploaded content) can influence the new mechanism: what does it control, can its echoed data forge the trusted signal, can it inflate what the trusted reader processes, does an error fail closed, is the check enforced at every entry point?
-5. Re-read your own fixes for "did fixing A introduce B".
-6. A clean automated verdict counts only if it ran on the current diff with real output.
-
-After the PR is open: two review rounds maximum, stated to the reviewer up front; later findings become follow-ups.
-
-## Live Validation
-
-Unit tests and review validate logic, not the system. For pipeline, integration, CLI, or UI-flow changes:
-1. Check preconditions first: each dependency reachable, ask what it offers instead of assuming, then one small scoped run.
-2. Drive the real entry point end to end with one scripted command against real dependencies.
-3. Follow the user's path: copy-paste every command the help text and README tell them to run.
-4. Judge the artifact (PR opened, row stored, page renders), not the exit code; confirm which variant actually ran.
-5. A retry that fails at the same spot again is a bug, not flakiness.
-6. Record a dated write-up with timed steps and numbered findings; carry the numbers forward.
-
-Plans name a checkable exit bar before work starts ("N/N steps pass", "0 hand edits").
+- Before creating or pushing a PR: `pre-pr-review` skill. Before delegating to a subagent: `agent-brief` skill. For pipeline, integration, CLI, or UI-flow changes: `live-validation` skill.
 
 ---
 
