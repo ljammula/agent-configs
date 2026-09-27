@@ -91,3 +91,16 @@ drive another round.
   drifted twice.
 - PR #23 ran seven Codex App rounds, and PR #133 four, mostly on the previous
   round's fixes. That is where the two-round cap comes from.
+
+## Cost and speed rules
+
+- **Review sized by risk:** trust-boundary or correctness-critical code gets the
+  strongest review on the session's main model; routine changes (wiring,
+  tests, docs, deletions, UI) get one mid-tier-model review with a review
+  brief (checks, file:line + failure scenario per finding, a word cap).
+- **One round by default;** a second only when round 1 found correctness bugs;
+  two maximum.
+- **Verdict by exit status:** rebase on the latest main, run the full suite
+  with output saved to a file, require exit 0 (or explain each failure). A
+  `head`-truncated grep of test output hid a real package failure and left
+  `main` red (buildgate #303 → hotfix #304, 2026-09-27).
