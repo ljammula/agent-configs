@@ -180,6 +180,8 @@ Deploy path: tag `vX.Y.Z` → GitHub Actions `deploy.yml` → Cloud Run. Any ✗
 - Commit/PR text goes through a file (`git commit -F`, `gh --body-file`); inline `-m "..."` mangles backticks. Read it back before pushing.
 - Done = a test covers the change and you exercised the feature in the running app.
 - After fixing a bug, name what stops it recurring.
+- Confirm a plan's diagnosis by measuring before building its fix; when the evidence disagrees, ship the smaller correct change and say so.
+- Edit a script only when no run of it is in progress (bash reads it as it executes); experiment on a copy.
 - Fix correctness and usability bugs first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
 - Docs: current state only, concise, ASCII diagrams, `~/` paths. History goes to the notes repo.
 - Before creating or pushing a PR: `pre-pr-review` skill. Before delegating to a subagent: `agent-brief` skill. For pipeline, integration, CLI, or UI-flow changes: `live-validation` skill.

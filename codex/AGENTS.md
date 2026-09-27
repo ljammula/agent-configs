@@ -14,6 +14,11 @@ Always use the `karpathy-guidelines` skill by default for coding tasks in every 
   changes: `live-validation` skill.
 - After fixing a bug, name what stops it recurring (a regression test, a
   check, a rule).
+- Confirm a plan's diagnosis before building its fix: measure (log
+  timestamps, a trace). When the evidence disagrees, ship the smaller correct
+  change and say so.
+- Edit a script only when no run of it is in progress: bash reads a script as
+  it executes. Experiment on a copy.
 - Triage findings by concrete failure scenario: correctness and usability bugs
   first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
 - Docs describe the current state only: concise, tables and lists, flows as

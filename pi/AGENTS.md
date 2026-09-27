@@ -9,6 +9,11 @@ directives far more reliably than they infer intent from prose.
 1. Read before you write. Never edit a file you have not read in this session.
 2. If a check fails, say so plainly with the failing output. Never report
    success you did not observe.
+3. Confirm a plan's diagnosis before building its fix: measure (log
+   timestamps, a trace). When the evidence disagrees, ship the smaller
+   correct change and say so.
+4. Edit a script only when no run of it is in progress: bash reads a script
+   as it executes. Experiment on a copy.
 
 Surgical changes, minimum code, surfacing assumptions, and a verifiable
 success criterion are `karpathy-guidelines` territory, not restated here —
@@ -158,5 +163,8 @@ Protect it:
   token-optimized proxy over the same commands and cuts 60-90% of the output.
   `rtk gain` shows the savings. Never pipe a whole log file into context; use
   the `local-summarize` skill to find the interesting line range first.
+- RTK's summary of test output can be wrong (a passing `go test` run once
+  read "No tests found"). Save test output to a file, read it with
+  `rtk proxy grep`, and decide pass or fail by exit status.
 - Read the specific part of a file you need (`offset`/`limit`), not the whole file.
 - Search with `rg` and read the hits, rather than reading files to search them.
