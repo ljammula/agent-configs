@@ -39,6 +39,11 @@ before pushing.
   first; cosmetic or no-trigger findings get a minimal fix or a follow-up note.
 - After fixing a bug, name what stops it recurring (a regression test, a
   check, a rule) in the same report.
+- Confirm a plan's diagnosis before building its fix: measure (log
+  timestamps, a trace). When the evidence disagrees, ship the smaller correct
+  change and say so (buildgate #310: 2 of 3 "slow because of X" tests weren't).
+- Edit a script only when no run of it is in progress: bash reads a script as
+  it executes. Experiment on a copy.
 - When you have the access to do a step, do it; hand the user a `! ...`
   command only when a permission or the classifier blocks you.
 - Docs describe the current state only: concise, tables and lists, flows as

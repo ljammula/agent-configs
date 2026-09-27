@@ -27,3 +27,9 @@ All other commands are automatically rewritten by the Claude Code hook.
 Example: `git status` → `rtk git status` (transparent, 0 tokens overhead)
 
 Refer to CLAUDE.md for full command reference.
+
+## Test output
+
+RTK's summary of test output can be wrong (a passing `go test` run once read
+"No tests found", 2026-09-27). Save test output to a file, read it with
+`rtk proxy cat`/`rtk proxy grep`, and decide pass or fail by exit status.
