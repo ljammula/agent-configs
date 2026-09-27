@@ -13,11 +13,12 @@ description: >
 | Work | Model |
 |---|---|
 | Implementation from a decided design; "reproduce → read log → patch → rebuild → rerun" loops | `model: "sonnet"` |
-| Log summarisation, status polling, mechanical low-stakes edits | `model: "haiku"` |
-| Adversarial review, correctness-critical validation, merge-conflict resolution, final PR judgement | main model; never downgrade |
+| Routine review: wiring, tests, docs, deletions, UI (an Agent with a review brief: the checks to make, file:line + failure scenario per finding, a word cap) | `model: "sonnet"` |
+| Mechanical edits against a known list (docs, claims tables, plans, renames, deletions), log summarisation, status polling | `model: "haiku"` |
+| Design passes (read-only, one phase ahead); review of trust-boundary or correctness-critical code (credentials, sandbox/relay, gates, workflow determinism); merge-conflict resolution; final PR judgement | main model; never downgrade |
 
-The main model writes the brief, reviews the branch, integrates, and merges.
-Cheap tiers do the iteration.
+The main model designs, writes the brief, reviews trust-boundary code,
+integrates, and merges. Cheap tiers do the iteration and routine review.
 
 ## Brief contents
 
@@ -27,10 +28,17 @@ A brief is complete when a fresh agent could finish without asking a question:
    (tests green, file X contains Y, command Z exits 0), plus "commit on your
    branch and report the SHA".
 2. **Decided design** — files to touch, interfaces, what is out of scope.
+   Check the design (a read-only design pass) before writing the brief: most
+   fix rounds come from a brief that describes the design imprecisely. In a
+   large file, name the exact functions and line ranges instead of letting
+   the agent explore it.
 3. **Exact commands** — build, test, reproduce, with paths. End the brief
    with the literal verify command and "stop only when it passes". Tell the
    agent to derive domain facts (key names, config fields, API shapes) from
-   the source by grep, not from memory.
+   the source by grep, not from memory. Iterate with targeted tests
+   (`go test -run <pattern>` or equivalent); run the full suite once before
+   committing and the slow or race variant once before merge. Judge a run by
+   its exit status, never by a `head`-truncated grep of its output.
 4. **Foreground rule**, verbatim: "Run tests and any long command in the
    FOREGROUND with a 600000 ms timeout on the Bash call; do not use a
    background monitor. To wait on external state, use a foreground `until`
@@ -38,6 +46,8 @@ A brief is complete when a fresh agent could finish without asking a question:
 5. **Shared resources** — name any single-instance resource the agent will hit
    (a local model server, a device, a port, a database) and say whether it may
    use it now or must wait its turn.
+6. **Report format** — SHA, files changed, test result lines, deviations from
+   the brief. No narrative: the report lands in the orchestrator's context.
 
 ## Checking the result
 
@@ -55,13 +65,14 @@ accepting delegated work:
 
 ## Delegating to Codex CLI
 
-Only when the user asks, and only for a large, mechanical task extending an
-existing pattern (e.g. seven tool families shaped like one that exists).
-Run `codex exec -C <dir> --sandbox workspace-write` in the background with a
-long self-contained prompt: what is done, what remains in dependency order,
-constraints ("don't commit or push"). Then rebuild and test from scratch and
-read the whole diff before committing; its summary is a claim. It shares the
-Codex budget, so confirm budget first.
+Not for implementation: the budget is small, and its `workspace-write`
+sandbox cannot commit in a git worktree (the worktree's `.git` is outside the
+writable root), so every result needs a second pass. When the user offers
+Codex, spend it on validation runs. If the user explicitly asks for a Codex
+implementation anyway, run `codex exec -C <dir> --sandbox workspace-write` in
+the background with a long self-contained prompt (what is done, what remains
+in dependency order, "don't commit or push"), then rebuild, test and read the
+whole diff before committing; its summary is a claim.
 
 ## Running several agents
 
@@ -70,6 +81,11 @@ Codex budget, so confirm budget first.
   process, so a one-at-a-time rule written for sequential jobs does not cover
   them. To pause one mid-flight, pause the thing actually making the calls
   (e.g. `docker pause <container>`), not only the host process.
+- Run 2-3 agents at a time on disjoint files. More than that caused CPU
+  contention (timing-sensitive tests flake) and rebase conflicts on shared
+  files. Merge each as soon as it is green so rebase distance stays short.
+- Don't route reviews through a single-instance local model: one round takes
+  20+ minutes and reviews queue behind each other.
 - Each implementation agent works in its own worktree and branch. After its
   branch merges (`git merge-base --is-ancestor <branch> main`), remove it with
   `git worktree remove <path>` and `git branch -d <branch>`. The auto-mode
@@ -98,5 +114,11 @@ the branch has a commit and the worktree is clean.
 - 2026-09-22: two parallel agents each drove a live run against the
   single-instance local model at once; caught only because the user asked.
 - Sonnet-tier review passes caught a self-referential hash bug and a
-  locale-dependent ordering bug in one session — the reason review stays on
-  the main tier.
+  locale-dependent ordering bug in one session — the reason trust-boundary and
+  correctness-critical review stays on the main tier.
+- 2026-09-27 (buildgate, ten PRs): implementation agents used 200k-950k
+  tokens each and reviews 100k-170k per round; about half of agent spend was
+  fix rounds from briefs that described the design imprecisely. A read-only
+  design pass before the brief caught three plan errors for the price of one
+  review. Four parallel agents caused load flakes and a rebase that broke
+  `main`; Codex output needed a second pass every time.

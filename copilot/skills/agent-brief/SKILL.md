@@ -101,3 +101,24 @@ the branch has a commit and the worktree is clean.
 - Sonnet-tier review passes caught a self-referential hash bug and a
   locale-dependent ordering bug in one session — the reason review stays on
   the main tier.
+
+## Cost and speed rules
+
+- **Tiering:** a mid-tier model (e.g. Sonnet) implements from a checked design
+  and does routine reviews (wiring, tests, docs, deletions, UI); the cheapest
+  capable model (e.g. Haiku) does mechanical edits against a known list and
+  polling; the session's main model designs, reviews trust-boundary or
+  correctness-critical code (credentials, sandbox/relay, gates, workflow
+  determinism) and makes the final merge call.
+- **Design before the brief:** a read-only design pass first; in a large file
+  name exact functions and line ranges. About half of delegated spend in one
+  measured session (2026-09-27) was fix rounds from imprecise briefs.
+- **Tests:** iterate with targeted tests, run the full suite once before
+  committing and the slow/race variant once before merge; judge by exit
+  status, never a `head`-truncated grep.
+- **Report format:** SHA, files, test result lines, deviations — no narrative.
+- **Parallelism:** 2-3 delegated tasks at a time on disjoint files; merge each
+  as soon as it is green. Don't route reviews through a single-instance local
+  model (20+ minutes per round).
+- **Codex CLI:** not for implementation (small budget; its sandbox cannot
+  commit in a git worktree); spend it on validation runs when the user offers.

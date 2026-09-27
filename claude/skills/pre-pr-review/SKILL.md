@@ -14,9 +14,13 @@ is in "Why" at the bottom.
 
 ## Steps
 
-1. **Diff pass.** Run `/code-review --level high` on the change. Fix every
-   finding with a concrete failure scenario. Done when a re-run finds nothing
-   new of that kind.
+1. **Diff pass, sized by risk.** Trust-boundary or correctness-critical code
+   (credentials, sandbox/relay, gates, state machines, workflow determinism):
+   `/code-review --level high` on the main model. Routine changes (wiring,
+   tests, docs, deletions, UI): one Sonnet review agent with a review brief
+   (the checks to make, file:line and failure scenario per finding, a word
+   cap), or `/code-review --level medium`. Fix every finding with a concrete
+   failure scenario.
 2. **Subsystem pass.** When the change wires into existing code, review the
    touched files *as they now stand*, not just the diff. A delta-only review
    cannot find a bug in adjacent code nobody touched this time. Done when
@@ -43,12 +47,17 @@ is in "Why" at the bottom.
      sites? Collapse it; partial updates to copies have shipped real gaps.
 5. **Fix-regression pass.** Re-read your own fixes hunting one thing: did the
    fix for A introduce B.
-6. **Trust check on automated verdicts.** A clean result from an LLM
+6. **Verdict by exit status.** Rebase on the latest main, run the full suite
+   with output saved to a file, and require exit 0 (or explain each failure,
+   e.g. a load flake that passes alone). Never judge from a `head`-truncated
+   grep: test output is full of failure-looking lines, and the real
+   `FAIL <package>` line can fall past the cut.
+7. **Trust check on automated verdicts.** A clean result from an LLM
    reviewer, second tool, or CI job counts only if it demonstrably ran on the
    current diff and produced real output. Reasoning-budget exhaustion or a
    quota notice looks exactly like "no issues"; when in doubt, probe the
    reviewer with a known-answer prompt through the same pipeline.
-7. Push only when steps 1-6 are clean.
+8. Push only when steps 1-7 are clean.
 
 ## Triage rule
 
@@ -58,10 +67,12 @@ action does the wrong thing). A finding with no realistic trigger gets a minimal
 mitigation or a follow-up note. Cosmetic findings get a quick fix and never
 drive another round.
 
-## Post-PR rounds
+## Review rounds
 
-- **Two rounds maximum**, stated to the reviewer up front. Merge after round 2;
-  anything later becomes a follow-up item.
+- **One round by default.** Run a second only when round 1 found correctness
+  bugs; re-check the fixes in it. **Two rounds maximum**, stated to the
+  reviewer up front. Merge after round 2; anything later becomes a follow-up
+  item.
 - The Codex budget (GitHub App + local `codex` CLI, one shared $20/mo account)
   is usually gone. Leave the App's auto-trigger on, never wait on it or block a
   merge on it, and run the local `codex` CLI only when the user confirms budget
@@ -91,3 +102,9 @@ drive another round.
   drifted twice.
 - PR #23 ran seven Codex App rounds, and PR #133 four, mostly on the previous
   round's fixes. That is where the two-round cap comes from.
+- buildgate #303 (2026-09-27): after a rebase, the merge check was
+  `go test ./... | grep FAIL | head -12`; the real `internal/sandbox` failure
+  was past line 12 behind doctor-output "FAIL" rows, and `main` stayed red
+  until hotfix #304. Same session: two `high` rounds on every PR cost
+  100k-170k tokens each, including test-only and doc PRs where a Sonnet
+  review found the same issues — hence review sized by risk.
