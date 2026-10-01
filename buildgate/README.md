@@ -18,5 +18,5 @@ Every skill here must be:
 | Role | Skills |
 |---|---|
 | planning | none (spec/plan drafting prompts are fully specified) |
-| execution | `buildgate-ticket-done`, `buildgate-guidelines`, `buildgate-tdd`, `buildgate-diagnosing`, and the stack skills `go-service`, `python-service`, `typescript-service`, `flutter-app`, `kafka-processing`, `postgres-change`, `temporal-go` (each applies only when the repo matches) |
+| execution | `buildgate-ticket-done`, `buildgate-guidelines`, `buildgate-tdd`, `buildgate-diagnosing`, and the stack skills `go-service`, `typescript-service`, `flutter-app`, `kafka-processing`, `postgres-change`, `temporal-go` (each applies only when the repo matches) |
 | review | none (single-turn, JSON-only prompts; skills add tokens and invite tool use) |
