@@ -18,7 +18,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // once :8080 pointed at the identical mtplx/18084 backend -- two public
 // listeners fronting one upstream served no purpose. Do not re-add it
 // without a corresponding live route in ai-stack's proxy_config.py.
-const QWEN38_MODEL_ID = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
+// AI_STACK_MODEL_ID / AI_STACK_CONTEXT_WINDOW override the served model and
+// its admission budget without editing this file (2026-10-03: used to trial
+// Qwen3.8-Flash-Next behind the same :8080 route, where mtplx caps context at
+// 81920 on a 96 GB Mac and the proxy rejects past ~62K). Defaults unchanged.
+const QWEN38_MODEL_ID =
+  process.env.AI_STACK_MODEL_ID || "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
+const CONTEXT_WINDOW = Number(process.env.AI_STACK_CONTEXT_WINDOW) || 124518;
 // mlx-vlm's OpenAI-compatible server defaults unset sampling fields to
 // greedy/no-op values (temperature 0.0, no top_p/top_k/presence_penalty
 // clamp at all) whenever a request omits them, and pi-coding-agent has no
@@ -92,7 +98,7 @@ export default function (pi: ExtensionAPI) {
     models: [
       {
         id: QWEN38_MODEL_ID,
-        name: "Qwen3.8-27B-MTPLX-Optimized-Quality",
+        name: QWEN38_MODEL_ID.split("/").pop() ?? QWEN38_MODEL_ID,
         // Was `reasoning: false`, which made pi send no thinking-control
         // field at all (every thinkingFormat branch in pi-ai's buildParams
         // is gated on model.reasoning) -- not an explicit "thinking off",
@@ -175,7 +181,7 @@ export default function (pi: ExtensionAPI) {
         // local-model-bench/STATUS.md's 2026-08-07 entry for the failure
         // this caused and pi-harness-validation-status.md's
         // context-budget-awareness finding.
-        contextWindow: 124518,
+        contextWindow: CONTEXT_WINDOW,
         maxTokens: 16384,
       },
     ],

@@ -32,7 +32,10 @@ INSTALLED_AGENT_DIR = Path.home() / ".pi" / "agent"
 # Swapped 2026-08-21: :8080 now serves the mtplx runtime's
 # Qwen3.8-27B-MTPLX-Optimized-Quality, not the prior dedicated 8-bit mlx-vlm
 # instance -- see local-ai-stack.md's ":8080 swap to mtplx" section.
-MODEL = "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
+# AI_STACK_MODEL_ID overrides (must match extensions/ai-stack-local.ts).
+MODEL = os.environ.get(
+    "AI_STACK_MODEL_ID", "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
+)
 DEFAULT_SEED = 20260802
 
 # Three difficulty strata, both primary languages, and both full-stack tasks.
