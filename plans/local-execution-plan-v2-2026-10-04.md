@@ -51,18 +51,26 @@ spec → plan → ticket bundle      ──►      per ticket: lean pi, thinkin
 
 ### 1. The ticket bundle (Claude's output — the hand-off contract)
 
-Per feature, committed in the target repo (e.g. `spec/`):
-- `spec.md` — numbered requirements, including every behaviour the tests
+Handed to buildgate with
+`factoryd submit -spec-file spec.md -plan-dir tickets/ <workspace>` (buildgate
+#466/#467): no drafting or planning model call — the request goes straight to
+**your** `spec_review`, then `plan_review`. Rejecting at either review makes
+buildgate's *planning role* revise the document from your feedback, so the
+planning role must be routed to Claude, not the local model. Per feature:
+- `spec.md` — in **buildgate's spec skeleton** (the drafted spec's headings,
+  in order, with numbered acceptance criteria), listing every behaviour the tests
   check (status codes, error texts, ordering, idempotency semantics, which
   fields a role may change). *The 4 unfair battery tickets are the checklist
   of what gets forgotten.*
-- `tickets/NNN.spec.md` in **buildgate's ticket format**
+- `tickets/001.spec.md`, `002.spec.md`, … in dependency order, together
+  covering every acceptance criterion, in **buildgate's ticket format**
   (`internal/ticketspec`): headers `Verify-Command`, `Allowed-Files`,
   `Required-Changed-Files`, `Required-Content`, `Tests-Required`; body Goal /
   Plan / Out of scope. One package, ≤150 changed lines, files pre-created as
   stubs, naming the tests this ticket must turn green.
-- `acceptance/NNN/` — tests written **before** implementation, then frozen
-  (hash recorded).
+- Acceptance tests written **before** implementation and committed in the
+  workspace before `submit`; each ticket's `Verify-Command` runs the ones it
+  must turn green (frozen, hash recorded).
 - Bundle checks run automatically before execution (cheap, local):
   (a) tests fail on the stubs; (b) every requirement maps to ≥1 ticket and
   ≥1 test; (c) stubs build/type-check; (d) *test self-check* — tests pass on
@@ -127,7 +135,7 @@ local planning/review roles that v2 moves to Claude or gates.
 | **M2** | Lean pi | strip extensions to the essentials; keep thinking on | regression suite pass rate ≥ today's, time per task lower |
 | **M3** | Hand-off contract | Claude skill/prompt that emits ticket bundles; automatic bundle checks (fail-on-stub, coverage map, stub build) | bundles for the regression suite's tasks have **no spec gaps** |
 | **M4a** | buildgate smoke on this Mac | one small real feature through buildgate: planning role → Claude, execution → local Qwen via pi, gates on, Colima sized per budget | completes end to end, tickets committed and accepted, **zero memory aborts** |
-| **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue (`queue-run`) | a queued feature runs unattended overnight end to end |
+| **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue = requests submitted to the `factoryd worker` (Temporal; `queue-run` was removed in buildgate #447), lost steps park in `resume_review` for the morning | a queued feature runs unattended overnight end to end |
 | **M5** | Proven on real work | 3 real features from the user's backlog (personal-assistant, budget app, …): Claude plans, the Studio builds | **≥80% of tickets pass gates and review with no human code edits, ≤1 re-plan per feature**; Claude tokens used recorded |
 
 ## Measurement
