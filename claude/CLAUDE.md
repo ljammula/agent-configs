@@ -65,6 +65,26 @@ with no hacks or unclear logic. Its budget (GitHub App + local `codex` CLI, one
 shared $20/mo account) is usually exhausted: see `pre-pr-review` for how that
 changes the review flow.
 
+## Design standards
+
+For reliability, maintainability and extensibility, in every coding task, on
+new and changed code:
+
+- A function has at most 25 decision points (cyclomatic complexity). The
+  `complexity-on-edit` hook reports a Go or Python function that is over the
+  limit and new, or grew; split it before reporting done. Hold the same limit
+  by hand in other languages.
+- Code reaches a dependency that does I/O (database, HTTP, queue, cache,
+  clock, filesystem) through an interface declared by the code that uses it.
+- Unit tests use a fake or mock of that interface. A live dependency belongs
+  in an integration test.
+- One responsibility per function, type and file. Split by responsibility
+  when adding to one that already has its own.
+- Existing code over the limit stays as it is unless the task touches it;
+  never make it worse. Follow the repository's own structure where it has one.
+- Where a repository's verify command can run the same checks (complexity,
+  import layering), add them there so every agent and human hits them.
+
 ## Coding Guidelines
 
 Always apply the `karpathy-guidelines` skill when writing, reviewing, or refactoring code. Invoke it via the Skill tool at the start of any coding task.

@@ -30,6 +30,11 @@
             "type": "command",
             "command": "/Users/kanna/.claude/hooks/format-on-edit.sh 2>/dev/null || true",
             "statusMessage": "Formatting edited file"
+          },
+          {
+            "type": "command",
+            "command": "/Users/kanna/.claude/hooks/complexity-on-edit.sh",
+            "statusMessage": "Checking function complexity"
           }
         ]
       }

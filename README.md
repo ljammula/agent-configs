@@ -66,7 +66,8 @@ agent-configs/
 │   ├── hooks/
 │   │   ├── rtk-rewrite.sh    # PreToolUse hook: rewrites Bash commands via rtk
 │   │   ├── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
-│   │   └── bash-guard.sh     # PreToolUse hook: blocks backticks in inline commit/PR text, bg + trailing &
+│   │   ├── bash-guard.sh     # PreToolUse hook: blocks backticks in inline commit/PR text, bg + trailing &
+│   │   └── complexity-on-edit.sh # PostToolUse hook: reports an edited Go/Python function over 25 decision points (needs gocyclo, ruff)
 │   └── skills/
 │       ├── agent-brief/       # Subagent briefs: model tier, foreground tests, shared resources, result checks
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
@@ -156,6 +157,7 @@ agent-configs/
 | `claude/settings.json` | `~/.claude/settings.json` |
 | `claude/hooks/rtk-rewrite.sh` | `~/.claude/hooks/rtk-rewrite.sh` |
 | `claude/hooks/format-on-edit.sh` | `~/.claude/hooks/format-on-edit.sh` |
+| `claude/hooks/complexity-on-edit.sh` | `~/.claude/hooks/complexity-on-edit.sh` |
 | `claude/skills/<name>/` (whole dir) | `~/.claude/skills/<name>` |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` |
 | `codex/RTK.md` | `~/.codex/RTK.md` |
