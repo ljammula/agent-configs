@@ -1,5 +1,8 @@
 # Plan: Sonnet-parity code quality from a deterministic local pipeline
 
+> **Superseded 2026-10-04 by [local-execution-plan-v2-2026-10-04.md](local-execution-plan-v2-2026-10-04.md).** Kept for history; its core (tests first, test self-check, small tickets, seeds) is folded into v2 and its heavier machinery is deferred.
+
+
 **Date:** 2026-10-03. **Status:** plan only. Decisions taken (§7): **Claude
 plans, local inference executes**; software-factory/buildgate is the single
 pipeline home; best-of-N batches run overnight. **Goal:** a task planned by Claude and executed by the local stack
