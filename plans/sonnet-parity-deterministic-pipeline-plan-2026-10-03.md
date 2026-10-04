@@ -164,17 +164,19 @@ frozen and hash-pinned before execution starts (see "Planning by Claude").
 - **Parity battery** (backlog P1, never run): ≥20 tasks — the 7 bench tasks,
   the 4 Harbor ports, plus ~10 real tickets from your repos (brownfield),
   stratified small/medium/full-app. Hidden tests the pipeline never sees.
-- **Arms:** (a) Claude Sonnet solo via Claude Code on the same task text,
-  (b) the target pipeline — Claude plans, local executes, (c) local
-  execution of the *same* frozen Claude plan without the new gates/best-of-N
-  (isolates what execution-side work adds), (d) stock pi baseline. **n = 3 runs per task per arm**
-  (seeded for the local arms).
+- **Arms (Sonnet-solo runs excluded by the user, 2026-10-03):** (b) the
+  target pipeline — Claude plans, local executes; (c) local execution of the
+  *same* frozen Claude plan without the new gates/best-of-N (isolates what
+  execution-side work adds); (d) stock pi baseline; (e) current harness.
+  **Sonnet reference** = already-recorded Sonnet results on the shared tasks
+  (local-model-bench: 6/7 on the 7-task suite, 3/3 on `go/lru-cache`,
+  29–147 s/task) plus the published numbers; no new Sonnet-solo spend.
 - **Metrics:** hidden-test pass rate (primary); mutation score of the
   produced tests; lint/race/analyzer clean; blind diff-quality grading by a
   third model (correctness, simplicity, edge cases) without arm labels;
   wall-clock and cost.
-- **Parity = ** local pass rate ≥ Sonnet's on the held-out half of the
-  battery, defect rate (confirmed review findings, analyzer/race hits) not
+- **Parity = ** arm (b) pass rate ≥ the recorded Sonnet reference on the
+  tasks where one exists, and ≥ arm (d)/(e) everywhere, defect rate (confirmed review findings, analyzer/race hits) not
   worse, at any wall-clock (time is the accepted trade).
 - **Ablation rule:** every harness feature must show a non-negative effect
   on this battery or it is removed — the 08-20 baseline-beats-harness result
@@ -184,7 +186,7 @@ frozen and hash-pinned before execution starts (see "Planning by Claude").
 
 | Phase | Work | Exit criterion |
 |---|---|---|
-| **0. Baseline** (first) | Build the parity battery; run Sonnet + stock pi + current harness, n=3 | Numbers for all three arms; tasks where Sonnet beats local identified |
+| **0. Baseline** (first) | Build the parity battery; run stock pi (d) + current harness (e), n=3, overnight | Local baselines for every task; tasks below the Sonnet reference identified |
 | **1. Substrate** | Seeds everywhere, single-stream pipeline mode, evidence bundle + replay; converge on one pipeline home (D2) and retire the diverged copy | A ticket replays byte-identically from its bundle 3/3 |
 | **2. Planning compiler** | Contract stubs, tests-first oracles, oracle self-check (fail-on-stub + mutant kill), ≤150-line micro-tickets with pre-created files | 0 vacuous oracles on the battery; ticket graph never halts on an oracle bug |
 | **3. Gates** | Per-language gate packs incl. `-race`, analyzers, changed-line coverage, mutation score | Re-running the historical misses (LRU K/V, bookmarks race) is caught by a gate, not by luck |
