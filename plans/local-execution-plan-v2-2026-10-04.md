@@ -56,9 +56,11 @@ Per feature, committed in the target repo (e.g. `spec/`):
   check (status codes, error texts, ordering, idempotency semantics, which
   fields a role may change). *The 4 unfair battery tickets are the checklist
   of what gets forgotten.*
-- `tickets/NNN.md` — one package, ≤150 changed lines, `Allowed-Files`, files
-  pre-created as stubs, the tests this ticket must turn green, and the
-  `Verify-Command`.
+- `tickets/NNN.spec.md` in **buildgate's ticket format**
+  (`internal/ticketspec`): headers `Verify-Command`, `Allowed-Files`,
+  `Required-Changed-Files`, `Required-Content`, `Tests-Required`; body Goal /
+  Plan / Out of scope. One package, ≤150 changed lines, files pre-created as
+  stubs, naming the tests this ticket must turn green.
 - `acceptance/NNN/` — tests written **before** implementation, then frozen
   (hash recorded).
 - Bundle checks run automatically before execution (cheap, local):
@@ -89,18 +91,30 @@ Per feature, committed in the target repo (e.g. `spec/`):
 - **Morning report**: per ticket pass/fail/escalated, attempts used, time,
   confirmed review findings, diff links.
 
-Home: the existing **`pi-harness-hardening` `ticket_runner.py` + `build_app.py`
-path** (12/12 pilot tickets, 8 unaided). buildgate (`software-factory`) is
-adopted only if sandboxing or replay become necessary (revised D2).
+**Home: buildgate (`software-factory`, `factoryd`)** for autonomous runs
+(D2, confirmed 2026-10-04). Reasons: every build runs in a Docker sandbox
+with no network (model via `inference-relay`, packages via
+`registry-proxy`) — required for unattended runs on real repos; it already
+has model roles (planning → Claude, execution → local Qwen, review),
+enforced ticket headers, diff-scope / full-suite / tests-added /
+spec-conformity gates, Temporal resume and pinned evidence; and its human
+checkpoints (spec, plan, PR review) match "Claude plans, you merge". pi stays
+the inner harness (lean). The `pi-harness-hardening` `ticket_runner.py`
+path is frozen as the fallback, not developed further.
+
+Known risks to retire early (M4a): September proving-ground runs had 0/7
+tickets accepted (agent left the diff uncommitted), oracle drafting failed
+100% (timeouts) and spec-conformity was often "unavailable" — all on the
+local planning/review roles that v2 moves to Claude or gates.
 
 ### 3. The machine (boring and reliable)
 
 | Resource | Rule |
 |---|---|
-| RAM budget (96 GB, 90 GB wired) | Qwen ~40 GB (12 GB RAM session bank) + gemma ~16 GB + OS/apps ~10 GB + prefill headroom |
+| RAM budget (96 GB, 90 GB wired) | Qwen ~40 GB (12 GB RAM session bank) + gemma ~16 GB + Colima VM ~6–8 GB + Temporal/factoryd ~1–2 GB + OS/apps ~8 GB + prefill headroom (~10 GB). If it does not fit, gemma is loaded only for review windows |
 | Qwen session bank | **12 GB permanently** (`MTPLX_SESSION_BANK_MAX_BYTES`, `serve_mtplx.sh` default) — ~3.5 GB per 30K-token session |
 | Proxy idle-clear | live-footprint measurement, 54 GB TTL / 60 GB hard ceiling (ai-stack `1bcb71b`) |
-| Overnight runs | Colima (Open WebUI, SearXNG) and Whisper off; on when interactive |
+| Overnight runs | Colima **on** (buildgate's sandbox and builds run in its VM); Open WebUI/SearXNG containers and Whisper off; size the Colima VM for Go/Flutter builds (≥6–8 GB) and count it in the budget |
 | 2 TB NVMe (Thunderbolt) | mtplx SSD session bank, rollback/cold models, Go/Flutter/Docker build caches — disk and wear relief, not RAM |
 | Concurrency | 1 stream for quality runs; 2-stream aggregate throughput measured separately later |
 | Throughput expectation | ~10–15 min per ticket → ~30–50 tickets per night |
@@ -112,7 +126,8 @@ adopted only if sandboxing or replay become necessary (revised D2).
 | **M1** | Stable machine | 12 GB bank as default; on-demand services; memory budget check before overnight runs; 2 TB drive for caches/cold models | one full night with **zero memory aborts** |
 | **M2** | Lean pi | strip extensions to the essentials; keep thinking on | regression suite pass rate ≥ today's, time per task lower |
 | **M3** | Hand-off contract | Claude skill/prompt that emits ticket bundles; automatic bundle checks (fail-on-stub, coverage map, stub build) | bundles for the regression suite's tasks have **no spec gaps** |
-| **M4** | Executor loop | `ticket_runner`: seeded attempts, repair rounds from gate output, review report, Claude escalation, morning report; overnight queue | a queued feature runs unattended overnight end to end |
+| **M4a** | buildgate smoke on this Mac | one small real feature through buildgate: planning role → Claude, execution → local Qwen via pi, gates on, Colima sized per budget | completes end to end, tickets committed and accepted, **zero memory aborts** |
+| **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue (`queue-run`) | a queued feature runs unattended overnight end to end |
 | **M5** | Proven on real work | 3 real features from the user's backlog (personal-assistant, budget app, …): Claude plans, the Studio builds | **≥80% of tickets pass gates and review with no human code edits, ≤1 re-plan per feature**; Claude tokens used recorded |
 
 ## Measurement
@@ -130,14 +145,16 @@ adopted only if sandboxing or replay become necessary (revised D2).
 ## Decisions
 
 - **D1 — Claude plans, local executes** (unchanged).
-- **D2 — revised:** start on the lean `ticket_runner` + pi path; buildgate
-  only if needed.
+- **D2 — buildgate** (`software-factory`) is the home for autonomous runs,
+  with lean pi as the inner harness; `ticket_runner` is the frozen fallback.
+  (Briefly revised toward `ticket_runner` earlier on 2026-10-04, then
+  confirmed back to buildgate by the user for containment.)
 - **D3 — overnight batches** (unchanged).
 
 ## Deferred (from v1) until M5 shows they are needed
 
-Mutation-score gate; byte-level replay and evidence bundles; best-of-N
-selection by score (v2 uses first-green); context packs beyond Allowed-Files;
+Mutation-score gate; byte-level replay beyond what buildgate already pins;
+best-of-N selection by score (v2 uses first-green); context packs beyond Allowed-Files;
 the full 20-task × 3 parity battery; harness ablation as a separate phase
 (v2 strips to lean pi directly).
 
