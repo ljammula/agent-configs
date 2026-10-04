@@ -1,0 +1,5 @@
+{"type":"turn_start"}
+not valid json, a truncated line from a killed process
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Insufficient memory: shed caches, retry later."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"mentions insufficient memory in passing, not an abort"}],"stopReason":"stop"}}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"insufficient memory: the Mac ran out of memory it can hand out without compressing during this prefill."}}

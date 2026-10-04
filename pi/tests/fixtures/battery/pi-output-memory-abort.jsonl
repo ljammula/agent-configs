@@ -1,0 +1,8 @@
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[]}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Looking at the code now."}],"stopReason":"stop"}}
+{"type":"turn_end","message":{"role":"assistant","stopReason":"stop"}}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[]}}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"insufficient memory: the Mac ran out of memory it can hand out without compressing during this prefill (macOS compressed 17.1 GiB more of other apps' memory over the last 261.223 s of prefills). The prefill stopped before its next chunk; the engine shed its caches and stays up. A retry can succeed once other apps give memory back: close some apps and try again, or shorten the prompt."}}
+{"type":"turn_end","message":{"role":"assistant","stopReason":"error"}}
