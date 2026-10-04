@@ -1,9 +1,9 @@
 # Plan: Sonnet-parity code quality from a deterministic local pipeline
 
-**Date:** 2026-10-03. **Status:** plan only. Decisions taken (§7): fully
-local planning with no human checkpoint, software-factory/buildgate as the
-single pipeline home, best-of-N batches run overnight. **Goal:** a task handed to the local stack (Qwen3.8-27B
-writer, gemma-4-26b reviewer, pi harness) produces code whose correctness
+**Date:** 2026-10-03. **Status:** plan only. Decisions taken (§7): **Claude
+plans, local inference executes**; software-factory/buildgate is the single
+pipeline home; best-of-N batches run overnight. **Goal:** a task planned by Claude and executed by the local stack
+(Qwen3.8-27B writer, gemma-4-26b reviewer, pi harness) produces code whose correctness
 and quality match what Claude Sonnet produces on the same task, through a
 pipeline whose control flow, inputs and acceptance decisions are
 deterministic and replayable.
@@ -64,10 +64,12 @@ selection** problem more than a model problem.
                                        commit + evidence bundle
 ```
 
+Stages 1–3 run on **Claude** (buildgate `planning` role on an Anthropic
+route); stages 4–8 run **only on local inference**. The planning output is
+frozen and hash-pinned before execution starts (see "Planning by Claude").
+
 1. **Spec** — numbered acceptance criteria, non-goals, affected packages
-   (buildgate `draft_spec.py` format). No human checkpoint (D1), so the
-   planning stages carry their own automatic checks (see "Planning without
-   a human" below).
+   (buildgate `draft_spec.py` format).
 2. **Contract + oracles** — public interfaces (types, signatures, API
    shapes) written as compilable stubs, plus the acceptance tests for every
    criterion, written *before* implementation and then frozen (hash-pinned).
@@ -112,36 +114,37 @@ selection** problem more than a model problem.
    seed. Pure function of recorded data ⇒ deterministic. If none pass:
    halt with the evidence bundle (no silent widening).
 
-### Planning without a human (consequence of D1)
+### Planning by Claude (D1)
 
-Local planning is where past runs failed (oracle drafting timed out 100%, a
-plan contradicted itself), and nothing downstream can repair a wrong spec or
-a wrong test. With no human checkpoint, these become hard gates on the
-planning output:
-
-- **Best-of-N planning too:** draft 3 seeded spec/contract candidates;
-  select deterministically by the checks below (all must pass), then
-  fewest open questions, then lowest seed.
-- **Coverage check:** every acceptance criterion maps to ≥1 ticket and ≥1
-  oracle test; every ticket maps back to a criterion (no orphans).
-- **Contradiction check:** gemma reads spec + ticket graph and lists
-  conflicting statements; Qwen verifies each in a fresh call (the same
-  reviewer+verifier pattern that halved review false positives).
-  Any confirmed conflict → redraft.
-- **Compile check:** contract stubs must build and type-check.
-- **Oracle self-check, strengthened:** tests must (1) fail on stubs, (2)
-  pass on an *independently generated* reference implementation (separate
-  seed, no access to the tests) — a test that no plausible implementation
-  passes is itself wrong — and (3) kill planted mutants of that reference.
-- **Small planning calls:** draft oracles one criterion per call with a
-  bounded context (the 15-minute oracle-drafting timeouts came from
-  oversized single calls).
-- **Escalation rule:** if Phase 0/2 shows local planning below the parity
-  bar on the battery, the D1 decision is revisited with that data rather
-  than shipping a known-weak planner.
+- **Scope of the cloud call:** spec, interface contract (compilable stubs),
+  acceptance tests for every criterion, and the micro-ticket graph. Claude
+  writes no implementation code; execution never calls the cloud
+  (`--sonnet-fallback` stays off so results are attributable to local
+  inference).
+- **Frozen plan = the deterministic boundary.** The Claude API has no seed,
+  so planning is not reproducible; instead it runs once, and its output
+  (spec, contract, tests, tickets, model id, prompt hashes) is committed and
+  hash-pinned as the input to execution. Every later stage is seeded and
+  replays byte-identically from that bundle. Re-planning is an explicit,
+  recorded event, never an automatic retry.
+- **Checks still applied to Claude's plan** (cheap, deterministic, and they
+  catch planning mistakes before local time is spent):
+  - coverage: every criterion → ≥1 ticket and ≥1 test; every ticket → a
+    criterion;
+  - stubs build and type-check;
+  - oracle self-check: tests fail on the stubs, pass on an independently
+    generated *local* reference implementation (separate seed, never sees
+    the tests), and kill planted mutants of it. A failure goes back to
+    Claude with the evidence for one re-plan.
+- **Ticket sizing for the local executor:** ≤150 changed lines, one
+  package, files pre-created, each ticket naming the tests it must turn
+  green — written for Qwen3.8-27B's strengths, not Claude's.
+- **Human checkpoint:** optional (off by default); the parity battery
+  decides whether one is needed.
 
 ## 4. Determinism substrate
 
+- Planning is pinned, not seeded (see "Planning by Claude").
 - Send explicit `seed` (and fixed temperature/top_p/top_k) on every model
   call from build_app/ticket_runner and the pi provider; derive seeds
   deterministically from (task id, ticket id, attempt index).
@@ -161,8 +164,10 @@ planning output:
 - **Parity battery** (backlog P1, never run): ≥20 tasks — the 7 bench tasks,
   the 4 Harbor ports, plus ~10 real tickets from your repos (brownfield),
   stratified small/medium/full-app. Hidden tests the pipeline never sees.
-- **Arms:** (a) Claude Sonnet via Claude Code on the same task text, (b)
-  local pipeline, (c) stock pi baseline. **n = 3 runs per task per arm**
+- **Arms:** (a) Claude Sonnet solo via Claude Code on the same task text,
+  (b) the target pipeline — Claude plans, local executes, (c) local
+  execution of the *same* frozen Claude plan without the new gates/best-of-N
+  (isolates what execution-side work adds), (d) stock pi baseline. **n = 3 runs per task per arm**
   (seeded for the local arms).
 - **Metrics:** hidden-test pass rate (primary); mutation score of the
   produced tests; lint/race/analyzer clean; blind diff-quality grading by a
@@ -189,10 +194,10 @@ planning output:
 
 ## 7. Decisions (taken 2026-10-03)
 
-- **D1 — Who plans? → All local, no human checkpoint.** (Alternatives
-  considered: Claude for spec/contract/oracles; local with a human
-  checkpoint.) Consequence: the "Planning without a human" gates in §3 are
-  mandatory, and the escalation rule there applies.
+- **D1 — Who plans? → Claude plans, local inference executes.** Claude
+  produces spec, contract, tests and tickets once per feature; Qwen/gemma do
+  all implementation, review and repair. (Earlier the same day this was
+  recorded as all-local with no checkpoint; changed by the user.)
 - **D2 — One pipeline home → software-factory/buildgate**, with pi as its
   inner agent. pi-harness-hardening's `build_app.py`/`ticket_runner.py` are
   frozen as the lightweight path (or retired once buildgate covers it); no
@@ -202,11 +207,11 @@ planning output:
 
 ## 8. Risks / honest limits
 
-- With D1 = local planning and no checkpoint, quality is capped by local
-  spec/oracle quality; the planning gates reduce but don't remove that
-  ceiling, and a spec that is wrong-but-consistent passes every automatic
-  check. The parity battery is what will show whether that ceiling is
-  below Sonnet.
+- Quality is now bounded by Claude's plan plus local execution. A plan that
+  is wrong-but-consistent still passes the automatic checks; arm (b) vs arm
+  (a) on the battery shows whether that matters in practice.
+- Planning needs network and Anthropic API spend per feature; execution is
+  fully local and free.
 - Mutation testing and best-of-N multiply wall-clock; tickets must stay small
   for this to be tolerable.
 - n=3 on ~20 tasks still has wide error bars; parity claims should be stated
