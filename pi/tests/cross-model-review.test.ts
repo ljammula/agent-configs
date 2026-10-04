@@ -6,9 +6,12 @@ import test from "node:test";
 import {
 	default as reviewer,
 	parseVerdict,
+	parseVerification,
 	renderFindings,
 	requestReview,
+	requestVerification,
 	resolveReviewerConfig,
+	resolveVerifierConfig,
 } from "../extensions/cross-model-review.ts";
 import qualityGate from "../extensions/quality-gate.ts";
 import { ExtensionHarness, type ExecCall } from "./extension-api-harness.ts";
@@ -648,3 +651,127 @@ test("quality-gate and the reviewer both react to repeated agent_end firings wit
 		globalThis.fetch = previousFetch;
 	}
 });
+
+test("settlement verifier needs an independent reviewer and a known primary model", () => {
+	const independent = resolveReviewerConfig({ ...primary, AI_REVIEW_BASE_URL: "http://host:8081/v1", AI_REVIEW_MODEL: "reviewer" });
+	assert.deepEqual(resolveVerifierConfig(independent, {}), { enabled: true, baseUrl: "http://host:8080/v1", model });
+	assert.equal(resolveVerifierConfig(independent, { AI_REVIEW_VERIFY: "0" }).reason, "opted-out");
+	const noPrimary = resolveReviewerConfig({ AI_REVIEW_BASE_URL: "http://host:8081/v1", AI_REVIEW_MODEL: "reviewer" });
+	assert.equal(resolveVerifierConfig(noPrimary, {}).reason, "no-primary-model");
+	const self = resolveReviewerConfig({ ...primary, AI_REVIEW_BASE_URL: primary.AI_PRIMARY_BASE_URL, AI_REVIEW_MODEL: model, AI_REVIEW_ALLOW_SELF: "1" });
+	assert.equal(resolveVerifierConfig(self, {}).reason, "reviewer-not-independent");
+});
+
+test("verifier output is parsed leniently from prose-wrapped JSON", () => {
+	assert.deepEqual([...(parseVerification('Sure.\n```json\n{"analysis":"x","verdicts":[{"index":0,"real":false},{"index":1,"real":true}]}\n```') ?? [])], [1]);
+	assert.equal(parseVerification("no json here"), undefined);
+	assert.equal(parseVerification('{"analysis":"missing verdicts"}'), undefined);
+});
+
+test("verification splits findings into confirmed and rejected, and never claims a verdict on failure", async () => {
+	const verifier = { enabled: true, baseUrl: "http://host:8080/v1", model };
+	const findings = [
+		{ file: "a.ts", severity: "bug" as const, issue: "real bug" },
+		{ file: "b.ts", severity: "bug" as const, issue: "imagined bug" },
+	];
+	let body: any;
+	const reply = (content: string) =>
+		(async (_url: unknown, init: any) => {
+			body = JSON.parse(init.body);
+			return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) } as Response;
+		}) as typeof fetch;
+	const split = await requestVerification(verifier, "spec", "diff", findings, undefined, reply('{"analysis":"","verdicts":[{"index":0,"real":true},{"index":1,"real":false}]}'));
+	assert.equal(split.outcome, "flagged");
+	assert.deepEqual(split.confirmed.map((f) => f.file), ["a.ts"]);
+	assert.deepEqual(split.rejected.map((f) => f.file), ["b.ts"]);
+	assert.equal(body.response_format, undefined, "primary route runs speculative decoding; no response_format");
+	const none = await requestVerification(verifier, "spec", "diff", findings, undefined, reply('{"analysis":"","verdicts":[]}'));
+	assert.equal(none.outcome, "clean");
+	assert.equal((await requestVerification(verifier, "spec", "diff", findings, undefined, reply("garbled"))).reason, "unparseable");
+	const rejected = await requestVerification(verifier, "spec", "diff", findings, undefined, (async () => ({ ok: false, status: 503 }) as Response) as typeof fetch);
+	assert.equal(rejected.outcome, "transient");
+	assert.equal(rejected.status, 503);
+});
+
+function verifyHarnessEnv(extra: Record<string, string> = {}) {
+	const keys = ["AI_REVIEW_BASE_URL", "AI_REVIEW_MODEL", "AI_PRIMARY_BASE_URL", "AI_PRIMARY_MODEL", "AI_REVIEW_VERIFY"];
+	const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+	Object.assign(process.env, { AI_REVIEW_BASE_URL: "http://review/v1", AI_REVIEW_MODEL: "reviewer", AI_PRIMARY_BASE_URL: "http://primary/v1", AI_PRIMARY_MODEL: "writer", ...extra });
+	return () => {
+		for (const key of keys) {
+			if (previous[key] === undefined) delete process.env[key];
+			else process.env[key] = previous[key];
+		}
+	};
+}
+
+function settlementHarness() {
+	const branch = [{ id: "user-1", type: "message", message: { role: "user", content: "fix it" } }];
+	return new ExtensionHarness({
+		branch,
+		exec: ({ command, args }: ExecCall) => {
+			if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "base\n", stderr: "", killed: false };
+			if (command === "git" && args[0] === "diff") return { code: 0, stdout: "diff --git a/app.ts b/app.ts\n+changed\n", stderr: "", killed: false };
+			if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "", killed: false };
+			return { code: 1, stdout: "", stderr: "", killed: false };
+		},
+	});
+}
+
+test("settlement verifies a flagged review once per diff on the primary route and logs the split", async () => {
+	const restore = verifyHarnessEnv();
+	const previousFetch = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = (async (url: string) => {
+		calls.push(url);
+		const content = url.startsWith("http://review")
+			? '{"analysis":"x","verdict":"flagged","findings":[{"file":"app.ts","severity":"bug","issue":"real"},{"file":"app.ts","severity":"bug","issue":"imagined"}]}'
+			: '{"analysis":"y","verdicts":[{"index":0,"real":true},{"index":1,"real":false}]}';
+		return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) } as Response;
+	}) as typeof fetch;
+	try {
+		const harness = settlementHarness();
+		reviewer(harness.api);
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "agent_end", messages: [] } as any);
+		assert.deepEqual(calls, ["http://review/v1/chat/completions", "http://primary/v1/chat/completions"]);
+		const verify = harness.entries.map((entry) => entry.data as any).find((data) => data?.event === "review-verify");
+		assert.equal(verify?.outcome, "flagged");
+		assert.equal(verify?.metadata?.confirmedCount, 1);
+		assert.match(verify?.metadata?.confirmed, /real/);
+		assert.match(verify?.metadata?.rejected, /imagined/);
+		// Same diff again: the review is skipped as unchanged and so is verification.
+		await harness.emit({ type: "agent_start" } as any);
+		await harness.emit({ type: "agent_end", messages: [] } as any);
+		assert.equal(calls.filter((url) => url.startsWith("http://primary")).length, 1);
+	} finally {
+		restore();
+		globalThis.fetch = previousFetch;
+	}
+});
+
+for (const [label, extra, reviewContent] of [
+	["a clean review", {}, '{"analysis":"x","verdict":"clean","findings":[]}'],
+	["AI_REVIEW_VERIFY=0", { AI_REVIEW_VERIFY: "0" }, '{"analysis":"x","verdict":"flagged","findings":[{"file":"a","severity":"bug","issue":"i"}]}'],
+] as const) {
+	test(`settlement makes no verifier call after ${label}`, async () => {
+		const restore = verifyHarnessEnv(extra);
+		const previousFetch = globalThis.fetch;
+		const calls: string[] = [];
+		globalThis.fetch = (async (url: string) => {
+			calls.push(url);
+			return { ok: true, json: async () => ({ choices: [{ message: { content: reviewContent } }] }) } as Response;
+		}) as typeof fetch;
+		try {
+			const harness = settlementHarness();
+			reviewer(harness.api);
+			await harness.emit({ type: "agent_start" } as any);
+			await harness.emit({ type: "agent_end", messages: [] } as any);
+			assert.deepEqual(calls, ["http://review/v1/chat/completions"]);
+			assert.equal(harness.entries.some((entry) => (entry.data as any)?.event === "review-verify"), false);
+		} finally {
+			restore();
+			globalThis.fetch = previousFetch;
+		}
+	});
+}
