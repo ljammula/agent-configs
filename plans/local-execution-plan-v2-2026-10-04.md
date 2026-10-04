@@ -138,6 +138,22 @@ local planning/review roles that v2 moves to Claude or gates.
 | **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue = requests submitted to the `factoryd worker` (Temporal; `queue-run` was removed in buildgate #447), lost steps park in `resume_review` for the morning | a queued feature runs unattended overnight end to end |
 | **M5** | Proven on real work | 3 real features from the user's backlog (personal-assistant, budget app, …): Claude plans, the Studio builds | **≥80% of tickets pass gates and review with no human code edits, ≤1 re-plan per feature**; Claude tokens used recorded |
 
+## Status (updated 2026-10-04 evening)
+
+| # | State | Notes |
+|---|---|---|
+| M1 | **in progress** | 12G session bank is the `serve_mtplx.sh` default, override removed (ai-stack `169c40d`). `scripts/memory_preflight.py` + `services.sh` + `overnight_run.sh` (ai-stack `d7d7bf4`): refuses runs that don't fit, stops unneeded services, logs memory per minute. 2 TB NVMe **not attached** — SSD bank/caches move deferred. Regression suite (10 tasks × 3, stock pi) running overnight in `pi/evals/battery-results/2026-10-04-m1-regression/` |
+| M4a | **prepared, waiting for the battery** (local models never run two jobs) | Feature: `PATCH /transactions/{id}` in personal-budget-simplifier (user pick). Bundle in [`m4a-buildgate-smoke-2026-10-04/`](m4a-buildgate-smoke-2026-10-04/); acceptance tests + stubs committed first (`bd35e86`, branch `m4a-recategorize-transaction`). Roles: execution → local Qwen; planning + review → gpt-5.6-luna on the Codex subscription (user decision: no Anthropic API key, so planning is **not** on Claude) |
+
+### Findings so far (feed M3/M4)
+
+- **buildgate cannot reach Claude on a subscription**: credential modes are `static` (API key, billed), `github-copilot`, `chatgpt-codex`. "Planning → Claude" needs an Anthropic API key route (marked not live-tested) or Claude doing planning outside buildgate (which `-spec-file/-plan-dir` already makes the normal path: planning is only called when a review is rejected).
+- **§1 contradiction**: the plan says each ticket's `Verify-Command` runs only the tests that ticket turns green; buildgate requires every ticket's `Verify-Command` to equal the request's verify command and runs it per ticket. Pre-committed acceptance tests for ticket N therefore fail tickets 1..N-1. Options for M3: commit each ticket's acceptance tests in that ticket's own stub commit chain (not all up front), or add per-ticket test selection to buildgate.
+- **Sandboxed pi has no provider shim**: buildgate's pi runs without `ai-stack-local.ts`, so Qwen's sampling preset / `thinkingFormat: qwen` / `supportsDeveloperRole: false` must be set in the factoryd model's `extra_json` (done in `~/.config/factoryd/config.yml`).
+- The relay cannot use `127.0.0.1:8080` (it runs in a container) or hostnames for plaintext upstreams; use colima's host IP `192.168.5.2`.
+- The installed `factoryd` predated `-spec-file/-plan-dir` (built Oct 3); rebuild with `make install` after pulling.
+- Colima was 4 GiB (plan: ≥6–8); `services.sh start colima` resizes to `COLIMA_MEMORY_GB` (8). Starting colima brings back `hermes-agent` (calls Qwen on a schedule), `openwebui`, `searxng` (`restart: unless-stopped`); `services.sh` stops them.
+
 ## Measurement
 
 - **Regression suite** (~10 fair, discriminating tasks, from the phase-0
