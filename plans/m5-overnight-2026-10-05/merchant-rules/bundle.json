@@ -1,0 +1,13 @@
+{
+  "feature": "merchant-rules",
+  "repo": "~/code/personal-budget-simplifier",
+  "worktree": "~/buildgate/ws/pbs-merchant-rules",
+  "branch": "bundle/merchant-rules",
+  "ref_branch": "bundle/merchant-rules-ref",
+  "verify_command": "sh .bundle/check-frozen.sh && cd backend && go vet ./... && go test ./...",
+  "tests": {
+    "001": ["backend/internal/store/merchant_rule_test.go"],
+    "002": ["backend/internal/api/merchant_rules_test.go"],
+    "003": ["backend/internal/api/merchant_rules_import_test.go"]
+  }
+}

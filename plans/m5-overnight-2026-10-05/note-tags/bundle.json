@@ -1,0 +1,13 @@
+{
+  "feature": "note-tags",
+  "repo": "~/code/notes-app",
+  "worktree": "~/buildgate/ws/notes-note-tags",
+  "branch": "bundle/note-tags",
+  "ref_branch": "bundle/note-tags-ref",
+  "verify_command": "sh .bundle/check-frozen.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests",
+  "tests": {
+    "001": ["tests/test_tags_store.py"],
+    "002": ["tests/test_tags_api.py"],
+    "003": ["tests/test_tags_filter.py"]
+  }
+}

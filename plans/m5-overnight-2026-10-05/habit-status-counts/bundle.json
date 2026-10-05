@@ -1,0 +1,12 @@
+{
+  "feature": "habit-status-counts",
+  "repo": "~/code/personal-assistant",
+  "worktree": "~/buildgate/ws/pa-habit-status-counts",
+  "branch": "bundle/habit-status-counts",
+  "ref_branch": "bundle/habit-status-counts-ref",
+  "verify_command": "sh .bundle/check-frozen.sh && cd backend && go vet ./... && go test ./...",
+  "tests": {
+    "001": ["backend/internal/service/habit_status_counts_test.go"],
+    "002": ["backend/internal/service/habit_status_counts_list_test.go"]
+  }
+}

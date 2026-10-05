@@ -1,0 +1,7 @@
+RAM 96G | available now 30.8G (mtplx def) | wired 3.6G | compressor 1.1G | swap used 0.8G
+running: qwen 39.0G, colima 8.0G
+need: qwen 44.0G, colima 8.0G, factory 2.0G; OS/apps 18.2G (measured, floor 8G)
+[ok] typical: services 54.0 + OS 18.2 + prefill 12 = 84.2G <= 96G
+[ok] worst case: qwen ceiling 60 + others 10.0 + OS 18.2 + abort floor 2.4 = 90.6G <= 96G
+[ok] live: available 30.8G >= not-yet-running 2.0 + prefill 12 + floor 2.4 = 16.4G
+FITS
