@@ -228,3 +228,26 @@ class OutcomeCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class HasConnectionErrorTests(unittest.TestCase):
+	def test_model_text_mentioning_connection_error_is_not_an_error(self):
+		stdout = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
+			"content": [{"type": "text", "text": "upstream 503 -> [], connection error -> []"}]}})
+		self.assertFalse(battery_lib.has_connection_error(stdout, ""))
+
+	def test_error_event_with_connection_error_counts(self):
+		stdout = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error",
+			"errorMessage": "Connection error."}})
+		self.assertTrue(battery_lib.has_connection_error(stdout, ""))
+
+	def test_stderr_counts(self):
+		self.assertTrue(battery_lib.has_connection_error("", "Error: Connection error."))
+
+	def test_real_false_positive_capture(self):
+		# The 2026-10-04 aistack-models-hide-offline rep3 run: hidden tests passed,
+		# the model's summary said "connection error -> []".
+		capture = Path("/private/tmp/pi-screen-27-baseline-lwe916d5/pi-output.jsonl")
+		if not capture.exists():
+			self.skipTest("capture not on this machine")
+		self.assertFalse(battery_lib.has_connection_error(capture.read_text(errors="replace"), ""))

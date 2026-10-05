@@ -16,12 +16,17 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import battery_lib  # noqa: E402
 
 
 PI_ROOT = Path(__file__).resolve().parents[1]
@@ -533,9 +538,7 @@ def execute_arm(
     extension_errors = sum(
         1 for line in pi_result.stderr.splitlines() if line.startswith("Extension error")
     )
-    connection_error = "connection error" in (
-        pi_result.stdout + pi_result.stderr
-    ).lower()
+    connection_error = battery_lib.has_connection_error(pi_result.stdout, pi_result.stderr)
     valid = (
         not timed_out
         and pi_result.returncode == 0

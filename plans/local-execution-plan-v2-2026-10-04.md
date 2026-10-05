@@ -138,12 +138,12 @@ local planning/review roles that v2 moves to Claude or gates.
 | **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue = requests submitted to the `factoryd worker` (Temporal; `queue-run` was removed in buildgate #447), lost steps park in `resume_review` for the morning | a queued feature runs unattended overnight end to end |
 | **M5** | Proven on real work | 3 real features from the user's backlog (personal-assistant, budget app, …): Claude plans, the Studio builds | **≥80% of tickets pass gates and review with no human code edits, ≤1 re-plan per feature**; Claude tokens used recorded |
 
-## Status (updated 2026-10-04 evening)
+## Status (updated 2026-10-04 21:45)
 
 | # | State | Notes |
 |---|---|---|
-| M1 | **in progress** | 12G session bank is the `serve_mtplx.sh` default, override removed (ai-stack `169c40d`). `scripts/memory_preflight.py` + `services.sh` + `overnight_run.sh` (ai-stack `d7d7bf4`): refuses runs that don't fit, stops unneeded services, logs memory per minute. 2 TB NVMe **not attached** — SSD bank/caches move deferred. Regression suite (10 tasks × 3, stock pi) running overnight in `pi/evals/battery-results/2026-10-04-m1-regression/` |
-| M4a | **prepared, waiting for the battery** (local models never run two jobs) | Feature: `PATCH /transactions/{id}` in personal-budget-simplifier (user pick). Bundle in [`m4a-buildgate-smoke-2026-10-04/`](m4a-buildgate-smoke-2026-10-04/); acceptance tests + stubs committed first (`bd35e86`, branch `m4a-recategorize-transaction`). Roles: execution → local Qwen; planning + review → gpt-5.6-luna on the Codex subscription (user decision: no Anthropic API key, so planning is **not** on Claude) |
+| M1 | **done** (NVMe item deferred) | 12G session bank is the `serve_mtplx.sh` default, override removed (ai-stack `169c40d`). `memory_preflight.py` + `services.sh` + `overnight_run.sh` + `memory_sampler.py`/`summarize_memory.py` (ai-stack `d7d7bf4`, `e154eef`): refuses runs that don't fit, stops unneeded services, dumps memory for post-run review. **Overnight regression run: 0 memory aborts / 30, 29/30 passed** ([results](../pi/evals/battery-results/2026-10-04-m1-regression/README.md)). Margin: available dips to ~7 GiB at Qwen's in-task peak (56 GiB) — fine for Qwen alone, no room for gemma + Colima overnight. 2 TB NVMe not attached: SSD bank/cold models/build caches move deferred (asks first when it is) |
+| M4a | **next** (battery done; local models never run two jobs) | Feature: `PATCH /transactions/{id}` in personal-budget-simplifier (user pick). Bundle in [`m4a-buildgate-smoke-2026-10-04/`](m4a-buildgate-smoke-2026-10-04/); acceptance tests + stubs committed first (`bd35e86`, branch `m4a-recategorize-transaction`). Roles: execution → local Qwen; planning + review → gpt-5.6-luna on the Codex subscription (user decision: no Anthropic API key, so planning is **not** on Claude) |
 
 ### Findings so far (feed M3/M4)
 

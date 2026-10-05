@@ -1,0 +1,69 @@
+gemma: stopped (com.aistack.gemma-hermes)
+RAM 96G | available now 40.9G (mtplx def) | wired 3.4G | compressor 0.5G | swap used 1.7G
+running: qwen 41.0G
+need: qwen 44.0G; OS/apps 14.1G (measured, floor 8G)
+[ok] typical: services 44.0 + OS 14.1 + prefill 12 = 70.1G <= 96G
+[ok] worst case: qwen ceiling 60 + others 0.0 + OS 14.1 + abort floor 2.4 = 76.5G <= 96G
+[ok] live: available 40.9G >= not-yet-running 0.0 + prefill 12 + floor 2.4 = 14.4G
+FITS
+30 runs planned, 0 already done, 30 to go
+[1/30] real/sf-retry-stale-result baseline rep1
+real/sf-retry-stale-result               baseline rep1 attempt1  passed=True valid=True memory_aborts=0 1393s
+[2/30] real/pa-habits-stable-order baseline rep1
+real/pa-habits-stable-order              baseline rep1 attempt1  passed=False valid=True memory_aborts=0 1249s
+[3/30] go-flutter/bookmarks-app baseline rep1
+go-flutter/bookmarks-app                 baseline rep1 attempt1  passed=True valid=True memory_aborts=0 708s
+[4/30] real/sf-ticketspec-fenced-verify baseline rep1
+real/sf-ticketspec-fenced-verify         baseline rep1 attempt1  passed=True valid=True memory_aborts=0 629s
+[5/30] real/pa-note-create-idempotent baseline rep1
+real/pa-note-create-idempotent           baseline rep1 attempt1  passed=True valid=True memory_aborts=0 687s
+[6/30] real/pa-shared-reminder-rules baseline rep1
+real/pa-shared-reminder-rules            baseline rep1 attempt1  passed=True valid=True memory_aborts=0 333s
+[7/30] real/aistack-models-hide-offline baseline rep1
+real/aistack-models-hide-offline         baseline rep1 attempt1  passed=True valid=True memory_aborts=0 692s
+[8/30] real/todo-durable-done-filter baseline rep1
+real/todo-durable-done-filter            baseline rep1 attempt1  passed=True valid=True memory_aborts=0 272s
+[9/30] go/lru-cache baseline rep1
+go/lru-cache                             baseline rep1 attempt1  passed=True valid=True memory_aborts=0 78s
+[10/30] real/pbs-latency-histogram baseline rep1
+real/pbs-latency-histogram               baseline rep1 attempt1  passed=True valid=True memory_aborts=0 484s
+[11/30] real/sf-retry-stale-result baseline rep2
+real/sf-retry-stale-result               baseline rep2 attempt1  passed=True valid=True memory_aborts=0 1046s
+[12/30] real/pa-habits-stable-order baseline rep2
+real/pa-habits-stable-order              baseline rep2 attempt1  passed=True valid=True memory_aborts=0 1006s
+[13/30] go-flutter/bookmarks-app baseline rep2
+go-flutter/bookmarks-app                 baseline rep2 attempt1  passed=True valid=True memory_aborts=0 378s
+[14/30] real/sf-ticketspec-fenced-verify baseline rep2
+real/sf-ticketspec-fenced-verify         baseline rep2 attempt1  passed=True valid=True memory_aborts=0 1271s
+[15/30] real/pa-note-create-idempotent baseline rep2
+real/pa-note-create-idempotent           baseline rep2 attempt1  passed=True valid=True memory_aborts=0 600s
+[16/30] real/pa-shared-reminder-rules baseline rep2
+real/pa-shared-reminder-rules            baseline rep2 attempt1  passed=True valid=True memory_aborts=0 505s
+[17/30] real/aistack-models-hide-offline baseline rep2
+real/aistack-models-hide-offline         baseline rep2 attempt1  passed=True valid=True memory_aborts=0 318s
+[18/30] real/todo-durable-done-filter baseline rep2
+real/todo-durable-done-filter            baseline rep2 attempt1  passed=True valid=True memory_aborts=0 196s
+[19/30] go/lru-cache baseline rep2
+go/lru-cache                             baseline rep2 attempt1  passed=True valid=True memory_aborts=0 93s
+[20/30] real/pbs-latency-histogram baseline rep2
+real/pbs-latency-histogram               baseline rep2 attempt1  passed=True valid=True memory_aborts=0 346s
+[21/30] real/sf-retry-stale-result baseline rep3
+real/sf-retry-stale-result               baseline rep3 attempt1  passed=True valid=True memory_aborts=0 1086s
+[22/30] real/pa-habits-stable-order baseline rep3
+real/pa-habits-stable-order              baseline rep3 attempt1  passed=True valid=True memory_aborts=0 825s
+[23/30] go-flutter/bookmarks-app baseline rep3
+go-flutter/bookmarks-app                 baseline rep3 attempt1  passed=True valid=True memory_aborts=0 482s
+[24/30] real/sf-ticketspec-fenced-verify baseline rep3
+real/sf-ticketspec-fenced-verify         baseline rep3 attempt1  passed=True valid=True memory_aborts=0 878s
+[25/30] real/pa-note-create-idempotent baseline rep3
+real/pa-note-create-idempotent           baseline rep3 attempt1  passed=True valid=True memory_aborts=0 1156s
+[26/30] real/pa-shared-reminder-rules baseline rep3
+real/pa-shared-reminder-rules            baseline rep3 attempt1  passed=True valid=True memory_aborts=0 546s
+[27/30] real/aistack-models-hide-offline baseline rep3
+real/aistack-models-hide-offline         baseline rep3 attempt1  passed=False valid=False memory_aborts=0 241s
+[28/30] real/todo-durable-done-filter baseline rep3
+real/todo-durable-done-filter            baseline rep3 attempt1  passed=True valid=True memory_aborts=0 224s
+[29/30] go/lru-cache baseline rep3
+go/lru-cache                             baseline rep3 attempt1  passed=True valid=True memory_aborts=0 108s
+[30/30] real/pbs-latency-histogram baseline rep3
+real/pbs-latency-histogram               baseline rep3 attempt1  passed=True valid=True memory_aborts=0 352s

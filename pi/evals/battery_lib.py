@@ -49,6 +49,33 @@ def count_memory_aborts(pi_output_path: Path) -> int:
     return count
 
 
+def has_connection_error(pi_stdout: str, pi_stderr: str) -> bool:
+    """True when pi itself failed to reach the model: an assistant message
+    with stopReason "error" whose errorMessage mentions a connection error,
+    or the phrase on stderr (pi's own diagnostics; model text never goes
+    there). Model-written text in stdout is ignored -- a raw substring
+    check over stdout marked a passing aistack-models-hide-offline run
+    invalid because the model's summary said "connection error -> []"
+    (2026-10-04 M1 regression battery)."""
+    if "connection error" in pi_stderr.lower():
+        return True
+    for line in pi_stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = event.get("message") if isinstance(event, dict) else None
+        if not isinstance(message, dict) or message.get("stopReason") != "error":
+            continue
+        error_message = message.get("errorMessage")
+        if isinstance(error_message, str) and "connection error" in error_message.lower():
+            return True
+    return False
+
+
 def resolve_inner_artifact_dir(run_root: Path) -> Path | None:
     """<out>/<slug>/results.jsonl's last line carries the real, ephemeral
     artifact dir (under /tmp, written by run_screening.execute_arm) that

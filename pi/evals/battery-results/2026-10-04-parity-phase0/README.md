@@ -76,6 +76,23 @@ ones when the battery and its reruns finish.
 7. **SSD session tier is write-only for batch evals:** ~37 GB written in the
    first 1.5 h with 1 restore — every task is a fresh session.
 
+## Update 2026-10-04 evening — M1 regression run
+
+The ~10-task regression suite (stock pi, 3 reps) ran 16:24–21:27 with the
+12G session bank default and the M1 memory preflight: **0 memory aborts in
+30 runs, 0 mtplx memory-guard actions, 29/30 passed** (one "fail" was a
+checker false positive, now fixed). All four spec-corrected tickets passed
+every run. Details: [`../2026-10-04-m1-regression/README.md`](../2026-10-04-m1-regression/README.md).
+
+Follow-up status: F2 done (local-model-bench `ce4101a`; confirmed 12/12);
+F4 done (proxy measures live footprint, ai-stack `1815b27`/`1bcb71b`; Qwen
+no longer creeps); F5 done (12G bank is the default, ai-stack `169c40d`);
+F6 done (driver records and retries memory aborts). New: F11 the
+"connection error" validity check matched model text — fixed
+(`battery_lib.has_connection_error`); F12 available memory still dips to
+~7 GiB at Qwen's in-task peaks (56 GiB) — no aborts, but no room to add
+services to an overnight run.
+
 ## Follow-ups
 
 | # | Follow-up | Owner/where | Priority |

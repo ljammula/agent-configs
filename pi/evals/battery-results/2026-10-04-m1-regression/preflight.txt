@@ -1,0 +1,8 @@
+gemma: stopped (com.aistack.gemma-hermes)
+RAM 96G | available now 40.9G (mtplx def) | wired 3.4G | compressor 0.5G | swap used 1.7G
+running: qwen 41.0G
+need: qwen 44.0G; OS/apps 14.1G (measured, floor 8G)
+[ok] typical: services 44.0 + OS 14.1 + prefill 12 = 70.1G <= 96G
+[ok] worst case: qwen ceiling 60 + others 0.0 + OS 14.1 + abort floor 2.4 = 76.5G <= 96G
+[ok] live: available 40.9G >= not-yet-running 0.0 + prefill 12 + floor 2.4 = 14.4G
+FITS
