@@ -21,7 +21,14 @@ result.
 | [note-tags](note-tags/spec.md): tags, `GET/PUT /api/notes/{id}/tags`, `?tag=` filter | notes-app (Python) | 3 | 15 | `factoryd/notes-app-can-search-notes-by-text-get-a-64043e34700d` | 5 files, +115/−21 |
 | [habit-status-counts](habit-status-counts/spec.md): 30-day done/skip/rest/fail counts in `GET /api/v1/habits` | personal-assistant (Go) | 2 | 10 | `factoryd/get-api-v1-habits-reports-a-streak-a-con-5d9044e19dce` | 4 files, +49/−6 |
 
-Nothing was pushed and no PRs were opened (worker `-open-pull-request=false`).
+**Merged (2026-10-05):** merchant-rules as personal-budget-simplifier PR #8
+(squash, `d463c37`) and note-tags locally into notes-app `main` (`3c41230`,
+no GitHub remote; tags added to `spec/contract.md` and `ARCHITECTURE.md`). Both
+merges drop `.bundle/`. The pre-PR review found one more bug: two concurrent
+creates of the same merchant gave a 500 (UNIQUE constraint) instead of 409.
+It was fixed with a regression test that fails 2/50 without the fix.
+habit-status-counts is **not merged** (user decision). The worker ran with
+`-open-pull-request=false`, so buildgate itself opened no PRs.
 Each result is a local branch in the repo, stacked on the bundle commit
 (`bundle/<feature>`: stubs, staged tests, `.bundle/`). Before merging, decide
 whether to keep `.bundle/`: it is the frozen-test check and can be dropped
