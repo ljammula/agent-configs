@@ -137,8 +137,9 @@ local planning/review roles that v2 moves to Claude or gates.
 | **M4a** | buildgate smoke on this Mac | one small real feature through buildgate: planning role → Claude, execution → local Qwen via pi, gates on, Colima sized per budget | completes end to end, tickets committed and accepted, **zero memory aborts** |
 | **M4** | Executor loop in buildgate | per-ticket seeded attempts (≤3, first green wins), repair rounds from gate output (build_app rounds), gemma review + Qwen verify as a report, Claude escalation on exhaustion, morning report; overnight queue = requests submitted to the `factoryd worker` (Temporal; `queue-run` was removed in buildgate #447), lost steps park in `resume_review` for the morning | a queued feature runs unattended overnight end to end |
 | **M5** | Proven on real work | 3 real features from the user's backlog (personal-assistant, budget app, …): Claude plans, the Studio builds | **≥80% of tickets pass gates and review with no human code edits, ≤1 re-plan per feature**; Claude tokens used recorded |
+| **M6** | Proven at scale and worth it | One night of 20–30 backlog tickets (mixed repos, incl. at least one cross-cutting ticket near 150 lines). Reference implementation only for tickets with judgement calls (D5); Codex conformity review stays required (D4) | **≥80% accepted with no human code edits, 0 memory aborts, and Claude planning time per ticket clearly below the time to write the ticket's code**; record per ticket: plan minutes, reference yes/no, build rounds, review findings |
 
-## Status (updated 2026-10-05 01:55)
+## Status (updated 2026-10-05)
 
 | # | State | Notes |
 |---|---|---|
@@ -162,6 +163,31 @@ local planning/review roles that v2 moves to Claude or gates.
 - The installed `factoryd` predated `-spec-file/-plan-dir` (built Oct 3); rebuild with `make install` after pulling.
 - Colima was 4 GiB (plan: ≥6–8); `services.sh start colima` resizes to `COLIMA_MEMORY_GB` (8). Starting colima brings back `hermes-agent` (calls Qwen on a schedule), `openwebui`, `searxng` (`restart: unless-stopped`); `services.sh` stops them.
 
+### Assessment after M5 (2026-10-05)
+
+**Solid as an executor of fully specified tickets; not yet proven to save
+effort at scale.**
+
+| Established by M5 | Not established |
+|---|---|
+| Qwen executes well-specified tickets reliably: 8/8 accepted, every failure traced to Claude's tickets | Scale: 8 tickets vs the 30–50/night target |
+| Unattended machinery works: sandbox, gates, corrective rounds, ticket chaining, frozen tests, memory (0 aborts) | Large or cross-cutting tickets (M5: 1–3 files, 1–137 lines each) |
+| Code was mergeable and followed repo conventions (2 of 3 features merged) | Vaguer tickets; Flutter/frontend work |
+| | Net effort: bundling took Claude ~2 h for 98 min of build, partly because Claude wrote a reference implementation of every ticket |
+
+Caveats that shape what comes next:
+
+1. **Tickets were near pseudo-code** (stubs, named helpers, exact error
+   strings, pre-written tests). That is why execution was reliable, and also
+   why M5 says little about Qwen on looser tickets.
+2. **The tests were not the safety net; Codex review was.** It caught all
+   three spec gaps the tests missed. The pre-PR review caught a fourth bug
+   (concurrent duplicate → 500). "Local model" in practice means local
+   execution plus cloud review.
+3. **The reference-implementation step doubles Claude's work.** It is the
+   only proof that the tests are fair, so it must become selective (D5), not
+   be dropped.
+
 ## Measurement
 
 - **Regression suite** (~10 fair, discriminating tasks, from the phase-0
@@ -182,6 +208,14 @@ local planning/review roles that v2 moves to Claude or gates.
   (Briefly revised toward `ticket_runner` earlier on 2026-10-04, then
   confirmed back to buildgate by the user for containment.)
 - **D3 — overnight batches** (unchanged).
+- **D4 — Codex conformity review stays `required`** (2026-10-05, from M5):
+  it caught every spec gap the acceptance tests missed. Never run
+  unattended with `-conformity-policy advisory`.
+- **D5 — reference implementations are selective** (2026-10-05, for M6):
+  write one only for tickets with judgement calls (validation order, error
+  precedence, concurrency, time zones, normalisation); pure wiring and
+  mechanical tickets go out with stubs + tests + the fail-on-stub check only.
+  M6 measures whether acceptance holds without them.
 
 ## Deferred (from v1) until M5 shows they are needed
 
@@ -198,7 +232,15 @@ large batteries on tasks that always pass.
 ## Risks
 
 - A wrong-but-consistent spec passes every automatic check — Claude's
-  planning quality is the ceiling; M5 measures it on real work.
+  planning quality is the ceiling. M5 confirmed it: every quarantine was a
+  Claude ticket gap, caught only by Codex review.
+- **Dependence on Codex review**: the Codex budget is shared and often
+  exhausted. Before M6, confirm what buildgate does when the review is
+  unavailable under `required` (#471 added a "review unavailable" state);
+  an overnight batch must halt, not accept unreviewed work.
+- **Planning cost can exceed the savings**: if Claude's minutes per ticket
+  approach the time to write the code, the pipeline does not pay. M6
+  measures it.
 - 30–50 tickets/night assumes ~10–15 min tickets; larger tickets must be
   split (M3).
 - Memory rules must hold as other services evolve; the M1 budget check is
