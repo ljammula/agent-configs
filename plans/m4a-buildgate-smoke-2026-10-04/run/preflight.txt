@@ -1,0 +1,53 @@
+time="2026-10-04T21:45:50-05:00" level=info msg="Using the existing instance `colima`"
+time="2026-10-04T21:45:50-05:00" level=info msg="Starting the instance \"colima\" with internal VM driver \"vz\""
+time="2026-10-04T21:45:51-05:00" level=info msg="[hostagent] hostagent socket created at /Users/kanna/.colima/_lima/colima/ha.sock"
+time="2026-10-04T21:45:51-05:00" level=info msg="[hostagent] Starting VZ (hint: to watch the boot progress, see `/Users/kanna/.colima/_lima/colima/serial*.log`)"
+time="2026-10-04T21:45:51-05:00" level=info msg="[hostagent] Mounting disk `colima` on `/mnt/lima-colima`"
+time="2026-10-04T21:45:51-05:00" level=info msg="[hostagent] Converting \"/Users/kanna/.colima/_lima/_disks/colima/datadisk\" (raw) to a raw disk \"/Users/kanna/.colima/_lima/_disks/colima/datadisk\""
+time="2026-10-04T21:45:51-05:00" level=info msg="[hostagent] [VZ] - vm state change: running"
+time="2026-10-04T21:45:55-05:00" level=info msg="[hostagent] SSH server does not seem to be running on vsock port, using usernet forwarder"
+time="2026-10-04T21:45:56-05:00" level=info msg="SSH Local Port: 59259"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Waiting for the essential requirement 1 of 3: \"ssh\""
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] The essential requirement 1 of 3 is satisfied"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Waiting for the essential requirement 2 of 3: \"user session is ready for ssh\""
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] The essential requirement 2 of 3 is satisfied"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Waiting for the essential requirement 3 of 3: \"Explicitly start ssh ControlMaster\""
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] The essential requirement 3 of 3 is satisfied"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Waiting for the guest agent to be running"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Forwarding \"/var/run/docker.sock\" (guest) to \"/Users/kanna/.colima/default/docker.sock\" (host)"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Forwarding \"/var/run/containerd/containerd.sock\" (guest) to \"/Users/kanna/.colima/default/containerd.sock\" (host)"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Forwarding \"/var/run/docker.sock\" (guest) to \"/Users/kanna/.colima/docker.sock\" (host)"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Guest agent is running"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Waiting for the final requirement 1 of 1: \"boot scripts must have finished\""
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Time sync: guest agent is alive, starting time synchronization"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Not forwarding TCP 0.0.0.0:22"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Not forwarding TCP 192.168.5.1:53"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] Forwarding TCP from 127.0.0.1:53 to 127.0.0.1:53"
+time="2026-10-04T21:45:56-05:00" level=info msg="[hostagent] The final requirement 1 of 1 is satisfied"
+time="2026-10-04T21:45:56-05:00" level=info msg="READY. Run `limactl shell colima` to open the shell."
+installing: 386 OK
+installing: amd64 OK
+{
+  "supported": [
+    "linux/arm64",
+    "linux/amd64",
+    "linux/386"
+  ],
+  "emulators": [
+    "python3.12",
+    "qemu-i386",
+    "qemu-x86_64"
+  ]
+}
+colima
+Successfully created context "colima"
+colima
+Current context is now "colima"
+colima: started (8G, 6 CPUs)
+RAM 96G | available now 52.3G (mtplx def) | wired 32.6G | compressor 0.8G | swap used 0.8G
+running: qwen 29.0G
+need: qwen 44.0G, colima 8.0G, factory 2.0G; OS/apps 14.7G (measured, floor 8G)
+[ok] typical: services 54.0 + OS 14.7 + prefill 12 = 80.7G <= 96G
+[ok] worst case: qwen ceiling 60 + others 10.0 + OS 14.7 + abort floor 2.4 = 87.1G <= 96G
+[ok] live: available 52.3G >= not-yet-running 10.0 + prefill 12 + floor 2.4 = 24.4G
+FITS
