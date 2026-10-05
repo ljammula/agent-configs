@@ -1,0 +1,10 @@
+RAM 96G | available now 21.7G (mtplx def) | wired 46.3G | compressor 1.6G | swap used 0.8G
+running: qwen 45.0G, colima 8.0G
+streams 2: qwen + 2 x session KV 3.5G, prefill 2 x 12G
+need: qwen 52.0G, colima 8.0G, factory 2.0G; OS/apps 21.3G (measured, floor 8G)
+[FAIL] typical: services 62.0 + OS 21.3 + prefill 24 = 107.3G <= 96G
+[FAIL] worst case: qwen ceiling 60 + 1 more stream(s) 15.5 + others 10.0 + OS 21.3 + abort floor 2.9 = 109.7G <= 96G
+[FAIL] live: available 21.7G >= not-yet-running 2.0 + session KV 7.0 + prefill 24 + floor 2.9 = 35.9G
+REFUSE: typical budget exceeds RAM
+REFUSE: worst case (qwen at proxy hard ceiling) leaves no abort-floor margin
+REFUSE: not enough memory available right now (close apps, or clear the Qwen session bank)
