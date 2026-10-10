@@ -49,13 +49,27 @@
     "andrej-karpathy-skills@multica-ai": true,
     "mattpocock-skills@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
-    "cache-tax@claude-code-mods": true
+    "cache-tax@claude-code-mods": true,
+    "usage-band@cc-usage-band": true,
+    "cc-pr-tracker@cc-pr-tracker": true
   },
   "extraKnownMarketplaces": {
     "claude-code-mods": {
       "source": {
         "source": "github",
         "repo": "karanb192/claude-code-mods"
+      }
+    },
+    "cc-usage-band": {
+      "source": {
+        "source": "github",
+        "repo": "JetsonChan/CC-Usage-Band"
+      }
+    },
+    "cc-pr-tracker": {
+      "source": {
+        "source": "github",
+        "repo": "sezaakgun/cc-pr-tracker"
       }
     }
   },
@@ -101,5 +115,14 @@
       "**Org-specific CLiHs**: None configured — `rtk` (repo review/skill tooling) and `flutter`/`dart` are routine project CLIs seen frequently in this project's transcripts",
       "**routine under this repo prefix**: routine use of `make`, `flutter`, `dart`, `gofmt`, `rtk` within /Users/kanna/code/personal-assistant is expected day-to-day activity"
     ]
+  },
+  "pluginConfigs": {
+    "cc-pr-tracker@cc-pr-tracker": {
+      "options": {
+        "notifyClaude": false,
+        "alertOn": "failures and ready to merge",
+        "stopWhenDone": true
+      }
+    }
   }
 }
