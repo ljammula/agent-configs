@@ -47,7 +47,17 @@
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "andrej-karpathy-skills@multica-ai": true,
-    "mattpocock-skills@claude-plugins-official": true
+    "mattpocock-skills@claude-plugins-official": true,
+    "gopls-lsp@claude-plugins-official": true,
+    "cache-tax@claude-code-mods": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-mods": {
+      "source": {
+        "source": "github",
+        "repo": "karanb192/claude-code-mods"
+      }
+    }
   },
   "effortLevel": "medium",
   "modelSettings": {
@@ -58,5 +68,38 @@
   "skipDangerousModePermissionPrompt": true,
   "theme": "auto",
   "agentPushNotifEnabled": true,
-  "model": "sonnet"
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Bash(gh pr merge:*) in ljammula/personal-assistant — squash-merge is the stated workflow but treat as review-worthy since branch protection is not enforced by rules",
+      "Bash(git push --force*) on ljammula/personal-assistant main — CLAUDE.md notes force-push is intended to be blocked; keep as soft block for any remaining branch"
+    ],
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: Google Cloud (Firebase/Firestore, Cloud Run, Cloud Storage, Secret Manager) — used by this repo (ljammula/personal-assistant); GCP project identity not disclosed here",
+      "**Repository visibility**: Private — ljammula/personal-assistant (confirmed via gh)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: gcloud secrets (Secret Manager) referenced in CI; CI secret names include ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, BRAVE_API_KEY, DISCORD_WEBHOOK_URL, FIREBASE_* keys, INTERNAL_SECRET, WIF_PROVIDER, WIF_SERVICE_ACCOUNT — names only, not values",
+      "**Default / protected branches**: Default branch main; no branch protection rules or rulesets listed via gh (repo may rely on convention rather than enforced rules — treat main as sensitive to force-push/history-rewrite regardless)",
+      "**CI/CD deploy targets**: GitHub Actions builds and deploys to Google Cloud Run (us-central1) on tag vX.Y.Z push, for ljammula/personal-assistant only",
+      "**Network posture**: None configured",
+      "**Host containment**: None configured — assume Claude Code runs on an ordinary developer machine with open internet",
+      "**Source control**: ljammula/personal-assistant (origin, private) and its remote only — no additional orgs configured",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: kannas-mac-studio (Tailscale MagicDNS host for local read-only AI stack: code-review/log-triage on :8080, SearXNG on :8888) — routine, local-network use only, not a deploy or data target",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: `.env`, `.env.local`, `.env.*.local`, `.env.local.example`, `.github-token` in this repo; Cloud Run secrets GEMINI_API_KEY, INTERNAL_SECRET, ADMIN_SECRET and CI secrets listed above — share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment; the deployed Cloud Run service for this repo (personal-assistant, us-central1) is a live production target",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic; treat the deployed Cloud Run service for this repo as sensitive by default",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (DayTrix — Flutter + Go productivity app)",
+      "**Trusted repo**: /Users/kanna/code/personal-assistant (this repo), remote origin https://github.com/ljammula/personal-assistant.git — private, so confidential material is fine here but secrets/credentials are still never committed",
+      "**Org-specific CLiHs**: None configured — `rtk` (repo review/skill tooling) and `flutter`/`dart` are routine project CLIs seen frequently in this project's transcripts",
+      "**routine under this repo prefix**: routine use of `make`, `flutter`, `dart`, `gofmt`, `rtk` within /Users/kanna/code/personal-assistant is expected day-to-day activity"
+    ]
+  }
 }
