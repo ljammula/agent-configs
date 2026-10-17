@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/karpathy-guardrail.ts
+../../../pi-harness-hardening/extensions/karpathy-guardrail.ts

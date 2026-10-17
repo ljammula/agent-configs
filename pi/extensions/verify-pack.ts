@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/verify-pack.ts
+../../../pi-harness-hardening/extensions/verify-pack.ts

@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/searxng-search.ts
+../../../pi-harness-hardening/extensions/searxng-search.ts

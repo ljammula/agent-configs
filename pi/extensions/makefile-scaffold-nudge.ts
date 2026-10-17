@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/makefile-scaffold-nudge.ts
+../../../pi-harness-hardening/extensions/makefile-scaffold-nudge.ts

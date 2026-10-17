@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/git-checkpoint.ts
+../../../pi-harness-hardening/extensions/git-checkpoint.ts

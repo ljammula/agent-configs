@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/full-stack-dev.ts
+../../../pi-harness-hardening/extensions/full-stack-dev.ts

@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/quality-gate.ts
+../../../pi-harness-hardening/extensions/quality-gate.ts

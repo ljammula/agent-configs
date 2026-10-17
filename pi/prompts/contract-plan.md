@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/prompts/contract-plan.md
+../../../pi-harness-hardening/prompts/contract-plan.md

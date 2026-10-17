@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kanna/.claude/hooks/rtk-rewrite.sh"
+            "command": "$HOME/.claude/hooks/rtk-rewrite.sh"
           },
           {
             "type": "command",
@@ -17,7 +17,7 @@
           },
           {
             "type": "command",
-            "command": "/Users/kanna/.claude/hooks/bash-guard.sh"
+            "command": "$HOME/.claude/hooks/bash-guard.sh"
           }
         ]
       }
@@ -28,12 +28,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kanna/.claude/hooks/format-on-edit.sh 2>/dev/null || true",
+            "command": "$HOME/.claude/hooks/format-on-edit.sh 2>/dev/null || true",
             "statusMessage": "Formatting edited file"
           },
           {
             "type": "command",
-            "command": "/Users/kanna/.claude/hooks/complexity-on-edit.sh",
+            "command": "$HOME/.claude/hooks/complexity-on-edit.sh",
             "statusMessage": "Checking function complexity"
           }
         ]

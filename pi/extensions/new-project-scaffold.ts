@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/new-project-scaffold.ts
+../../../pi-harness-hardening/extensions/new-project-scaffold.ts

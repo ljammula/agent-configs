@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/git-safety.ts
+../../../pi-harness-hardening/extensions/git-safety.ts

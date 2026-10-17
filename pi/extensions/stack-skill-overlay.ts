@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/stack-skill-overlay.ts
+../../../pi-harness-hardening/extensions/stack-skill-overlay.ts

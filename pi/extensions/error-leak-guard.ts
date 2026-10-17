@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/error-leak-guard.ts
+../../../pi-harness-hardening/extensions/error-leak-guard.ts
