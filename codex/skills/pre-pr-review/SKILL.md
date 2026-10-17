@@ -14,7 +14,7 @@ is in "Why" at the bottom.
 
 ## Steps
 
-1. **Diff pass.** Run your strongest available review pass on the change (a fresh-context reviewer, or `codex review` when budget allows). Fix every
+1. **Diff pass.** Run your strongest available review pass on the change (a fresh-context reviewer, or `codex review` when budget allows). Give the reviewer the diff and the contract it must meet, never your own conclusion or reasoning. Fix every
    finding with a concrete failure scenario. Done when a re-run finds nothing
    new of that kind.
 2. **Subsystem pass.** When the change wires into existing code, review the

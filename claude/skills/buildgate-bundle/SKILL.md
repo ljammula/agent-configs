@@ -59,46 +59,62 @@ Use a separate `git worktree` per feature as the buildgate workspace
 1. **Read the code first.** Find the conventions the feature must follow:
    error helpers, response shapes, naming, test style, how existing tests
    build fixtures. Tickets reference them by name.
-2. **Write `spec.md`** in this exact skeleton (each heading on its own line,
+2. **Grill before writing.** Interview the operator in rounds until no
+   decision is open (adapted from Matt Pocock's `grilling` skill, MIT):
+   - Sources of questions: the repo's `ARCHITECTURE.md` and `AGENTS.md`, the
+     design guide's `## Spec decisions` when `.factory.yml` names one
+     (`factoryd content -show guide:<name>`; each is answered, "not
+     applicable: <reason>" counts), and the completeness checklist below.
+   - A round asks every decision whose prerequisites are settled: numbered,
+     each with a recommended answer, worded so "yes" accepts it
+     (AskUserQuestion, up to 4 per call). Later decisions wait for the round
+     that unblocks them.
+   - Facts are looked up, never asked: current behaviour, file layout,
+     existing conventions, what a test fixture contains.
+   - Done when no decision is open and the operator confirms. Each answer
+     lands in `## Scope`, `## Non-goals` or an acceptance criterion with exact
+     values; none stays only in the conversation.
+   Skip only when the operator hands over a finished spec, and say so.
+3. **Write `spec.md`** in this exact skeleton (each heading on its own line,
    in order): `# Spec`, `## Problem`, `## Scope`, `## Non-goals`,
    `## Affected services and packages`, `## Acceptance criteria` (numbered
-   list), `## Risks`, `## Open questions` (write "None."). Each criterion is
+   list), `## Risks`, `## Open questions` (write "None.": step 2 asked each). Each criterion is
    one checkable behaviour with exact values. Go through the
    **completeness checklist** below for every input and output.
-3. **Split into tickets** (`tickets/001.spec.md`, ...): one package or one
+4. **Split into tickets** (`tickets/001.spec.md`, ...): one package or one
    layer each, <=150 changed lines, dependency order, every criterion covered
    by >=1 ticket. Prefer store/domain -> handler -> wiring.
-4. **Write stubs** for every new function/type/file the tickets touch, with
+5. **Write stubs** for every new function/type/file the tickets touch, with
    final signatures and doc comments; bodies return a zero value plus a
    "not implemented" error (Go) or `raise NotImplementedError` (Python). Route
    registration and other wiring that needs only the signature can go in the
    bundle commit, so tickets stay inside one file set.
-5. **Write the acceptance tests** before any implementation, one test file
+6. **Write the acceptance tests** before any implementation, one test file
    per ticket (`*_t001_test.go`-style naming is fine, or the natural file
    name), each test named after the criterion it checks. Include
    **malformed-input cases** for every input-validation criterion.
-6. **Stage the tests** — first line(s) of each ticket's test file:
+7. **Stage the tests** — first line(s) of each ticket's test file:
    - Go: `//go:build bundle_tNNN` then a blank line, then `package ...`.
    - Python unittest: right after the imports,
      `raise unittest.SkipTest("bundle: enabled by ticket NNN")`.
    - pytest: `pytest.skip("bundle: enabled by ticket NNN", allow_module_level=True)`.
    Ticket NNN's first step deletes exactly that line.
-7. **Freeze the tests**: copy `check-frozen.sh` from this skill to
+8. **Freeze the tests**: copy `check-frozen.sh` from this skill to
    `.bundle/check-frozen.sh` in the repo, run
    `python3 bundle_check.py freeze --repo <wt> <test files...>` to write
    `.bundle/frozen-tests.sha256` (hash of each file with gate lines and blank
    lines removed), and append `&& sh .bundle/check-frozen.sh` to the verify
    command (prepend when the command starts with `cd`, e.g.
    `sh .bundle/check-frozen.sh && cd backend && go vet ./... && go test ./...`).
-8. **Commit** stubs + staged tests + `.bundle/` as one commit on
+9. **Commit** stubs + staged tests + `.bundle/` as one commit on
    `bundle/<feature>` (message: `bundle: <feature> stubs, staged acceptance tests`).
-9. **Reference implementation** on `bundle/<feature>-ref`: one commit per
+10. **Reference implementation** on `bundle/<feature>-ref`: one commit per
    ticket, each touching only that ticket's Allowed-Files and removing only
    that ticket's gate line. Write it as the executor would — from the ticket
    text only. If writing it needs knowledge the ticket lacks, fix the ticket.
-10. **Run the checks** (`python3 bundle_check.py check --bundle <plans>/<feature>`)
+11. **Run the checks** (`python3 bundle_check.py check --bundle <plans>/<feature>`)
     and fix until it passes. Then `factoryd check-ticket` runs inside it.
-11. **Hand over**: `factoryd submit -verify-command '<cmd>' -spec-file spec.md
+12. **Hand over**: `factoryd submit -verify-command '<cmd>' -spec-file spec.md
     -plan-dir tickets/ <worktree>`, then `factoryd approve <id>` at
     spec_review and plan_review (Claude's own review is the bundle check).
 

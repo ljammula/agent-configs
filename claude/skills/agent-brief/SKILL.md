@@ -49,6 +49,11 @@ A brief is complete when a fresh agent could finish without asking a question:
 6. **Report format** — SHA, files changed, test result lines, deviations from
    the brief. No narrative: the report lands in the orchestrator's context.
 
+A review brief replaces 1–3 with the artifact, the contract it must meet
+(spec, invariants, sources to check against) and the checks to make. It never
+states the author's conclusion or reasoning: a reviewer handed the claim tends
+to confirm it.
+
 ## Checking the result
 
 "Tests pass" is the agent's claim, not proof the work happened. Before

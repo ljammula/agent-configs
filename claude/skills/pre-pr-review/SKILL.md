@@ -19,8 +19,10 @@ is in "Why" at the bottom.
    `/code-review --level high` on the main model. Routine changes (wiring,
    tests, docs, deletions, UI): one Sonnet review agent with a review brief
    (the checks to make, file:line and failure scenario per finding, a word
-   cap), or `/code-review --level medium`. Fix every finding with a concrete
-   failure scenario.
+   cap), or `/code-review --level medium`. Give a reviewer agent the diff (or
+   document) and the contract it must meet (spec, invariants, sources), never
+   your own conclusion or reasoning: a reviewer handed the author's claim tends
+   to confirm it. Fix every finding with a concrete failure scenario.
 2. **Subsystem pass.** When the change wires into existing code, review the
    touched files *as they now stand*, not just the diff. A delta-only review
    cannot find a bug in adjacent code nobody touched this time. Done when
