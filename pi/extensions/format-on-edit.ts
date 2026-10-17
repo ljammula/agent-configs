@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/format-on-edit.ts
+../../../pi-harness-hardening/extensions/format-on-edit.ts

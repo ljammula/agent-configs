@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/artifact-guard.ts
+../../../pi-harness-hardening/extensions/artifact-guard.ts

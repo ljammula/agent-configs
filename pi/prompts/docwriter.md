@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/prompts/docwriter.md
+../../../pi-harness-hardening/prompts/docwriter.md

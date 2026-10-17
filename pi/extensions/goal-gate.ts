@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/goal-gate.ts
+../../../pi-harness-hardening/extensions/goal-gate.ts

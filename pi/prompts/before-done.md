@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/prompts/before-done.md
+../../../pi-harness-hardening/prompts/before-done.md

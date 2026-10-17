@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/prompts/wire.md
+../../../pi-harness-hardening/prompts/wire.md

@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/lib/stale-context.ts
+../../../../pi-harness-hardening/extensions/lib/stale-context.ts

@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/protected-paths.ts
+../../../pi-harness-hardening/extensions/protected-paths.ts

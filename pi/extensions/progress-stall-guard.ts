@@ -1,1 +1,1 @@
-/Users/kanna/code/pi-harness-hardening/extensions/progress-stall-guard.ts
+../../../pi-harness-hardening/extensions/progress-stall-guard.ts
