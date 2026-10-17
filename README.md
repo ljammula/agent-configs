@@ -42,6 +42,15 @@ boundary.
 
 ## Install
 
+Prerequisite: clone `pi-harness-hardening` next to this repo, in the same
+parent directory. The `pi/` links are relative, so they break if it lives
+anywhere else:
+
+```text
+~/code/agent-configs
+~/code/pi-harness-hardening
+```
+
 ```bash
 ./install.sh            # symlink managed config into Claude, Codex, Copilot, and Pi homes
 ./install.sh --force     # also replace any existing file/dir at the target that isn't already linked here
