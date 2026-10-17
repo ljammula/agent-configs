@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // 81920 on a 96 GB Mac and the proxy rejects past ~62K). Defaults unchanged.
 const QWEN38_MODEL_ID =
   process.env.AI_STACK_MODEL_ID || "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
-const CONTEXT_WINDOW = Number(process.env.AI_STACK_CONTEXT_WINDOW) || 124518;
+const CONTEXT_WINDOW = Number(process.env.AI_STACK_CONTEXT_WINDOW) || 171212;
 // mlx-vlm's OpenAI-compatible server defaults unset sampling fields to
 // greedy/no-op values (temperature 0.0, no top_p/top_k/presence_penalty
 // clamp at all) whenever a request omits them, and pi-coding-agent has no
@@ -151,8 +151,9 @@ export default function (pi: ExtensionAPI) {
         },
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        // contextWindow is the proxy's real admission budget (max_kv_size
-        // 147456 - maxTokens 16384 = 131072; see
+        // contextWindow is the proxy's real admission line, 0.95 x (max_kv_size
+        // 196608 - maxTokens 16384) = 171212 since 2026-10-17 (Strata backend;
+        // was 147456 -> 124518); see
         // ~/code/ai-stack/scripts/proxy_config.py on kannasmacstudio.lan),
         // not the model's max_kv_size itself. proxy_config.py derives
         // :8080's budget the same way regardless of which model backs it,
