@@ -93,6 +93,7 @@ agent-configs/
 │       ├── pre-pr-review/     # Self-review passes before a PR + 2-round post-PR review cap
 │       ├── project-bootstrap/ # New-repo setup: AGENTS.md, verify/live-smoke, notes repo, templates (user-invoked)
 │       ├── release/           # Tag-driven deploy: verify, semver tag, watch CI, smoke prod
+│       ├── reverse-engineer-anything/ # Vendored from morluto/rea: drives the REA MCP server (see UPSTREAM.md)
 │       ├── self-review/       # Two-account PR review via narsimha-j + optional local second opinion, guaranteed switch-back
 │       └── wiring-verify/    # N-step feature wiring completeness checker
 │
@@ -286,6 +287,9 @@ Recovery runbook for a branch partially squash-merged to main; ends in a force p
 
 ### release
 End-to-end tag-driven deploy; pushes a tag and deploys to production, so it is user-triggered only (`disable-model-invocation: true` in the Claude variant). Preflight on a clean `main`, `make verify`, semver bump computed by `next-version.sh` from the commits since the last tag, push the tag, watch the deploy workflow, smoke-test production with `make test-e2e`. Deploy failures stop the flow without touching the tag.
+
+### reverse-engineer-anything
+Third-party skill vendored from [morluto/rea](https://github.com/morluto/rea) (MIT) at the commit in `UPSTREAM.md`, after a prompt-injection/exfiltration audit. Routes reverse-engineering targets (native binaries, JS/Electron, .NET, APKs, captures) to REA's MCP tools. Needs the REA MCP server registered: `claude mcp add --scope user rea -- node ~/code/rea/scripts/rea.mjs mcp`. To update, re-audit the new `.agents/skills/reverse-engineer-anything/` and copy it over.
 
 ### self-review
 Two-account PR review flow; posts public comments and switches the machine-wide `gh` account, so it is user-triggered only (`disable-model-invocation: true` in the Claude variant). Switch to `narsimha-j`, optionally get a local-model second opinion on the diff first (machine-conditional, candidates to verify not confirmed findings), review the diff (correctness → surgical scope → simplicity → conventions), post inline findings as `COMMENT`, approve only when clean, and unconditionally switch back to `ljammula` on every exit path.
