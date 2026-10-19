@@ -37,7 +37,9 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify pre-pr-review live-validation)
 # Claude-only global skills: agent-brief (Copilot has its own adapted copy)
 # and harvest-learnings (reads Claude Code's transcript format).
-CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings)
+# reverse-engineer-anything is vendored from morluto/rea (see UPSTREAM.md);
+# its MCP server is registered separately with `claude mcp add`.
+CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings reverse-engineer-anything)
 COPILOT_SKILLS=(pre-pr-review agent-brief)
 COPILOT_SHARED_SKILLS=(live-validation project-bootstrap)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
