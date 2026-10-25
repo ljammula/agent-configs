@@ -4,8 +4,8 @@
   "agent_configs_revision": "151c122",
   "pi_version": "0.83.0",
   "primary": {
-    "base_url": "http://192.168.1.233:8080/v1",
-    "model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+    "base_url": "http://192.0.2.11:8080/v1",
+    "model": "/Users/me/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
     "model_hash": null,
     "context_tokens": 96000,
     "max_output_tokens": 16384
@@ -46,7 +46,7 @@
     "full_dependency_audit": "1 high: brace-expansion 5.0.7 nested under pinned Pi 0.83.0"
   },
   "application_fixture": {
-    "path": "/Users/kanna/code/test-bed/app-x",
+    "path": "/Users/me/code/test-bed/app-x",
     "implementation_commit": "dc0769e2e6ad4e4b77114edcb23cd8a1a8649145",
     "documentation_commit": "a83204a",
     "verification_command": "make verify",

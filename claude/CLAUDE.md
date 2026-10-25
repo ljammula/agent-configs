@@ -97,9 +97,9 @@ Anthropic tokens and ran 5-10x slower (`~/code/local-model-bench/STATUS.md`).
 The read-only local services are worth using: code review and log triage
 (`:8080`) and SearXNG (`:8888`), used by `before-done`/`self-review`/
 `local-summarize`/`local-search`. They resolve through `AI_STACK_HOST`
-(default in `~/.zshenv`: `kannas-mac-studio`, the Tailscale MagicDNS name; FQDN
-`kannas-mac-studio.tailfb69fc.ts.net` where Tailscale isn't the active resolver;
-`kannasmacstudio.lan` only if Tailscale is down, never a raw IP). Discover the
+(default in `~/.zshenv`: `<studio-host>`, the Tailscale MagicDNS name; FQDN
+`<studio-host>.<tailnet>.ts.net` where Tailscale isn't the active resolver;
+`<studio-host>.lan` only if Tailscale is down, never a raw IP). Discover the
 model id from `/v1/models`; never hardcode it. The `:8080` model is
 single-instance: one long-running job against it at a time, across projects and
 parallel subagents. Routes and performance: `~/code/agent-configs/local-ai-stack.md`.

@@ -20,16 +20,16 @@ figures in the sections that follow it.
 ## Reaching this host
 
 **Default `AI_STACK_HOST` is now the Tailscale MagicDNS short name**,
-`kannas-mac-studio` (set in `~/.zshenv`:
-`AI_STACK_HOST="${AI_STACK_HOST:-kannas-mac-studio}"`), not the LAN mDNS
+`<studio-host>` (set in `~/.zshenv`:
+`AI_STACK_HOST="${AI_STACK_HOST:-mac-studio}"`), not the LAN mDNS
 name. Confirmed live 2026-09-09: `tailscale status --json` shows MagicDNS
-enabled (`tailfb69fc.ts.net`), `dscacheutil` resolves the short name to
-`kannas-mac-studio.tailfb69fc.ts.net` / `100.120.23.7`, and
-`curl http://kannas-mac-studio:8080/v1/models` returns 200 — short-name
+enabled (`<tailnet>.ts.net`), `dscacheutil` resolves the short name to
+`<studio-host>.<tailnet>.ts.net` / `100.x.y.z`, and
+`curl http://mac-studio:8080/v1/models` returns 200 — short-name
 resolution works because Tailscale's own resolver (`100.100.100.100`) is
-this Mac's active DNS nameserver, so the full `.tailfb69fc.ts.net` suffix
+this Mac's active DNS nameserver, so the full `.<tailnet>.ts.net` suffix
 isn't required on this machine. On a client where MagicDNS isn't the active
-resolver, use the full FQDN `kannas-mac-studio.tailfb69fc.ts.net` instead —
+resolver, use the full FQDN `<studio-host>.<tailnet>.ts.net` instead —
 that always works regardless of local resolver config. Either form resolves
 whether the caller is on the LAN or off it, as long as Tailscale is running
 on both ends — one value works everywhere instead of switching hosts by
@@ -39,12 +39,12 @@ plain `http://<name>:8080/...` calls work the same as they would against
 the LAN name — this is distinct from the separate HTTPS `/models/<name>/v1`
 routes under "Tailnet HTTPS access" in `ai-stack`'s README, which go through
 the `com.aistack.tailscale-serve` reverse-proxy LaunchAgent instead. The
-tailnet name segment (`tailfb69fc`) is stable in practice but tied to the
+tailnet name segment (`<tailnet>`) is stable in practice but tied to the
 Tailscale account/org identity, not guaranteed permanent -- re-verify with
 `tailscale status` after any login/org change before trusting a hardcoded
 copy of it.
 
-`kannasmacstudio.lan` (the router-assigned LAN mDNS name) still works as a
+`<studio-host>.lan` (the router-assigned LAN mDNS name) still works as a
 fallback when Tailscale is down or not installed on the calling machine, but
 only resolves on the local network — prefer the Tailscale name by default.
 
@@ -86,7 +86,7 @@ Three changes to `scripts/proxy_config.py` came out of it (commits `7f969a1`,
 - **Backward-compatible model alias added** (`91918ca`): the proxy now
   accepts both the short stable ID `qwen38-mtplx-quality` and the full
   legacy filesystem-shaped ID
-  (`/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality`)
+  (`/Users/me/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality`)
   in the `model` field, rewriting either to the filesystem ID before
   forwarding. Discovering the id from `/v1/models` (see "Client rules"
   below) still works and is still the robust choice, but a hardcoded short
@@ -187,7 +187,7 @@ why this real win doesn't fully explain live turn latency.
 
 ## Live vs. synthetic decode gap (found 2026-08-19, unconfirmed root cause)
 
-Pulled real per-request numbers straight from `kannasmacstudio.lan`'s
+Pulled real per-request numbers straight from `<studio-host>.lan`'s
 `qwen38.log` (`Request completed: ... prompt_tokens=... generated_tokens=...
 decode=... tok/s`) for a live `pi -p` harness session (46 requests,
 `dart/sequential-runner` pair-5 stall-backstop smoke test, 2026-08-19
@@ -235,7 +235,7 @@ planted-bug catches plus 9/9 correct-code controls (see
 
 `AI_REVIEW_MODEL` briefly went stale after the `:8082`→`:8081` move: the
 route's served model id gained a `-4bit` suffix and a full path
-(`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`), but
+(`/Users/me/code/ai-stack/models/gemma-4-26b-a4b-it-4bit`), but
 `~/.zshrc` still exported the short form. Every real review request 400'd
 with `model_mismatch`, which `requestReview()` silently downgrades to
 `{outcome: "transient"}` — no crash, no error, just a reviewer that never

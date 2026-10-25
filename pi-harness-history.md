@@ -412,16 +412,16 @@ fixes landed and retested — see `ai-stack/cross-model-review-bounded-loop-plan
   cause. Confirmed by reproducing the failure and the fix directly.
 - **Terminal launch, verified live, 2026-07-26**: the LAN box's address had
   changed once already at that point (DHCP reassignment,
-  `192.168.1.233` → `192.168.1.79`) — see
+  `192.0.2.11` → `192.0.2.10`) — see
   `ai-stack/cross-model-review-bounded-loop-plan.md`'s "Live retest, round
   3" for the retest this triggered. Launched `pi` exactly as a user would
   from a terminal — `zsh -ic 'pi --print ...'` against a real `lru-cache`
   bug, zero explicit `--provider`/`-e`/`--no-extensions` flags. Confirmed
   via `lsof` mid-run: an actual `ESTABLISHED` TCP connection from the `pi`
-  process to `192.168.1.79:8080`. `cross-model-review.ts` fired against
-  `192.168.1.79:8081`, flagged a real eviction bug in round 1, the model
+  process to `192.0.2.10:8080`. `cross-model-review.ts` fired against
+  `192.0.2.10:8081`, flagged a real eviction bug in round 1, the model
   fixed it, final `go test` passed, zero extension errors. (The box's
-  address has since moved to a stable hostname, `kannasmacstudio.lan` —
+  address has since moved to a stable hostname, `<studio-host>.lan` —
   see `pi/README.md`.)
 
 ### The one full real-task dispatch (not a benchmark — a case study)
@@ -617,9 +617,9 @@ confirmed it's blocked and the repo's commits are untouched. See
 **`AI_STACK_HOST` / terminal launch, confirmed live, 2026-07-26**: a plain
 `pi` launch from an interactive shell (no flags) opened a real connection
 to the box at the address `~/.zshrc` exported at the time
-(`192.168.1.233`). See "Terminal launch, verified live, 2026-07-26" above
+(`192.0.2.11`). See "Terminal launch, verified live, 2026-07-26" above
 for the fuller version of this same check. The box's address has since
-moved to a stable hostname, `kannasmacstudio.lan`, specifically to stop
+moved to a stable hostname, `<studio-host>.lan`, specifically to stop
 this kind of note from going stale on every reboot.
 
 ## `cross-model-review.ts` wired to a live Gemma route, 2026-08-04
@@ -648,7 +648,7 @@ box. Before wiring it in as the reviewer, ran two checks:
 Set `AI_REVIEW_BASE_URL=http://${AI_STACK_HOST}:8082/v1` and
 `AI_REVIEW_MODEL=gemma-4-26b-a4b-it` in `~/.zshrc`. Verified live:
 `resolveReviewerConfig()` now resolves `{ enabled: true, kind:
-"independent-review", baseUrl: "http://kannasmacstudio.lan:8082/v1", model:
+"independent-review", baseUrl: "http://<studio-host>.lan:8082/v1", model:
 "gemma-4-26b-a4b-it" }`, and `requestReview()` against the real endpoint
 correctly flagged a deliberately planted bug (subtraction instead of
 addition) with an accurate explanation instead of returning
@@ -659,7 +659,7 @@ tests" figure to the current 67 while in there).
 ## Trying a third reviewer route, KAT-Coder on `:8083`, found and fixed three real bugs, 2026-08-04
 
 A third model, `KAT-Coder-V2.5-Dev-OptiQ-4bit`, came up on `:8083` on the
-same LAN box (discovered by port-scanning `kannasmacstudio.lan` after being
+same LAN box (discovered by port-scanning `<studio-host>.lan` after being
 told a new model was up but not given its host/port). Rather than trust it
 as reviewer on faith, ran it through `pi-harness-history.md`'s pair-4 task
 (`go-flutter/bookmarks-app`, the race-condition task) with the full
@@ -740,7 +740,7 @@ separate, real bugs, in order:
    `upstream_errors: 4`, `queue_wait_seconds: 43`, and a manual probe
    request got no response in 30s. Restarted all four LaunchAgents
    (`qwen36`, `kvproxy`, `whisper`, `katcoder` — bootout/bootstrap on
-   `kannasmacstudio.lan`) to rule out a stuck connection; `:8083` came back
+   `<studio-host>.lan`) to rule out a stuck connection; `:8083` came back
    with clean zeroed counters and answered a probe chat completion in a
    few seconds. The timing gap persisted anyway — it's structural, not a
    symptom of an unhealthy route. **Fixed**: `tool_result` now stores the
@@ -1115,7 +1115,7 @@ clean. Still no live trial of the revised designs.
 ## GLM-4.7-Flash-4bit ruled out as reviewer candidate, 2026-08-05
 
 A new local route appeared on `:8081` serving `GLM-4.7-Flash-4bit`
-(`mlx_vlm.server`, `kannasmacstudio.lan`), a candidate to replace or
+(`mlx_vlm.server`, `<studio-host>.lan`), a candidate to replace or
 supplement Gemma as `cross-model-review.ts`'s reviewer. `resolveReviewerConfig()`
 correctly resolved `independent-review` for it (distinct baseUrl/model from
 the `:8080` Qwen primary) — the config-resolution logic itself needed no
@@ -1181,7 +1181,7 @@ now that it lives on `:8081` (only smoke-tested at that point, per
 battery itself was a direct request against the configured
 `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL`. It came back **HTTP 400
 `model_mismatch`**: `GET :8081/v1/models` reports the served id as
-`/Users/kanna/code/ai-stack/models/gemma-4-26b-a4b-it-4bit` — a full path
+`/Users/me/code/ai-stack/models/gemma-4-26b-a4b-it-4bit` — a full path
 plus a `-4bit` suffix — while `~/.zshrc` still exported the short form,
 `gemma-4-26b-a4b-it`, unchanged since the model was wired in on `:8082`
 back on 2026-08-04 (see "`cross-model-review.ts` wired to a live Gemma
@@ -2304,11 +2304,11 @@ available evidence allows, not abandoned mid-investigation.
 
 Everything above exhausted *this* machine's forensic trail (unified log,
 crash reports, shell history) — but the two kills happened to a process
-that was also a network client of `kannasmacstudio.lan`'s model-serving
+that was also a network client of `<studio-host>.lan`'s model-serving
 stack, and that stack keeps its own independent, durable, plain-text
 request logs (`~/code/ai-stack/logs/{kv_proxy,qwen36}.log` on the LAN
 host), a source not checked in any prior pass of this investigation. SSH'd
-in directly (`ssh kannasmacstudio.lan`, read-only) and searched the actual
+in directly (`ssh <studio-host>.lan`, read-only) and searched the actual
 incident window.
 
 **Found both kills, independently timestamped from the server side, not
@@ -2430,7 +2430,7 @@ hit a real interactive-mode crash (`pi` exited with an uncaught
 `pi-tui`'s `Box.render`) while running `/goal implement OTEL metrics`.
 
 **Root cause, live-traced from the actual crashed session's log**
-(`~/.pi/agent/sessions/--Users-kanna-code-personal-budget-simplifier--/
+(`~/.pi/agent/sessions/--Users-me-code-personal-budget-simplifier--/
 2026-08-12T19-29-54-282Z_...jsonl`, 37 entries, ends immediately at the
 crash): the local model emitted a malformed `todo` tool call
 (`{"toggle":"<parameter=id>\n1"}`), which pi's own JSON-schema argument
@@ -2522,7 +2522,7 @@ showed real, substantial progress (attempt 1: all 5 requested files
 written, 376 lines total) — the model was actively mid-task when
 whatever killed it landed, consistent in shape with the two prior
 documented `stream_closed_before_completion` kills traced to
-`kannasmacstudio.lan`'s own server logs (client-side idle timeout on a
+`<studio-host>.lan`'s own server logs (client-side idle timeout on a
 long prefill, not a parent-shell-exit/detachment problem — that hypothesis
 was already ruled out).
 
@@ -2712,7 +2712,7 @@ not a sampling problem.
 - Invalidity, declared in advance: a killed process, `valid:false` on
   either arm (per `execute_arm`'s own gate), reviewer route unreachable
   or model-id-mismatched, or a concurrently running heavy job on
-  `kannasmacstudio.lan` at launch time → the run is discarded and
+  `<studio-host>.lan` at launch time → the run is discarded and
   redone, not reinterpreted.
 - **No pooling** with `full-screening-2026-08-03.json`'s harness-arm
   numbers or the 2026-08-04 run's numbers: `REVIEW_TIMEOUT_MS` (120s→
@@ -2731,7 +2731,7 @@ check, pinned `pi --version`, `baseline_agent_dir` isolation, runtime
 manifest) plus an added reviewer-route check (`AI_REVIEW_BASE_URL`/
 `AI_REVIEW_MODEL` resolve and match a live `:8081` model id) that
 `run_screening.py` itself doesn't do. Confirmed live and current before
-running: `AI_REVIEW_BASE_URL=http://kannasmacstudio.lan:8081/v1`,
+running: `AI_REVIEW_BASE_URL=http://<studio-host>.lan:8081/v1`,
 `AI_REVIEW_MODEL` matches Gemma's live id — the `:8082` references in
 the 2026-08-04 entries were that route's numbering at the time, not a
 live discrepancy today. Pair 4's actual recorded arm order under seed
@@ -2741,7 +2741,7 @@ invented one.
 ## Update 2026-08-13 (continued): pair-4 rerun executed — invalid per its own pre-registration, not reinterpreted
 
 Ran `pi/evals/run_single_pair.py --seed 20260802 --pair 4 --host
-kannasmacstudio.lan`. Preflight passed clean (model identity, `pi --version`
+<studio-host>.lan`. Preflight passed clean (model identity, `pi --version`
 0.83.0, reviewer route resolved live to Gemma on `:8081`). Baseline arm:
 valid, passed, 185.9s. Harness arm: **invalid** — hit the fixture's
 45-minute wall (`pi_exit: 124`, `timed_out: true`, `harness_seconds:
@@ -2821,7 +2821,7 @@ than re-running blind.
   own server-side request logs, not this machine's OS logs.** Every local
   forensic channel on the client machine (unified log, crash reports,
   reboot history, shell history, legacy syslog, sudo-elevated access) came
-  back empty or unavailable, as documented above — but `kannasmacstudio.lan`
+  back empty or unavailable, as documented above — but `<studio-host>.lan`
   (the LAN model-serving host) keeps its own independent, durable,
   plain-text logs, and SSH access into them (read-only) surfaced both
   kills precisely: two `stream_closed_before_completion` events in
@@ -2871,7 +2871,7 @@ than re-running blind.
   live goal state surviving a restart.
 - Live-test `/goal` (`goal-gate.ts`) against a real repo with an
   open-ended, multi-round condition (e.g.
-  `/Users/kanna/code/personal-budget-simplifier`, "enrich features and make
+  `/Users/me/code/personal-budget-simplifier`, "enrich features and make
   it a true usable full-stack app") — confirm the kickoff follow-up turn
   actually fires under interactive `pi`, the nudge loop survives multiple
   rounds, and a `GOAL COMPLETE` claim only sticks once backed by a real
@@ -3767,7 +3767,7 @@ follow-up entry for the condensed version.
 
 Direct follow-up to the 2026-08-17/18 evening entry above, per its own
 recommendation. Same methodology: `run_single_pair.py --seed 20260802
---pair 7 --host kannasmacstudio.lan` (pair 7 of the *unskipped* schedule is
+--pair 7 --host <studio-host>.lan` (pair 7 of the *unskipped* schedule is
 `go/lru-cache`, arm order baseline-then-harness), on the freshly-preflighted
 stack (`:8080` Qwen3.8, `:8081` Gemma reviewer, both reachable and model-id
 matched before launch; Pi pinned at 0.83.0; installed `quality-gate.ts`
@@ -4118,7 +4118,7 @@ Direct follow-up to the "New root cause" finding above. A `plans/pi-harness-hard
 
 ## 2026-08-19 — fourth go/lru-cache rerun (harness arm only): decoupled behavior confirmed live, zero injected messages
 
-Closes the "not done" gap above. Same precedent as the third rerun: baseline for pair 7 already solid, so `run_single_arm.py --seed 20260802 --pair 7 --arm harness --host kannasmacstudio.lan` reran only the harness arm. Preflight matched prior runs: Pi 0.83.0, both routes reachable, `cross-model-review.ts`/`quality-gate.ts`/`progress-stall-guard.ts` symlinked straight to the working tree (today's decoupling commit included).
+Closes the "not done" gap above. Same precedent as the third rerun: baseline for pair 7 already solid, so `run_single_arm.py --seed 20260802 --pair 7 --arm harness --host <studio-host>.lan` reran only the harness arm. Preflight matched prior runs: Pi 0.83.0, both routes reachable, `cross-model-review.ts`/`quality-gate.ts`/`progress-stall-guard.ts` symlinked straight to the working tree (today's decoupling commit included).
 
 **Result: `valid: true, passed: false, timed_out: false`, 110.4s** — a sharp contrast with the prior three reruns of this pair, all of which either failed differently or ran to the 30-minute timeout. Hidden tests: `TestEvictsByKeyNotValue` failed, the same key/value-confusion eviction bug class as before.
 
@@ -4159,7 +4159,7 @@ IPC socket. The equivalent `node --import tsx/esm --test tests/*.test.ts`
 suite passed **190/190** after redirecting uv's cache to a writable temporary
 directory. The required live preflight confirmed Pi `0.83.0` and the
 `~/.pi/agent/extensions/progress-stall-guard.ts` symlink to this working tree,
-but both route curls failed with DNS resolution for `kannasmacstudio.lan`; the
+but both route curls failed with DNS resolution for `<studio-host>.lan`; the
 exact `run_single_arm.py` command consequently failed before creating a live
 session (`reviewer route unreachable`). No stochastic live stall result is
 claimed; that remains open pending a host with route/DNS access.
@@ -4176,7 +4176,7 @@ made.
 ## 2026-08-19 — two live pair-7 reruns post-fix: neither reproduced the target stall
 
 Closed the live-confirmation gap Codex's sandbox couldn't reach, using this
-host's real route access (`kannasmacstudio.lan`, both `:8080`/`:8081`
+host's real route access (`<studio-host>.lan`, both `:8080`/`:8081`
 reachable). Ran `run_single_arm.py --seed 20260802 --pair 7 --arm harness`
 twice in direct succession against the fixed code (still uncommitted,
 working-tree-symlinked as usual).
@@ -5079,7 +5079,7 @@ recording a real gap honestly rather than patching reactively mid-
 investigation. Artifacts (local temp, not committed):
 `/private/tmp/pi-screen-05-harness-1nh7k9v3/` (session log, empty working
 tree diff), summary at
-`/private/tmp/claude-501/-Users-kanna-code-agent-configs/9d0b7f60-8788-4f88-9f15-28281898433f/scratchpad/pair5-intercept-validate/summary.json`.
+`/private/tmp/claude-501/-Users-me-code-agent-configs/9d0b7f60-8788-4f88-9f15-28281898433f/scratchpad/pair5-intercept-validate/summary.json`.
 
 ## Update 2026-08-19 (later still): unconditional stall backstop hardened per PR #20 Codex review
 
@@ -5134,7 +5134,7 @@ Direct live validation of the fixes above (commit `599a4b7`), not just the
 unit-test coverage that shipped with them. Same fixture as every prior
 rerun this investigation has used: `dart/sequential-runner`, pair 5, seed
 `20260802`, harness arm, via `run_single_arm.py --seed 20260802 --pair 5
---arm harness --host kannasmacstudio.lan`. `AI_STACK_HOST` reachable,
+--arm harness --host <studio-host>.lan`. `AI_STACK_HOST` reachable,
 `/v1/models` responding, Pi `0.83.0` matched. One deliberate deviation from
 the usual methodology: `PI_STALL_GUARD_BACKSTOP_MINUTES=2` (soft=2min,
 hard=4min) instead of the 10/20-minute defaults, purely to get a fast

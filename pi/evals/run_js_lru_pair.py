@@ -7,7 +7,7 @@ this constructs a one-off `ScheduledPair` directly and reuses
 `execute_arm()`, mirroring `run_single_pair.py`'s structure.
 
 Usage:
-    python3 run_js_lru_pair.py [--host kannasmacstudio.lan] [--output DIR]
+    python3 run_js_lru_pair.py [--host mac-studio.lan] [--output DIR]
 """
 
 from __future__ import annotations

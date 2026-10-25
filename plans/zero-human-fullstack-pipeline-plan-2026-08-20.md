@@ -343,7 +343,7 @@ doesn't catch it, and the round budget burns against an outage instead
 of surfacing it distinctly from a real implementation failure — same
 failure class as the first ticket-001 observation above, just not
 caught by the stall-timeout this time. Confirmed root cause live:
-`curl http://kannasmacstudio.lan:8080/v1/models` → `no route to host`
+`curl http://<studio-host>.lan:8080/v1/models` → `no route to host`
 while general internet egress from the same shell worked fine and DNS
 resolved the hostname correctly — the ai-stack Mac Studio was
 unreachable on the LAN, not a DNS or sandbox-network-policy issue.
@@ -359,19 +359,19 @@ assistant turns errored)` blocker, surfaced per round in
 makes the failure class legible, it doesn't grant free retries).
 
 **Root cause of the unreachability, and the actual fix (2026-08-20).**
-`AI_STACK_HOST=kannasmacstudio.lan` had gone stale — `curl`/`nc`/`ping`
+`AI_STACK_HOST=<studio-host>.lan` had gone stale — `curl`/`nc`/`ping`
 all failed with "no route to host" against it, but the box was reachable
-the whole time via Tailscale MagicDNS at `kannas-mac-studio` (no `.lan`
-suffix), confirmed with `curl http://kannas-mac-studio:8080/v1/models`
+the whole time via Tailscale MagicDNS at `<studio-host>` (no `.lan`
+suffix), confirmed with `curl http://mac-studio:8080/v1/models`
 returning the model list. `~/.zshenv` already defaults `AI_STACK_HOST` to
-`kannas-mac-studio`; the stale `.lan` value only won because it was
+`<studio-host>`; the stale `.lan` value only won because it was
 already exported earlier in the session. Resumed with
-`AI_STACK_HOST=kannas-mac-studio make run` and the pipeline continued
+`AI_STACK_HOST=mac-studio make run` and the pipeline continued
 through tickets 005-009 with no further rescues needed. Saved to
 Claude's cross-session memory (`ai-stack-host-hostname.md`) so a future
 session tries this fallback before concluding the box itself is down.
 This correction belongs in `~/.claude/CLAUDE.md` too (it currently
-documents `kannasmacstudio.lan` as *the* host) but that file is the
+documents `<studio-host>.lan` as *the* host) but that file is the
 user's, not this repo's, to edit.
 
 **Ticket 010 halt — oracle-integrity gate caught real drift, but the
@@ -407,7 +407,7 @@ wrapping the launching shell/session died, taking the child process with
 it), not a crash inside `ticket_runner.py`/`build_app.py` itself and not
 the harness's own nohup/disown detachment behavior; no error was logged
 because the failure was one layer up the process tree. No special
-recovery was needed: relaunching `make run` (`AI_STACK_HOST=kannas-mac-studio`)
+recovery was needed: relaunching `make run` (`AI_STACK_HOST=mac-studio`)
 found the stale `build-attempt-01.started.json` with no matching report,
 printed `previous build attempt ended without report evidence; retrying
 0/2 after 30s`, and ran a fresh `build_app.py` invocation as

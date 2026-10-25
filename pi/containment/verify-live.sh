@@ -58,7 +58,7 @@ expect_fail subprocess-escape /bin/bash -c "/usr/bin/touch /usr/local/escape"
 escape_alias() { /usr/bin/touch /var/escape; }
 expect_fail alias-escape escape_alias
 expect_fail host-path-write /usr/bin/touch "$HOST_ESCAPE_TARGET"
-check host-home-absent /usr/bin/test ! -e /Users/kanna
+check host-home-absent /usr/bin/test ! -e /Users/me
 check ssh-credential-absent /usr/bin/test ! -e /home/pi/.ssh/id_rsa
 check cloud-credential-absent /usr/bin/test ! -e /home/pi/.config/gcloud/credentials.db
 check docker-socket-absent /usr/bin/test ! -S /var/run/docker.sock

@@ -10,7 +10,7 @@ would just cost time without adding anything.
 
 Usage:
     python3 run_single_arm.py --seed 20260802 --pair 7 --arm harness \
-        [--host kannasmacstudio.lan] [--output DIR]
+        [--host mac-studio.lan] [--output DIR]
 """
 
 from __future__ import annotations

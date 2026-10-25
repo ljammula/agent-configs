@@ -106,8 +106,8 @@ procedure below, since the gap between 0.83.0 and `latest` will have grown.
 
    ```bash
    pi --version
-   curl -fsS http://kannasmacstudio.lan:8080/v1/models   # Qwen3.8 route
-   curl -fsS http://kannasmacstudio.lan:8081/v1/models   # Gemma reviewer route
+   curl -fsS http://<studio-host>.lan:8080/v1/models   # Qwen3.8 route
+   curl -fsS http://<studio-host>.lan:8081/v1/models   # Gemma reviewer route
    ```
 
 4. **Validation subset, not a cold full battery** — 2-3 pairs, including at
@@ -115,7 +115,7 @@ procedure below, since the gap between 0.83.0 and `latest` will have grown.
 
    ```bash
    python3 evals/run_screening.py --seed 20260802 --max-pairs 3 \
-     --host kannasmacstudio.lan \
+     --host <studio-host>.lan \
      --output evals/battery-results/<date>-seed20260802-<version>-validation
    ```
 

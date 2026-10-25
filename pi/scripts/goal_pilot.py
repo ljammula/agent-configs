@@ -87,7 +87,7 @@ WIDENED_THINKING = "xhigh"
 # names by hand (plans/zero-human-fullstack-pipeline-plan-2026-08-20.md,
 # "Root cause of the unreachability, and the actual fix") and that is
 # already in Claude's cross-session memory (ai-stack-host-hostname.md).
-AI_STACK_HOST_FALLBACK = "kannas-mac-studio"
+AI_STACK_HOST_FALLBACK = "mac-studio"
 MAX_INFRA_AUTO_RETRIES = 2
 
 SPEC_STATUS_RE = re.compile(r"^STATUS:\s*(\S+)")

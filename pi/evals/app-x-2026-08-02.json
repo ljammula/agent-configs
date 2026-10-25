@@ -7,8 +7,8 @@
     "plan_commit": "a5ac0e1",
     "implementation_revision_at_run": "working-tree",
     "post_run_hardening_revision": "151c122",
-    "primary_route": "http://192.168.1.233:8080/v1",
-    "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+    "primary_route": "http://192.0.2.11:8080/v1",
+    "primary_model": "/Users/me/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
     "primary_model_hash": null,
     "context_tokens": 96000,
     "max_output_tokens": 16384,
@@ -41,7 +41,7 @@
   },
   "fixture": {
     "name": "app-x",
-    "path": "/Users/kanna/code/test-bed/app-x",
+    "path": "/Users/me/code/test-bed/app-x",
     "commit": "dc0769e2e6ad4e4b77114edcb23cd8a1a8649145",
     "stack": ["express", "typescript", "postgresql", "react", "vite"],
     "verification": {

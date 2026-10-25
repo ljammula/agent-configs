@@ -6,7 +6,7 @@
   "seed": 20260802,
   "pi_version": "0.83.0",
   "agent_configs_revision": "056b914-plus-stale-context-and-nested-manifest-fixes",
-  "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+  "primary_model": "/Users/me/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
   "supersedes": "pi/evals/partial-screening-2026-08-02.json",
   "fixes_since_partial_screen": [
     "resolveVerificationCommand() now falls back to a bounded nested-directory scan for Makefile/go.mod/pubspec.yaml/etc. when the repo root has none, instead of returning unconfigured (pi/extensions/lib/verification.ts)",

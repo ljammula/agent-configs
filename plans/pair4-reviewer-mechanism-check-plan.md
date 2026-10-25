@@ -53,7 +53,7 @@ framed as closing any statistical gap.
 - **Invalidity, declared in advance**: a killed process, `valid:false` on
   either arm (per `execute_arm`'s own gate), reviewer route unreachable or
   model-id-mismatched, or a concurrently running heavy job on
-  `kannasmacstudio.lan` at launch time → discard and redo, don't
+  `<studio-host>.lan` at launch time → discard and redo, don't
   reinterpret.
 - **No pooling** with `full-screening-2026-08-03.json` or the 2026-08-04
   run's harness-arm numbers — `REVIEW_TIMEOUT_MS` (120s→240s), the
@@ -74,7 +74,7 @@ itself doesn't do: a reviewer-route check (`AI_REVIEW_BASE_URL`/
 script exists specifically to check whether the reviewer fires.
 
 Confirmed live before running: `AI_REVIEW_BASE_URL=http://
-kannasmacstudio.lan:8081/v1`, `AI_REVIEW_MODEL` matches Gemma's live id;
+<studio-host>.lan:8081/v1`, `AI_REVIEW_MODEL` matches Gemma's live id;
 `:8082` references in the 2026-08-04 entries were that route's numbering at
 the time, not a live discrepancy today. Pair 4's recorded arm order under
 seed `20260802` is `("baseline", "harness")` — this run uses that order.
@@ -83,7 +83,7 @@ Invocation:
 
 ```
 python3 pi/evals/run_single_pair.py --seed 20260802 --pair 4 \
-    --host kannasmacstudio.lan --output <artifact dir>
+    --host <studio-host>.lan --output <artifact dir>
 ```
 
 Launched detached (`nohup ... & disown`) per the documented mitigation for

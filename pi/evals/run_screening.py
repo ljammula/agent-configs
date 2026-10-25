@@ -39,7 +39,7 @@ INSTALLED_AGENT_DIR = Path.home() / ".pi" / "agent"
 # instance -- see local-ai-stack.md's ":8080 swap to mtplx" section.
 # AI_STACK_MODEL_ID overrides (must match extensions/ai-stack-local.ts).
 MODEL = os.environ.get(
-    "AI_STACK_MODEL_ID", "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
+    "AI_STACK_MODEL_ID", "/Users/me/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality"
 )
 DEFAULT_SEED = 20260802
 
@@ -585,7 +585,7 @@ def execute_arm(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--host", default=os.environ.get("AI_STACK_HOST", "192.168.1.233"))
+    parser.add_argument("--host", default=os.environ.get("AI_STACK_HOST", "192.0.2.11"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--plan", action="store_true", help="print the randomized schedule and exit")
     parser.add_argument("--max-pairs", type=int, default=None, help="run a schedule prefix for runner validation")

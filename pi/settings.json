@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.83.0",
   "theme": "dark",
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality",
+  "defaultModel": "/Users/me/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality",
   "defaultThinkingLevel": "medium",
   "enabledModels": [
     "Qwen3.8-27B-MTPLX-Optimized-Quality"

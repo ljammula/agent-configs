@@ -191,7 +191,7 @@ chunks 1–4 of this build actually got that benefit surfaced two separate probl
 environmental and one structural.
 
 **First, the environmental one.** The orchestrating shell (this session's `Bash` tool) reported
-`AI_REVIEW_BASE_URL=http://kannasmacstudio.lan:8082/v1` and `AI_REVIEW_MODEL=gemma-4-26b-a4b-it`
+`AI_REVIEW_BASE_URL=http://<studio-host>.lan:8082/v1` and `AI_REVIEW_MODEL=gemma-4-26b-a4b-it`
 — the exact stale pair `~/.zshrc` was already fixed to *not* export (it now correctly exports
 `:8081` and the full model path). Root cause: zsh only sources `.zshrc` for interactive shells;
 `ps` on the Bash tool's own shell showed `/bin/zsh -c source .../snapshot-*.sh` — non-interactive,
@@ -319,7 +319,7 @@ relying only on a redirected `--mode json` stdout log.
 
 `appendHarnessTrace` calls `pi.appendEntry(...)`, which persists to pi's session JSONL files, not
 stdout — it cannot be lost to a killed process's stdout buffer, the mechanism round 1 proposed.
-Checked directly (`~/.pi/agent/sessions/--Users-kanna-code-personal-budget-simplifier--/*.jsonl`):
+Checked directly (`~/.pi/agent/sessions/--Users-me-code-personal-budget-simplifier--/*.jsonl`):
 **all 7 real build sessions carry a reviewer `startup` trace and zero carry a `review` trace** —
 including the two sessions that ran after `AI_REVIEW_*` was already correctly configured. The
 reviewer never completed a single review round anywhere in this build. Round 1's "no real bug"

@@ -297,7 +297,7 @@ to advisory-only review.
    `AI_STACK_HOST` staleness, a crashed process with recoverable
    attempt-retry state — tickets 003/005/011's class): under
    `auto-rescue`, handled without asking — e.g. retry the
-   `kannas-mac-studio` MagicDNS fallback on a `model route unreachable`
+   `<studio-host>` MagicDNS fallback on a `model route unreachable`
    blocker, then relaunch. Under `--on-halt=report`, reported like any
    other halt.
 2. **Frozen-artifact-canon drift** (a correct fix to a genuine bug in a

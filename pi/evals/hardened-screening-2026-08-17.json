@@ -8,7 +8,7 @@
   "skip_reason": "already has separately-recorded 4/4 hardened-config live evidence (see pi-harness-validation-status.md, 2026-08-17 entry); re-running it here would just re-prove a settled result at real cost.",
   "pi_version": "0.83.0",
   "agent_configs_revision": "3c327fd3ce954c8b249287ace204e8ed112e34b1-plus-git-checkpoint-stale-context-fix",
-  "primary_model": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
+  "primary_model": "/Users/me/code/ai-stack/models/Qwen3.8-27B-8bit",
   "supersedes": null,
   "relationship_to_prior_battery": "pi/evals/full-screening-2026-08-03.json is the last full nine-pair battery, run pre-hardening (defaultThinkingLevel off, no temperature injection). This battery reruns the same seed/task pool (minus go/lru-cache) after the 2026-08-17 hardening (defaultThinkingLevel medium, qwen thinking format, temperature 0.6 injection). Not a like-for-like replacement of that file -- both remain current evidence for their respective configs.",
   "design": {

@@ -43,13 +43,13 @@ case the local model self-corrects mechanical mistakes but not logic bugs,
 so treat its output as evidence to review — never a trusted result.
 
 The served HTTP endpoints (code review and log triage :8080, SearXNG :8888)
-need not be on this machine: set `AI_STACK_HOST` to `kannas-mac-studio`
+need not be on this machine: set `AI_STACK_HOST` to `<studio-host>`
 (already the live default in `~/.zshenv`) -- this box's Tailscale MagicDNS
 short name, resolving via Tailscale's own DNS rather than the LAN, on or
 off the LAN as long as Tailscale is running on both ends. Use the full FQDN
-`kannas-mac-studio.tailfb69fc.ts.net` on a client where Tailscale's
+`<studio-host>.<tailnet>.ts.net` on a client where Tailscale's
 resolver isn't the active DNS nameserver -- the short form depends on that.
-Fall back to the LAN mDNS name `kannasmacstudio.lan` only if Tailscale is
+Fall back to the LAN mDNS name `<studio-host>.lan` only if Tailscale is
 down (never the raw DHCP IP -- that's changed on every reboot).
 Reachability checks and scripts resolve through whatever `AI_STACK_HOST` is
 set to; unset, it defaults to `127.0.0.1`. Set it once in the shell

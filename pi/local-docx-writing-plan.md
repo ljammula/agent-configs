@@ -3,7 +3,7 @@
 ## Goal
 
 Use the Pi harness on this workstation to draft, review, and produce professional
-`.docx` documents with the local inference service on `kannasmacstudio.lan`.
+`.docx` documents with the local inference service on `<studio-host>.lan`.
 
 The model should handle planning, prose, and critique. Deterministic local
 scripts should handle document formatting, rendering, and structural checks.
@@ -203,7 +203,7 @@ docwriter render output/project.docx --output-dir qa/project
 ## Implementation order
 
 1. Confirm Pi can reach the model discovery endpoint
-   `http://kannasmacstudio.lan:8080/v1/models`.
+   `http://<studio-host>.lan:8080/v1/models`.
 2. Add a reusable document-writing prompt.
 3. Implement outline generation.
 4. Implement Markdown drafting and review.

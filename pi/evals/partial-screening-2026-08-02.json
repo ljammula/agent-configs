@@ -6,7 +6,7 @@
   "seed": 20260802,
   "pi_version": "0.83.0",
   "agent_configs_revision": "609a6c5",
-  "primary_model": "/Users/kanna/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
+  "primary_model": "/Users/me/code/ai-stack/models/ThinkingCap-Qwen3.6-27B-MLX-8bit",
   "design": {
     "baseline": "stock Pi with only the ai-stack provider shim",
     "candidate": "installed Pi harness",

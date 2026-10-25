@@ -74,7 +74,7 @@ existing 0/4 baseline) has not been run yet.
 | `reasoning: 0` in the 4-trial usage lines proves the model didn't reason | **Not established** — likely a structural null | `openai-completions.js`: `reasoning: rawUsage.completion_tokens_details?.reasoning_tokens \|\| 0`; mlx-vlm's OpenAI-compat server is not confirmed to populate `completion_tokens_details` |
 | The 4 trials ran at `temperature: 0` | **Not established** for the trials specifically | `buildParams` only sets `params.temperature` if the caller passes one; `pi/settings.json` sets none. The "temp 0" citations found (`local-ai-stack.md`'s throughput micro-benchmark, `PLAN.md:1095`'s direct-curl tool-config baseline) are both non-`pi` runs |
 | `--thinking off` was used in a `pi` harness run | Verified, but for a **different (3.6-era) run**, not the 2026-08-16 4-trial config | `ai-stack/PLAN.md:455`, dated 2026-07-26 |
-| mlx-vlm's `:8080` route reads `enable_thinking`/`reasoning_effort` top-level vs. nested under `chat_template_kwargs` | **Unconfirmed either way** | No local install of `mlx_vlm` on this machine (it runs on `kannasmacstudio.lan`); needs a direct curl or a remote read of `mlx_vlm/server.py` |
+| mlx-vlm's `:8080` route reads `enable_thinking`/`reasoning_effort` top-level vs. nested under `chat_template_kwargs` | **Unconfirmed either way** | No local install of `mlx_vlm` on this machine (it runs on `<studio-host>.lan`); needs a direct curl or a remote read of `mlx_vlm/server.py` |
 | GLM-4.7-Flash-4bit was tested on this same mlx-vlm stack with thinking explicitly forced on via `chat_template_kwargs: {"enable_thinking": true}` | Verified — and the closest internal prior to this experiment | `pi-harness-history.md:1133-1166` |
 
 ## Community findings (Reddit / HF discussions / independent write-ups, 2026-08-17)
@@ -200,7 +200,7 @@ fix follow-through even if the request format is correct.
 
 Three checks run live against `:8080/v1/chat/completions` directly
 (bypassing pi entirely), model
-`/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit`, prompt "A farmer has
+`/Users/me/code/ai-stack/models/Qwen3.8-27B-8bit`, prompt "A farmer has
 17 sheep. All but 9 die. How many sheep does the farmer have left? Answer
 with just the number.", `temperature: 0`, `max_tokens: 300`:
 
@@ -375,7 +375,7 @@ before drawing any conclusion.
   3 as a real test that can come back negative, not a confirmation
   exercise.
 - **`mlx_vlm` is not installed on this machine** — it runs on
-  `kannasmacstudio.lan`. Step 1's curl must run against that host (or via
+  `<studio-host>.lan`. Step 1's curl must run against that host (or via
   `AI_STACK_HOST`); source-reading `mlx_vlm/server.py` directly isn't
   possible from here without going to that box.
 

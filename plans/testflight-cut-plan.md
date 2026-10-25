@@ -8,9 +8,9 @@ was found and why — see `git show 7f64bb8` for the actual diffs. Ported to `co
 ## Confirmed real bugs in `scripts/release-facts.sh` (from adversarial testing, workflow wf_0d455652-fc9) — FIXED in 7f64bb8
 
 All reproduced with exact commands/output — see full detail in
-`~/.claude/projects/-Users-kanna-code-agent-configs/d6f9e434-369e-48a6-8c77-2efe0df1a4ec/subagents/workflows/wf_0d455652-fc9/journal.jsonl`
+`~/.claude/projects/-Users-me-code-agent-configs/d6f9e434-369e-48a6-8c77-2efe0df1a4ec/subagents/workflows/wf_0d455652-fc9/journal.jsonl`
 (task `test:release-facts`, plus the raw output file at
-`/private/tmp/claude-501/-Users-kanna-code-agent-configs/6298f324-eb68-43e2-b9a0-2c2c14935621/tasks/wfr67s4a0.output`).
+`/private/tmp/claude-501/-Users-me-code-agent-configs/6298f324-eb68-43e2-b9a0-2c2c14935621/tasks/wfr67s4a0.output`).
 
 1. **BLOCKER — fail-open state logic.** Line ~34: `grep -qx "$key" <<<"$defaults"`. When key
    extraction fails (empty `$key`) and `$defaults` is empty (the real, intentional current state),

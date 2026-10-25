@@ -346,7 +346,7 @@ that changes only how much output comes back") and the code respects it
 
 **`ai-stack-local.ts` — user-specific absolute paths.** Model IDs are
 hardcoded absolute filesystem paths
-(`/Users/kanna/code/ai-stack/models/Qwen3.6-27B-4bit`) rather than something
+(`/Users/me/code/ai-stack/models/Qwen3.6-27B-4bit`) rather than something
 portable. Given the README documents this is intentional (`enabledModels`
 in settings.json matches by substring against these exact path-style IDs),
 it's a known constraint, not an oversight — but it means this file cannot

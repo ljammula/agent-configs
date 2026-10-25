@@ -31,7 +31,7 @@ The focused deterministic extension checks pass locally:
   finding.
 
 The full benchmark comparison is still required. At this review point,
-`/Users/kanna/code/ai-stack/scratch-phase-validate/results.tsv` has only its
+`/Users/me/code/ai-stack/scratch-phase-validate/results.tsv` has only its
 header, `batch.log` is empty, and there is no active batch or Pi process. The
 status document says the fourth re-run was launched, but the current artifacts
 do not yet prove that it ran.

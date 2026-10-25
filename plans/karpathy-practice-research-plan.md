@@ -7,7 +7,7 @@ by design (no evidence yet that they're needed), not outstanding work.
 
 Source: workflow `wf_896310d0-59a` (task `wbnbwx4in`), 5 research lenses + adversarial
 verification pass. 63 findings, 33 held + 4 narrowed after refutation, 0 fully killed.
-Full raw output (all citations + per-agent trace): `/private/tmp/claude-501/-Users-kanna-code-agent-configs/6298f324-eb68-43e2-b9a0-2c2c14935621/tasks/wbnbwx4in.output`
+Full raw output (all citations + per-agent trace): `/private/tmp/claude-501/-Users-me-code-agent-configs/6298f324-eb68-43e2-b9a0-2c2c14935621/tasks/wbnbwx4in.output`
 
 > **Current-state correction (2026-08-02):** the deployed Pi reviewer is not
 > architecturally independent today. The primary and review pass both use the

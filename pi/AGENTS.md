@@ -109,13 +109,13 @@ Read-only local services are still worth using. The served endpoints are:
 | 8888 | SearXNG | web search |
 
 They need not run on this machine. `AI_STACK_HOST` names the serving host —
-default is `kannas-mac-studio` (already the live default in `~/.zshenv`),
+default is `<studio-host>` (already the live default in `~/.zshenv`),
 this box's Tailscale MagicDNS short name, resolving via Tailscale's own DNS
 rather than the LAN, on or off the LAN as long as Tailscale is running on
-both ends. Use the full FQDN `kannas-mac-studio.tailfb69fc.ts.net` on a
+both ends. Use the full FQDN `<studio-host>.<tailnet>.ts.net` on a
 client where Tailscale's resolver isn't the active DNS nameserver -- the
 short form depends on that. Fall back to the LAN mDNS name
-`kannasmacstudio.lan` only if Tailscale is down (never the raw DHCP IP --
+`<studio-host>.lan` only if Tailscale is down (never the raw DHCP IP --
 that's changed on every reboot). Unset, it defaults to `127.0.0.1`. Every
 script and reachability check resolves through it. Check reachability
 before relying on any of them — these instructions load on machines without

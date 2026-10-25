@@ -4,7 +4,7 @@
   "purpose": "Pre-registered mechanism check (see plans/pair4-reviewer-mechanism-check-plan.md): does cross-model-review.ts's harness arm emit a genuine reviewer trace on pair 4 (go-flutter/bookmarks-app) under real battery methodology, now that a settlement-time trigger exists where the reactive trigger structurally could not on 2026-08-04. Reviewed and pre-registered by an independent Opus pass before running.",
   "result": "INVALID per pre-registered criteria -- discarded, not reinterpreted",
   "invalidity_reason": "harness arm hit the fixture's 45-minute timeout (pi_exit 124, timed_out=true) before pi's own settlement/corrective loop converged, one of the invalidity conditions fixed in advance",
-  "runner": "pi/evals/run_single_pair.py --seed 20260802 --pair 4 --host kannasmacstudio.lan",
+  "runner": "pi/evals/run_single_pair.py --seed 20260802 --pair 4 --host mac-studio.lan",
   "arm_order": ["baseline", "harness"],
   "records": [
     {

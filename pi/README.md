@@ -574,7 +574,7 @@ rather than linking the file.
   "lastChangelogVersion": "0.83.0",
   "theme": "dark",
   "defaultProvider": "ai-stack-local",
-  "defaultModel": "/Users/kanna/code/ai-stack/models/Qwen3.8-27B-8bit",
+  "defaultModel": "/Users/me/code/ai-stack/models/Qwen3.8-27B-8bit",
   "defaultThinkingLevel": "off",
   "enabledModels": ["Qwen3.8-27B-8bit"],
   "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 24000 },
@@ -590,7 +590,7 @@ rather than linking the file.
   more of the available context for actual work.
 
 `AI_STACK_HOST` must be exported (it is, in `~/.zshrc`, set to
-`kannasmacstudio.lan` — the LAN box's raw IP has changed on every reboot via
+`<studio-host>.lan` — the LAN box's raw IP has changed on every reboot via
 DHCP reassignment, so `~/.zshrc` points at this stable router-assigned
 hostname instead) — unset, every provider points at `127.0.0.1:8080`, where
 nothing is listening on this Mac. Confirmed live: a plain `pi` launch from

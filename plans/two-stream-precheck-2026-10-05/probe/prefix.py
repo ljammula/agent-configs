@@ -1,6 +1,6 @@
 import json, sys, time, threading, urllib.request, random
 URL="http://127.0.0.1:18084/v1/chat/completions"; M="mtplx-qwen38-27b-optimized-quality"
-src=open('/Users/kanna/code/ai-stack/scripts/kv_concurrency_proxy.py').read()
+src=open('/Users/me/code/ai-stack/scripts/kv_concurrency_proxy.py').read()
 def prompt(tag):  # ~12K tokens of real code + a unique tag so the two sessions differ
     return f"Session {tag}. Review this file.\n\n" + src[:42000]
 def call(msgs, mx):

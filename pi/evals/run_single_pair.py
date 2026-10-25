@@ -15,7 +15,7 @@ reviewer fires under real battery methodology.
 
 Usage:
     python3 run_single_pair.py --seed 20260802 --pair 4 \
-        [--arm-order baseline,harness] [--host kannasmacstudio.lan] [--output DIR]
+        [--arm-order baseline,harness] [--host mac-studio.lan] [--output DIR]
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 Full 9-pair harness-arm run against the seeded task schedule
 (`run_screening.schedule(20260802)`), via `run_single_arm.py --arm harness`
-per pair, `--host kannasmacstudio.lan`. Baseline arms were not rerun.
+per pair, `--host <studio-host>.lan`. Baseline arms were not rerun.
 Default `progress-stall-guard.ts` settings throughout (10/20-minute
 backstop, `ACTION_SAME_FAILURE_THRESHOLDS = [8, 25]`, intercept off) —
 this is a coverage run, not the Recommendation-2 intercept-recovery trial
@@ -14,7 +14,7 @@ temporarily lowered thresholds and is not part of this battery).
 
 | Pair | Task | Valid | Passed | Time | Notes |
 |---:|---|:---:|:---:|---:|---|
-| 1 | `go-flutter/notes-app` | ✅ | ✅ | 1322.6s | Large dual-stack task; 78% of wall time was model decode (58 calls, 1035.8s, confirmed from `kannasmacstudio.lan`'s `qwen38.log`); 3 quality-gate fail rounds, 1 reviewer `blocked`→`clean` cycle before passing. |
+| 1 | `go-flutter/notes-app` | ✅ | ✅ | 1322.6s | Large dual-stack task; 78% of wall time was model decode (58 calls, 1035.8s, confirmed from `<studio-host>.lan`'s `qwen38.log`); 3 quality-gate fail rounds, 1 reviewer `blocked`→`clean` cycle before passing. |
 | 2 | `go/notes-api` | ✅ | ✅ | 238.5s | Clean. |
 | 3 | `dart/task-manager` | ✅ | ✅ | 276.0s | Clean. |
 | 4 | `go-flutter/bookmarks-app` | ✅ | ❌ | 2554.4s | **Real bug**: `handleList` in `server/bookmarksapi.go` appends live `*Bookmark` pointers from the map into the response slice and releases the lock before sorting/encoding, while `handleVisit` mutates the same struct under lock elsewhere — data race, caught by the hidden test's `-race` flag (`TestConcurrentVisits`), missed by 2 reviewer `clean` verdicts and 8 local quality-gate rounds (none run with `-race`). Also flagged (benign, unrelated): `artifact-guard` caught 2 untracked Dart toolchain-cache files >1MB at settle time — tooling exhaust, not model-authored, excluded from this repo copy. **Rerun at `medium` thinking produced the correct fix but the harness still recorded it as failed — see "Follow-up" section below.** |
