@@ -21,9 +21,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // AI_STACK_MODEL_ID / AI_STACK_CONTEXT_WINDOW override the served model and
 // its admission budget without editing this file (2026-10-03: used to trial
 // Qwen3.8-Flash-Next behind the same :8080 route, where mtplx caps context at
-// 81920 on a 96 GB Mac and the proxy rejects past ~62K). Defaults unchanged.
-const QWEN38_MODEL_ID =
-  process.env.AI_STACK_MODEL_ID || "/Users/me/code/ai-stack/models/Qwen3.8-27B-MTPLX-Optimized-Quality";
+// 81920 on a 96 GB Mac and the proxy rejects past ~62K).
+// Since 2026-10-15 :8080 serves Qwen3.8-Flash-Next on Strata; the proxy lists it
+// as "qwen38-flash-next" (2026-11-01) and still accepts the 27B-era ids.
+const QWEN38_MODEL_ID = process.env.AI_STACK_MODEL_ID || "qwen38-flash-next";
 const CONTEXT_WINDOW = Number(process.env.AI_STACK_CONTEXT_WINDOW) || 171212;
 // mlx-vlm's OpenAI-compatible server defaults unset sampling fields to
 // greedy/no-op values (temperature 0.0, no top_p/top_k/presence_penalty
