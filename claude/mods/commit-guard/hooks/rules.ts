@@ -47,21 +47,52 @@ export function join(dir: string, path: string, home: string): string {
   return `${dir}/${path}`
 }
 
-/** Each `git commit -F` file as a full path, following `cd dir` segments and `git -C dir`. */
-export function commitFiles(parts: readonly string[], cwd: string, home: string): string[] {
-  const files: string[] = []
-  let dir = cwd
-  for (const part of parts) {
-    const cd = CD.exec(part)?.[1]
-    if (cd !== undefined) {
-      dir = join(dir, unquote(cd), home)
+/** A `cd` target the guard can follow; `$VAR`, a backtick, `-` or a bare `cd` cannot be. */
+const isFollowable = (target: string): boolean => target !== '-' && !/[$`]/.test(target)
+
+/** A segment without the subshell or group brackets around it: `(cd x` -> `cd x`. */
+const ungroup = (part: string): string => part.replace(/^[({]\s*/, '').replace(/\s*[)}]$/, '')
+
+const isCd = (part: string): boolean => /^cd\b/.test(part)
+
+/** The folder a `cd` segment moves to; undefined when it cannot be told. */
+function afterCd(part: string, dir: string | undefined, home: string): string | undefined {
+  const target = CD.exec(part)?.[1]
+  if (dir === undefined || target === undefined) return undefined
+  const unquoted = unquote(target)
+  return isFollowable(unquoted) ? join(dir, unquoted, home) : undefined
+}
+
+/** git's folder for a commit segment: each `-C dir` before `commit`, applied in order. */
+function gitFolder(part: string, dir: string, home: string): string | undefined {
+  const globals = part.slice(0, part.search(/\scommit\b/))
+  let folder = dir
+  for (const match of globals.matchAll(new RegExp(GIT_DIR, 'g'))) {
+    const target = unquote(match[1] ?? '')
+    if (!isFollowable(target)) return undefined
+    folder = join(folder, target, home)
+  }
+  return folder
+}
+
+/**
+ * Each `git commit -F` file as a full path, following `cd dir` segments and
+ * `git -C dir`; `{ unknown }` names a relative file whose folder cannot be told.
+ */
+export function commitFiles(parts: readonly string[], cwd: string, home: string): Array<string | { unknown: string }> {
+  const files: Array<string | { unknown: string }> = []
+  let dir: string | undefined = cwd
+  for (const raw of parts) {
+    const part = ungroup(raw)
+    if (isCd(part)) {
+      dir = afterCd(part, dir, home)
       continue
     }
     const file = commitFile(part)
     if (file === undefined) continue
-    const gitDir = GIT_DIR.exec(part)?.[1]
-    const base = gitDir === undefined ? dir : join(dir, unquote(gitDir), home)
-    files.push(join(base, file, home))
+    const absoluteFile = file.startsWith('/') || file.startsWith('~')
+    const base = dir === undefined ? undefined : gitFolder(part, dir, home)
+    files.push(base === undefined && !absoluteFile ? { unknown: file } : join(base ?? '/', file, home))
   }
   return files
 }

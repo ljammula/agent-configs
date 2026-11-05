@@ -44,3 +44,14 @@ test('-F paths follow cd segments, git -C and ~', () => {
   expect(files('git -C ../app commit -F msg.txt')).toEqual(['/s/../app/msg.txt'])
   expect(files('cd /r && git -C sub commit -F "/abs/m.txt"')).toEqual(['/abs/m.txt'])
 })
+
+test('subshells, repeated -C and untraceable cds', () => {
+  const files = (cmd: string) => commitFiles(segments(cmd), '/s', '/h')
+  expect(files('(cd sub && git commit -F msg.txt)')).toEqual(['/s/sub/msg.txt'])
+  expect(files('git -C a -C b commit -F m.txt')).toEqual(['/s/a/b/m.txt'])
+  expect(files('git commit -C HEAD -F m.txt')).toEqual(['/s/m.txt'])
+  expect(files('cd "$REPO" && git commit -F m.txt')).toEqual([{ unknown: 'm.txt' }])
+  expect(files('cd - && git commit -F m.txt')).toEqual([{ unknown: 'm.txt' }])
+  expect(files('cd && git commit -F m.txt')).toEqual([{ unknown: 'm.txt' }])
+  expect(files('cd "$REPO" && git commit -F /abs/m.txt')).toEqual(['/abs/m.txt'])
+})

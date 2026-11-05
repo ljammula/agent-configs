@@ -25,14 +25,24 @@ const LINKED_CODE: Links = {
   '/h/code/agent-configs/README.md': '/vol/code/agent-configs/README.md',
 }
 
+// A dangling link: its target was deleted.
+const DANGLING: Record<string, string> = {
+  '/h/.claude/CLAUDE.md': '/h/code/agent-configs/claude/CLAUDE.md',
+}
+
 function engine(on: Parameters<TestBody>[1], links: Links = LINKS) {
   on('env.get', () => ({ value: '/h' }))
   on('session.cwd', () => ({ value: '/h/code/app' }))
   on('fs.stat', (_, e) => {
+    const dangling = DANGLING[e.path] !== undefined
+    if (dangling && !e.resolve) return { value: { kind: 'other', size: 0, mtimeMs: 0, isLink: true } }
     const realPath = links[e.path]
     if (realPath === undefined) throw new Error('ENOENT')
     return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false, realPath } }
   })
+  on('process.run', (_, e) => ({
+    value: { exitCode: 0, stdout: `${DANGLING[e.argv[1] ?? ''] ?? ''}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
   on('tool.call', () => ({ result: { text: 'ok' } }))
 }
 
@@ -57,6 +67,17 @@ test('~, relative and .. spellings are resolved before the check', async ($, on)
   expect(denied(await $.tool.call(write('~/.claude/skills/x/SKILL.md')))).toBe(true)
   expect(denied(await $.tool.call(write('../../.claude/skills/x/SKILL.md')))).toBe(true)
   expect(denied(await $.tool.call(write('/h/code/agent-configs/../../.claude/skills/x/SKILL.md')))).toBe(true)
+})
+
+test('.. is folded by the engine before the hook, so x/../y is checked (and written) as y', async ($, on) => {
+  engine(on)
+  // The Write tool writes the folded path too, so an unlinked ~/.claude/skills/y is not the source.
+  expect(denied(await $.tool.call(write('/h/.claude/skills/x/../y/SKILL.md')))).toBe(false)
+})
+
+test('a write through a dangling link into the source is refused', async ($, on) => {
+  engine(on)
+  expect(denied(await $.tool.call(write('/h/.claude/CLAUDE.md')))).toBe(true)
 })
 
 test('edits at the source and elsewhere go through', async ($, on) => {

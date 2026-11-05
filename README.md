@@ -327,8 +327,13 @@ Limits:
 - Commands are recognised behind `VAR=x`, `rtk` / `rtk proxy` and git's
   global options (`-C`, `-c`, `--flag`); other wrappers are not.
 - `commit-guard` reads the `-F` file before the command runs, so it misses
-  a file written by the same command. It follows `cd dir` segments and
-  `git -C dir` to find a relative file.
+  a file written by the same command. It follows `cd dir` segments (also in
+  a `( ... )` subshell) and each `git -C dir` to find a relative file, and
+  refuses a relative file after a `cd` it cannot follow (`$VAR`, `cd -`, bare
+  `cd`).
+- `agent-configs-guard` relies on the engine folding `..` in Edit/Write
+  paths before hooks run (the tool writes the folded path); it follows a
+  dangling link's target with `readlink`.
 - `install.sh` skips the mods from a worktree, and re-points the
   `agent-configs` marketplace when it was recorded at another path.
 

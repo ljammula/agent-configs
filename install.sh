@@ -195,9 +195,18 @@ install_claude_mods() {
     return
   fi
 
-  local recorded
-  recorded="$(claude plugin marketplace list --json | jq -r '.[] | select(.name == "agent-configs") | .path // empty')"
-  if [[ -n "$recorded" && "$recorded" != "$REPO_ROOT" ]]; then
+  local entry source recorded here
+  entry="$(claude plugin marketplace list --json | jq -c '.[] | select(.name == "agent-configs")')"
+  source="$(jq -r '.source // empty' <<<"$entry")"
+  if [[ -n "$entry" && "$source" != "directory" ]]; then
+    echo "skipped Claude mods: marketplace agent-configs has source '$source', not this folder; remove it first"
+    return
+  fi
+  # Compare resolved paths, so a trailing slash or a linked ~/code is not a move.
+  # Removing the marketplace uninstalls its plugins, so do it only on a real move.
+  here="$(cd "$REPO_ROOT" && pwd -P)"
+  recorded="$(jq -r '.path // empty' <<<"$entry")"
+  if [[ -n "$recorded" ]] && [[ "$(cd "$recorded" 2>/dev/null && pwd -P)" != "$here" ]]; then
     echo "re-pointing marketplace agent-configs: $recorded -> $REPO_ROOT"
     claude plugin marketplace remove agent-configs
     recorded=""

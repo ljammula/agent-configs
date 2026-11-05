@@ -1,6 +1,10 @@
 // Pure path helpers for the guard: spelling only, no file system.
 
-/** Folds `.`, `..` and repeated slashes in an absolute path. */
+/**
+ * Folds `.`, `..` and repeated slashes in an absolute path. The engine folds
+ * Edit/Write paths the same way before any hook runs, and the tool writes the
+ * folded path, so the guard checks what is written.
+ */
 export function normalize(path: string): string {
   const out: string[] = []
   for (const part of path.split('/')) {

@@ -1,8 +1,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { absolute, isUnder, parent, sourceSpelling } from './paths'
+import { absolute, isUnder, normalize, parent, sourceSpelling } from './paths'
 
 const SOURCE_ROOT = 'code/agent-configs'
+const MAX_LINK_HOPS = 8
 
 async function resolve($: EngineInterface, path: string): Promise<string | undefined> {
   try {
@@ -13,15 +14,28 @@ async function resolve($: EngineInterface, path: string): Promise<string | undef
   }
 }
 
-// Where a path lands, following links: the nearest ancestor that exists, resolved, plus the rest.
-async function landing($: EngineInterface, path: string): Promise<string> {
+// A dangling link resolves to nothing; its target, read without following it, still says where a write would land.
+async function danglingTarget($: EngineInterface, path: string): Promise<string | undefined> {
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  if (stat?.isLink !== true) return undefined
+  const { exitCode, stdout } = await $.process.run(['readlink', path], { timeoutMs: 5000 })
+  const target = stdout.replace(/\n$/, '')
+  if (exitCode !== 0 || target === '') return undefined
+  return target.startsWith('/') ? target : `${parent(path)}/${target}`
+}
+
+// Where a path lands, following links: the nearest ancestor that resolves (or a dangling
+// link's target), plus the rest.
+async function landing($: EngineInterface, path: string, hops = 0): Promise<string> {
   let rest = ''
   for (let at = path; at !== '/'; at = parent(at)) {
     const real = await resolve($, at)
-    if (real !== undefined) return `${real}${rest}`
+    if (real !== undefined) return normalize(`${real}${rest}`)
+    const target = hops < MAX_LINK_HOPS ? await danglingTarget($, at) : undefined
+    if (target !== undefined) return landing($, `${target}${rest}`, hops + 1)
     rest = `${at.slice(at.lastIndexOf('/'))}${rest}`
   }
-  return path
+  return normalize(path)
 }
 
 // Denies a path that lands in agent-configs only by way of a symlink.

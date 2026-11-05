@@ -12,6 +12,9 @@ export const register: Register = on => {
 
     const home = (await $.env.get('HOME')) ?? ''
     for (const path of commitFiles(parts, await $.session.cwd(), home)) {
+      if (typeof path !== 'string') {
+        return { deny: `Cannot tell which folder \`-F ${path.unknown}\` is read from (cd to a variable, \`cd -\` or a bare cd). Pass the message file as an absolute path.` }
+      }
       // A file that cannot be read now (written later in the same command) is not checked.
       const text = await $.fs.read(path).catch(() => '')
       if (TRAILER.test(text)) {
