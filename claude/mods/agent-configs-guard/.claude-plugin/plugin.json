@@ -1,0 +1,1 @@
+{ "name": "agent-configs-guard", "version": "0.1.0", "description": "Blocks edits that reach ~/code/agent-configs through a symlink; names the source path to edit instead." }

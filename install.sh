@@ -179,4 +179,50 @@ link_skills "$REPO_ROOT/codex/skills" "$HOME/.copilot/skills" "${COPILOT_SHARED_
 # README's "Global vs. local"), and a symlink or a commit there would hand
 # this machine's real config to anyone who clones or `pi install`s it.
 
+# Claude Code mods (claude/mods/<name>/): installed from this repo as a folder
+# marketplace, so Claude reads them from this checkout and an edit here
+# applies on /reload-plugins. Run from the main checkout, never a worktree:
+# the marketplace records this path.
+CLAUDE_MODS=(agent-configs-guard commit-guard gh-account-guard workbench-status)
+install_claude_mods() {
+  if ! command -v claude >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "skipped Claude mods: needs claude and jq on PATH"
+    return
+  fi
+  # A worktree's git dir differs from the common one; its path dies with the worktree.
+  if [[ "$(git -C "$REPO_ROOT" rev-parse --git-dir)" != "$(git -C "$REPO_ROOT" rev-parse --git-common-dir)" ]]; then
+    echo "skipped Claude mods: $REPO_ROOT is a worktree; rerun from the main checkout"
+    return
+  fi
+
+  local entry source recorded here
+  entry="$(claude plugin marketplace list --json | jq -c '.[] | select(.name == "agent-configs")')"
+  source="$(jq -r '.source // empty' <<<"$entry")"
+  if [[ -n "$entry" && "$source" != "directory" ]]; then
+    echo "skipped Claude mods: marketplace agent-configs has source '$source', not this folder; remove it first"
+    return
+  fi
+  # Compare resolved paths, so a trailing slash or a linked ~/code is not a move.
+  # Removing the marketplace uninstalls its plugins, so do it only on a real move.
+  here="$(cd "$REPO_ROOT" && pwd -P)"
+  recorded="$(jq -r '.path // empty' <<<"$entry")"
+  if [[ -n "$recorded" ]] && [[ "$(cd "$recorded" 2>/dev/null && pwd -P)" != "$here" ]]; then
+    echo "re-pointing marketplace agent-configs: $recorded -> $REPO_ROOT"
+    claude plugin marketplace remove agent-configs
+    recorded=""
+  fi
+  if [[ -z "$recorded" ]]; then
+    claude plugin marketplace add "$REPO_ROOT"
+  fi
+
+  local installed name
+  installed="$(claude plugin list --json | jq -r '.[].id')"
+  for name in "${CLAUDE_MODS[@]}"; do
+    if ! grep -qx "$name@agent-configs" <<<"$installed"; then
+      claude plugin install "$name@agent-configs"
+    fi
+  done
+}
+install_claude_mods
+
 echo "done."
