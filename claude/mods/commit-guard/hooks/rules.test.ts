@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commitFile, segments, verdict } from './rules'
+import { commitFile, commitFiles, segments, verdict } from './rules'
 
 const denies = (cmd: string) => verdict(segments(cmd)) !== undefined
 
@@ -27,4 +27,20 @@ test('the -F file is found, quotes stripped, stdin ignored', () => {
   expect(commitFile('git commit --file=msg.txt')).toBe('msg.txt')
   expect(commitFile('git commit -F -')).toBe(undefined)
   expect(commitFile('git push')).toBe(undefined)
+})
+
+test('rtk wrappers and git global options are still checked', () => {
+  expect(denies('rtk git commit -m x')).toBe(true)
+  expect(denies('rtk proxy git commit -m x')).toBe(true)
+  expect(denies('git -c user.name=x commit -m y')).toBe(true)
+  expect(denies('git --no-pager commit -m y')).toBe(true)
+  expect(denies('rtk gh pr create --body x')).toBe(true)
+})
+
+test('-F paths follow cd segments, git -C and ~', () => {
+  const files = (cmd: string) => commitFiles(segments(cmd), '/s', '/h')
+  expect(files('git commit -F msg.txt')).toEqual(['/s/msg.txt'])
+  expect(files('cd ~/code/app && git commit -F .git/MSG')).toEqual(['/h/code/app/.git/MSG'])
+  expect(files('git -C ../app commit -F msg.txt')).toEqual(['/s/../app/msg.txt'])
+  expect(files('cd /r && git -C sub commit -F "/abs/m.txt"')).toEqual(['/abs/m.txt'])
 })

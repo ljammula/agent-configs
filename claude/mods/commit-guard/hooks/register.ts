@@ -1,6 +1,8 @@
 import type { Register } from 'claude-code'
 
-import { commitFile, segments, verdict } from './rules'
+import { commitFiles, segments, verdict } from './rules'
+
+const TRAILER = /^Co-Authored-By:\s*Claude/im
 
 export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -8,14 +10,12 @@ export const register: Register = on => {
     const inline = verdict(parts)
     if (inline !== undefined) return { deny: inline }
 
-    for (const part of parts) {
-      const file = commitFile(part)
-      if (file === undefined) continue
-
-      const path = file.startsWith('/') ? file : `${await $.session.cwd()}/${file}`
+    const home = (await $.env.get('HOME')) ?? ''
+    for (const path of commitFiles(parts, await $.session.cwd(), home)) {
+      // A file that cannot be read now (written later in the same command) is not checked.
       const text = await $.fs.read(path).catch(() => '')
-      if (/^Co-Authored-By:\s*Claude/im.test(text)) {
-        return { deny: `${file} has a Co-Authored-By: Claude trailer; CLAUDE.md says to leave it out. Remove the line and commit again.` }
+      if (TRAILER.test(text)) {
+        return { deny: `${path} has a Co-Authored-By: Claude trailer; CLAUDE.md says to leave it out. Remove the line and commit again.` }
       }
     }
 

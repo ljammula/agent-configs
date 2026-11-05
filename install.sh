@@ -184,16 +184,36 @@ link_skills "$REPO_ROOT/codex/skills" "$HOME/.copilot/skills" "${COPILOT_SHARED_
 # applies on /reload-plugins. Run from the main checkout, never a worktree:
 # the marketplace records this path.
 CLAUDE_MODS=(agent-configs-guard commit-guard gh-account-guard workbench-status)
-if command -v claude >/dev/null 2>&1; then
-  if ! claude plugin marketplace list --json | jq -e 'any(.[]; .name == "agent-configs")' >/dev/null; then
+install_claude_mods() {
+  if ! command -v claude >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "skipped Claude mods: needs claude and jq on PATH"
+    return
+  fi
+  # A worktree's git dir differs from the common one; its path dies with the worktree.
+  if [[ "$(git -C "$REPO_ROOT" rev-parse --git-dir)" != "$(git -C "$REPO_ROOT" rev-parse --git-common-dir)" ]]; then
+    echo "skipped Claude mods: $REPO_ROOT is a worktree; rerun from the main checkout"
+    return
+  fi
+
+  local recorded
+  recorded="$(claude plugin marketplace list --json | jq -r '.[] | select(.name == "agent-configs") | .path // empty')"
+  if [[ -n "$recorded" && "$recorded" != "$REPO_ROOT" ]]; then
+    echo "re-pointing marketplace agent-configs: $recorded -> $REPO_ROOT"
+    claude plugin marketplace remove agent-configs
+    recorded=""
+  fi
+  if [[ -z "$recorded" ]]; then
     claude plugin marketplace add "$REPO_ROOT"
   fi
+
+  local installed name
   installed="$(claude plugin list --json | jq -r '.[].id')"
   for name in "${CLAUDE_MODS[@]}"; do
     if ! grep -qx "$name@agent-configs" <<<"$installed"; then
       claude plugin install "$name@agent-configs"
     fi
   done
-fi
+}
+install_claude_mods
 
 echo "done."

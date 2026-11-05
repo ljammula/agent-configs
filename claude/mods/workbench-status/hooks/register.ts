@@ -25,18 +25,26 @@ async function refresh($: EngineInterface): Promise<void> {
   $.ui.status(line({ account: who, model: modelState(slots), search: searx !== undefined }))
 }
 
+// Never awaited by a hook: a slow probe must not hold up a session start or a tool result.
+function refreshLater($: EngineInterface): void {
+  refresh($).catch(() => $.ui.log(`${$.plugin.name}: status refresh failed`))
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await refresh($)
-    $.clock.every(PERIOD_MS, () => refresh($))
+    // -p and SDK sessions draw no status line, so they get no poller.
+    if (e.isInteractive) {
+      refreshLater($)
+      $.clock.every(PERIOD_MS, () => refreshLater($))
+    }
     return started
   })
 
   // A gh auth switch changes the account now, not at the next tick.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    if (/\bgh\s+auth\s+switch\b/.test(e.command)) await refresh($)
+    if (/\bgh\s+auth\s+switch\b/.test(e.command)) refreshLater($)
     return ran
   })
 }

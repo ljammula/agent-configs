@@ -1,10 +1,17 @@
 // Pure rules for the commit guard: no I/O here, so tests need no engine.
 
-const GIT_COMMIT = /^(?:\w+=\S*\s+)*git\b(?:\s+-[Cc]\s+\S+)*\s+commit\b/
+// Same prefix as gh-account-guard's rules.ts: env assignments and an `rtk` / `rtk proxy` wrapper.
+const PREFIX = String.raw`^(?:\w+=\S*\s+)*(?:rtk\s+(?:proxy\s+)?)?`
+// git's global options before the subcommand: -C dir, -c key=value, --flag[=value].
+const GIT = String.raw`git(?:\s+-[Cc]\s+\S+|\s+--[\w-]+(?:=\S+)?)*`
+const GIT_COMMIT = new RegExp(String.raw`${PREFIX}${GIT}\s+commit\b`)
+const GH_BODY_CMD = new RegExp(String.raw`${PREFIX}gh\s+(?:pr|issue)\s+(?:create|edit|comment|review)\b`)
 const MESSAGE_FLAG = /\s(?:--message\b|-[a-zA-Z]*m)/
-const GH_BODY_CMD = /^(?:\w+=\S*\s+)*gh\s+(?:pr|issue)\s+(?:create|edit|comment|review)\b/
 const BODY_FLAG = /\s(?:--body(?!-file)\b|-b\b)/
-const FILE_FLAG = /\s(?:-F|--file)(?:=|\s+)("[^"]+"|'[^']+'|\S+)/
+const WORD = String.raw`("[^"]+"|'[^']+'|\S+)`
+const FILE_FLAG = new RegExp(String.raw`\s(?:-F|--file)(?:=|\s+)${WORD}`)
+const GIT_DIR = new RegExp(String.raw`\s-C\s+${WORD}`)
+const CD = new RegExp(String.raw`^cd\s+${WORD}$`)
 
 /** Splits a shell command on &&, ||, ;, | and newlines (quotes not honoured: best effort). */
 export const segments = (command: string): string[] =>
@@ -23,10 +30,38 @@ export function verdict(parts: readonly string[]): string | undefined {
   return undefined
 }
 
+const unquote = (word: string): string => word.replace(/^["']|["']$/g, '')
+
 /** The message file a `git commit -F` names, unquoted; undefined for stdin or no -F. */
 export function commitFile(part: string): string | undefined {
   if (!GIT_COMMIT.test(part)) return undefined
-  const match = FILE_FLAG.exec(part)
-  const file = match?.[1]?.replace(/^["']|["']$/g, '')
-  return file === undefined || file === '-' ? undefined : file
+  const word = FILE_FLAG.exec(part)?.[1]
+  const file = word === undefined ? undefined : unquote(word)
+  return file === '-' ? undefined : file
+}
+
+/** `path` from `dir`, unless it is absolute or starts at home. */
+export function join(dir: string, path: string, home: string): string {
+  if (path.startsWith('/')) return path
+  if (path === '~' || path.startsWith('~/')) return `${home}${path.slice(1)}`
+  return `${dir}/${path}`
+}
+
+/** Each `git commit -F` file as a full path, following `cd dir` segments and `git -C dir`. */
+export function commitFiles(parts: readonly string[], cwd: string, home: string): string[] {
+  const files: string[] = []
+  let dir = cwd
+  for (const part of parts) {
+    const cd = CD.exec(part)?.[1]
+    if (cd !== undefined) {
+      dir = join(dir, unquote(cd), home)
+      continue
+    }
+    const file = commitFile(part)
+    if (file === undefined) continue
+    const gitDir = GIT_DIR.exec(part)?.[1]
+    const base = gitDir === undefined ? dir : join(dir, unquote(gitDir), home)
+    files.push(join(base, file, home))
+  }
+  return files
 }

@@ -315,16 +315,22 @@ Claude reads them from this folder, so an edit here applies on
 |---|---|---|
 | `agent-configs-guard` | `tool.call` Edit, Write, NotebookEdit | Denies a path that lands in `~/code/agent-configs` only through a symlink; the reason names the source path |
 | `commit-guard` | `tool.call` Bash | Denies `git commit -m/-am/--message` and `gh pr/issue create/edit/comment/review --body/-b`; denies a `git commit -F` file holding `Co-Authored-By: Claude` |
-| `gh-account-guard` | `tool.call` Bash | Denies `git push`, `gh pr create/merge`, `gh release create` unless the active account is `ljammula`, and `gh pr review` unless it is `narsimha-j`; follows `gh auth switch --user` within the command |
+| `gh-account-guard` | `tool.call` Bash | Denies `git push`, `gh pr create/merge`, `gh release create` unless the active account is `ljammula`, and `gh pr review` unless it is `narsimha-j`; follows `gh auth switch -u/--user` within the command, and refuses a gated command after a bare `gh auth switch` |
 | `workbench-status` | `session.start`, `tool.call` Bash | Status line `gh:<account>  8080:<idle\|busy\|down>  searx:<up\|down>`, every 30 s and after `gh auth switch`; host from `AI_STACK_HOST` |
 
 Limits:
 
 - The guards fail open: a hook that throws logs a line and lets the call run.
 - Shell commands are split on `&&`, `||`, `;`, `|` and newlines without
-  honouring quotes: best effort.
+  honouring quotes: best effort. A heredoc whose text holds a gated command
+  after `&&` can be refused; write such files with the Write tool.
+- Commands are recognised behind `VAR=x`, `rtk` / `rtk proxy` and git's
+  global options (`-C`, `-c`, `--flag`); other wrappers are not.
 - `commit-guard` reads the `-F` file before the command runs, so it misses
-  a file written by the same command.
+  a file written by the same command. It follows `cd dir` segments and
+  `git -C dir` to find a relative file.
+- `install.sh` skips the mods from a worktree, and re-points the
+  `agent-configs` marketplace when it was recorded at another path.
 
 Check a mod:
 

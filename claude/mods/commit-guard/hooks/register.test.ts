@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 test('a message file with a Claude trailer is refused', async ($, on) => {
   on('session.cwd', () => ({ value: '/repo' }))
+  on('env.get', () => ({ value: '/h' }))
   on('fs.read', () => ({ value: 'feat: x\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' }))
   on('tool.call', () => ({ result: {} }))
 
@@ -11,6 +12,7 @@ test('a message file with a Claude trailer is refused', async ($, on) => {
 
 test('a clean message file goes through', async ($, on) => {
   on('session.cwd', () => ({ value: '/repo' }))
+  on('env.get', () => ({ value: '/h' }))
   on('fs.read', () => ({ value: 'feat: x\n' }))
   on('tool.call', () => ({ result: { text: 'ok' } }))
 

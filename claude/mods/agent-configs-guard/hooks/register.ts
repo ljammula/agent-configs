@@ -1,5 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
+import { absolute, isUnder, parent, sourceSpelling } from './paths'
+
 const SOURCE_ROOT = 'code/agent-configs'
 
 async function resolve($: EngineInterface, path: string): Promise<string | undefined> {
@@ -11,30 +13,32 @@ async function resolve($: EngineInterface, path: string): Promise<string | undef
   }
 }
 
-// Where a path lands, following links; for a file not written yet, where its folder lands.
-async function landing($: EngineInterface, path: string): Promise<string | undefined> {
-  const direct = await resolve($, path)
-  if (direct !== undefined) return direct
-
-  const slash = path.lastIndexOf('/')
-  if (slash <= 0) return undefined
-  const folder = await resolve($, path.slice(0, slash))
-  return folder === undefined ? undefined : `${folder}${path.slice(slash)}`
+// Where a path lands, following links: the nearest ancestor that exists, resolved, plus the rest.
+async function landing($: EngineInterface, path: string): Promise<string> {
+  let rest = ''
+  for (let at = path; at !== '/'; at = parent(at)) {
+    const real = await resolve($, at)
+    if (real !== undefined) return `${real}${rest}`
+    rest = `${at.slice(at.lastIndexOf('/'))}${rest}`
+  }
+  return path
 }
 
-const isUnder = (path: string, root: string) => path === root || path.startsWith(`${root}/`)
-
 // Denies a path that lands in agent-configs only by way of a symlink.
-async function check($: EngineInterface, path: string): Promise<string | undefined> {
+async function check($: EngineInterface, rawPath: string): Promise<string | undefined> {
   const home = await $.env.get('HOME')
-  if (home === undefined || !path.startsWith('/')) return undefined
+  if (home === undefined) return undefined
 
-  const root = (await resolve($, `${home}/${SOURCE_ROOT}`)) ?? `${home}/${SOURCE_ROOT}`
+  const path = absolute(rawPath, await $.session.cwd(), home)
+  const literalRoot = `${home}/${SOURCE_ROOT}`
+  const realRoot = (await resolve($, literalRoot)) ?? literalRoot
+  if (isUnder(path, literalRoot) || isUnder(path, realRoot)) return undefined
+
   const real = await landing($, path)
-  if (real === undefined || !isUnder(real, root) || isUnder(path, root)) return undefined
+  if (!isUnder(real, realRoot)) return undefined
 
-  const source = `~/${SOURCE_ROOT}${real.slice(root.length)}`
-  return `${path} is a symlink into agent-configs. Edit the source instead: ${source} (then rerun ./install.sh from the main checkout after merge).`
+  const source = sourceSpelling(real, realRoot, SOURCE_ROOT)
+  return `${rawPath} is a symlink into agent-configs. Edit the source instead: ${source} (then rerun ./install.sh from the main checkout after merge).`
 }
 
 export const register: Register = on => {

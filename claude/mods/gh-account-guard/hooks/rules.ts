@@ -3,10 +3,17 @@
 export const OWNER = 'ljammula'
 export const REVIEWER = 'narsimha-j'
 
-const PREFIX = String.raw`^(?:\w+=\S*\s+)*`
-const OWNER_ONLY = new RegExp(`${PREFIX}(?:git\\b(?:\\s+-C\\s+\\S+)*\\s+push\\b|gh\\s+pr\\s+(?:create|merge)\\b|gh\\s+release\\s+create\\b)`)
-const REVIEWER_ONLY = new RegExp(`${PREFIX}gh\\s+pr\\s+review\\b`)
-const SWITCH = new RegExp(`${PREFIX}gh\\s+auth\\s+switch\\b.*--user(?:=|\\s+)(\\S+)`)
+// Same prefix as commit-guard's rules.ts: env assignments and an `rtk` / `rtk proxy` wrapper.
+const PREFIX = String.raw`^(?:\w+=\S*\s+)*(?:rtk\s+(?:proxy\s+)?)?`
+// git's global options before the subcommand: -C dir, -c key=value, --flag[=value].
+const GIT = String.raw`git(?:\s+-[Cc]\s+\S+|\s+--[\w-]+(?:=\S+)?)*`
+const OWNER_ONLY = new RegExp(String.raw`${PREFIX}(?:${GIT}\s+push\b|gh\s+pr\s+(?:create|merge)\b|gh\s+release\s+create\b)`)
+const REVIEWER_ONLY = new RegExp(String.raw`${PREFIX}gh\s+pr\s+review\b`)
+const SWITCH = new RegExp(String.raw`${PREFIX}gh\s+auth\s+switch\b`)
+const SWITCH_USER = /\s(?:-u|--user)(?:=|\s+)["']?([\w-]+)["']?/
+
+/** A bare `gh auth switch` picks an account by what is logged in, so the guard cannot tell which. */
+const UNKNOWN = 'whatever account a bare `gh auth switch` picked'
 
 export const segments = (command: string): string[] =>
   command.split(/&&|\|\||[;|\n]/).map(s => s.trim()).filter(Boolean)
@@ -22,14 +29,14 @@ export function needs(part: string): string | undefined {
 export function mismatch(command: string, active: string): string | undefined {
   let account = active
   for (const part of segments(command)) {
-    const switched = SWITCH.exec(part)?.[1]
-    if (switched !== undefined) {
-      account = switched
+    if (SWITCH.test(part)) {
+      account = SWITCH_USER.exec(part)?.[1] ?? UNKNOWN
       continue
     }
     const wanted = needs(part)
     if (wanted !== undefined && wanted !== account) {
-      return `\`${part}\` would run as ${account}; it must run as ${wanted}. Run \`gh auth switch --user ${wanted}\` first${wanted === REVIEWER ? `, then switch back to ${OWNER} after the review` : ''}.`
+      const back = wanted === REVIEWER ? `, then switch back to ${OWNER} after the review` : ''
+      return `\`${part}\` would run as ${account}; it must run as ${wanted}. Run \`gh auth switch --user ${wanted}\` first${back}.`
     }
   }
   return undefined
