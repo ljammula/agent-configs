@@ -54,8 +54,7 @@
     "cc-pr-tracker@cc-pr-tracker": true,
     "agent-configs-guard@agent-configs": true,
     "commit-guard@agent-configs": true,
-    "gh-account-guard@agent-configs": true,
-    "workbench-status@agent-configs": true
+    "gh-account-guard@agent-configs": true
   },
   "extraKnownMarketplaces": {
     "claude-code-mods": {

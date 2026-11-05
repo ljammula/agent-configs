@@ -183,7 +183,7 @@ link_skills "$REPO_ROOT/codex/skills" "$HOME/.copilot/skills" "${COPILOT_SHARED_
 # marketplace, so Claude reads them from this checkout and an edit here
 # applies on /reload-plugins. Run from the main checkout, never a worktree:
 # the marketplace records this path.
-CLAUDE_MODS=(agent-configs-guard commit-guard gh-account-guard workbench-status)
+CLAUDE_MODS=(agent-configs-guard commit-guard gh-account-guard)
 install_claude_mods() {
   if ! command -v claude >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     echo "skipped Claude mods: needs claude and jq on PATH"
