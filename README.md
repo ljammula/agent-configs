@@ -80,8 +80,7 @@ agent-configs/
 │   ├── mods/                  # Claude Code mods (hooks modules), installed via the root .claude-plugin/marketplace.json
 │   │   ├── agent-configs-guard/ # Blocks edits through a symlink into this repo; names the source path
 │   │   ├── commit-guard/      # Requires git commit -F / gh --body-file; blocks a Co-Authored-By: Claude trailer
-│   │   ├── gh-account-guard/  # push/merge/PR create as ljammula, gh pr review as narsimha-j
-│   │   └── workbench-status/  # Status line: active gh account, :8080 idle/busy/down, SearXNG up/down
+│   │   └── gh-account-guard/  # push/merge/PR create as ljammula, gh pr review as narsimha-j
 │   └── skills/
 │       ├── agent-brief/       # Subagent briefs: model tier, foreground tests, shared resources, result checks
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
@@ -316,7 +315,6 @@ Claude reads them from this folder, so an edit here applies on
 | `agent-configs-guard` | `tool.call` Edit, Write, NotebookEdit | Denies a path that lands in `~/code/agent-configs` only through a symlink; the reason names the source path |
 | `commit-guard` | `tool.call` Bash | Denies `git commit -m/-am/--message` and `gh pr/issue create/edit/comment/review --body/-b`; denies a `git commit -F` file holding `Co-Authored-By: Claude` |
 | `gh-account-guard` | `tool.call` Bash | Denies `git push`, `gh pr create/merge`, `gh release create` unless the active account is `ljammula`, and `gh pr review` unless it is `narsimha-j`; follows `gh auth switch -u/--user` within the command, and refuses a gated command after a bare `gh auth switch` |
-| `workbench-status` | `session.start`, `tool.call` Bash | Status line `gh:<account>  8080:<idle\|busy\|down>  searx:<up\|down>`, every 30 s and after `gh auth switch`; host from `AI_STACK_HOST` |
 
 Limits:
 
