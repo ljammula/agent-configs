@@ -77,6 +77,11 @@ agent-configs/
 │   │   ├── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
 │   │   ├── bash-guard.sh     # PreToolUse hook: blocks backticks in inline commit/PR text, bg + trailing &
 │   │   └── complexity-on-edit.sh # PostToolUse hook: reports an edited Go/Python function over 25 decision points (needs gocyclo, ruff)
+│   ├── mods/                  # Claude Code mods (hooks modules), installed via the root .claude-plugin/marketplace.json
+│   │   ├── agent-configs-guard/ # Blocks edits through a symlink into this repo; names the source path
+│   │   ├── commit-guard/      # Requires git commit -F / gh --body-file; blocks a Co-Authored-By: Claude trailer
+│   │   ├── gh-account-guard/  # push/merge/PR create as ljammula, gh pr review as narsimha-j
+│   │   └── workbench-status/  # Status line: active gh account, :8080 idle/busy/down, SearXNG up/down
 │   └── skills/
 │       ├── agent-brief/       # Subagent briefs: model tier, foreground tests, shared resources, result checks
 │       ├── backend-dev/       # Go discipline: red/green TDD, layering, contracts, fail-closed
@@ -169,6 +174,7 @@ agent-configs/
 | `claude/hooks/format-on-edit.sh` | `~/.claude/hooks/format-on-edit.sh` |
 | `claude/hooks/complexity-on-edit.sh` | `~/.claude/hooks/complexity-on-edit.sh` |
 | `claude/skills/<name>/` (whole dir) | `~/.claude/skills/<name>` |
+| `claude/mods/<name>/` | Not linked: `claude plugin install <name>@agent-configs` from the folder marketplace `agent-configs` (this checkout) |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` |
 | `codex/RTK.md` | `~/.codex/RTK.md` |
 | `codex/skills/<name>/` (whole dir) | `~/.codex/skills/<name>` |
@@ -296,6 +302,36 @@ Two-account PR review flow; posts public comments and switches the machine-wide 
 
 ### wiring-verify
 Verifies that every step in a documented N-step feature wiring pattern exists in code. Generates stubs for missing steps.
+
+## Mods
+
+Claude Code mods: hooks modules in `claude/mods/<name>/`, listed in
+`.claude-plugin/marketplace.json`. `install.sh` adds this checkout as the
+folder marketplace `agent-configs` and installs each mod at user scope.
+Claude reads them from this folder, so an edit here applies on
+`/reload-plugins`.
+
+| Mod | Hooks | Does |
+|---|---|---|
+| `agent-configs-guard` | `tool.call` Edit, Write, NotebookEdit | Denies a path that lands in `~/code/agent-configs` only through a symlink; the reason names the source path |
+| `commit-guard` | `tool.call` Bash | Denies `git commit -m/-am/--message` and `gh pr/issue create/edit/comment/review --body/-b`; denies a `git commit -F` file holding `Co-Authored-By: Claude` |
+| `gh-account-guard` | `tool.call` Bash | Denies `git push`, `gh pr create/merge`, `gh release create` unless the active account is `ljammula`, and `gh pr review` unless it is `narsimha-j`; follows `gh auth switch --user` within the command |
+| `workbench-status` | `session.start`, `tool.call` Bash | Status line `gh:<account>  8080:<idle\|busy\|down>  searx:<up\|down>`, every 30 s and after `gh auth switch`; host from `AI_STACK_HOST` |
+
+Limits:
+
+- The guards fail open: a hook that throws logs a line and lets the call run.
+- Shell commands are split on `&&`, `||`, `;`, `|` and newlines without
+  honouring quotes: best effort.
+- `commit-guard` reads the `-F` file before the command runs, so it misses
+  a file written by the same command.
+
+Check a mod:
+
+```bash
+claude plugin validate claude/mods/<name>
+claude plugin test claude/mods/<name>
+```
 
 ## RTK
 

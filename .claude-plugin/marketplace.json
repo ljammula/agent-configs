@@ -1,0 +1,10 @@
+{
+  "name": "agent-configs",
+  "owner": { "name": "ljammula" },
+  "plugins": [
+    { "name": "agent-configs-guard", "source": "./claude/mods/agent-configs-guard" },
+    { "name": "commit-guard", "source": "./claude/mods/commit-guard" },
+    { "name": "gh-account-guard", "source": "./claude/mods/gh-account-guard" },
+    { "name": "workbench-status", "source": "./claude/mods/workbench-status" }
+  ]
+}

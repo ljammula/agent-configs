@@ -179,4 +179,21 @@ link_skills "$REPO_ROOT/codex/skills" "$HOME/.copilot/skills" "${COPILOT_SHARED_
 # README's "Global vs. local"), and a symlink or a commit there would hand
 # this machine's real config to anyone who clones or `pi install`s it.
 
+# Claude Code mods (claude/mods/<name>/): installed from this repo as a folder
+# marketplace, so Claude reads them from this checkout and an edit here
+# applies on /reload-plugins. Run from the main checkout, never a worktree:
+# the marketplace records this path.
+CLAUDE_MODS=(agent-configs-guard commit-guard gh-account-guard workbench-status)
+if command -v claude >/dev/null 2>&1; then
+  if ! claude plugin marketplace list --json | jq -e 'any(.[]; .name == "agent-configs")' >/dev/null; then
+    claude plugin marketplace add "$REPO_ROOT"
+  fi
+  installed="$(claude plugin list --json | jq -r '.[].id')"
+  for name in "${CLAUDE_MODS[@]}"; do
+    if ! grep -qx "$name@agent-configs" <<<"$installed"; then
+      claude plugin install "$name@agent-configs"
+    fi
+  done
+fi
+
 echo "done."

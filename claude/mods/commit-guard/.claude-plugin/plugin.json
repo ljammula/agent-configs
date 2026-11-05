@@ -1,0 +1,1 @@
+{ "name": "commit-guard", "version": "0.1.0", "description": "Requires git commit -F / gh --body-file and blocks a Co-Authored-By: Claude trailer." }
