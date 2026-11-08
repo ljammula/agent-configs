@@ -56,6 +56,8 @@ anywhere else:
 ./install.sh --force     # also replace any existing file/dir at the target that isn't already linked here
 ```
 
+Run the model-routing script and fixture checks with `bash tests/model-routing/test.sh`.
+
 Idempotent and safe to rerun anytime (e.g. after pulling new skills). Skill
 directories are symlinked whole — not just `SKILL.md` — so a skill's
 `scripts/` subdir and any future files in it are picked up automatically,
@@ -76,7 +78,8 @@ agent-configs/
 │   │   ├── rtk-rewrite.sh    # PreToolUse hook: rewrites Bash commands via rtk
 │   │   ├── format-on-edit.sh # PostToolUse hook: gofmt/dart format touched files
 │   │   ├── bash-guard.sh     # PreToolUse hook: blocks backticks in inline commit/PR text, bg + trailing &
-│   │   └── complexity-on-edit.sh # PostToolUse hook: reports an edited Go/Python function over 25 decision points (needs gocyclo, ruff)
+│   │   ├── complexity-on-edit.sh # PostToolUse hook: reports an edited Go/Python function over 25 decision points (needs gocyclo, ruff)
+│   │   └── usage-check.sh        # SessionStart hook: reports weekly usage and conserve mode
 │   ├── mods/                  # Claude Code mods (hooks modules), installed via the root .claude-plugin/marketplace.json
 │   │   ├── agent-configs-guard/ # Blocks edits through a symlink into this repo; names the source path
 │   │   ├── commit-guard/      # Requires git commit -F / gh --body-file; blocks a Co-Authored-By: Claude trailer
@@ -93,6 +96,7 @@ agent-configs/
 │       ├── local-search/      # Trivial lookups via local SearXNG instead of cloud WebSearch, machine-conditional
 │       ├── live-validation/   # "Done" = a live end-to-end run passed; exit bars, oracles, dated records
 │       ├── local-summarize/   # Triage large logs via local model before reading into context, machine-conditional
+│       ├── model-routing/     # Routes implementation, review, log triage, and lookups by budget
 │       ├── pr-remediate/      # Force-push rebase recovery (user-triggered only)
 │       ├── pre-pr-review/     # Self-review passes before a PR + 2-round post-PR review cap
 │       ├── project-bootstrap/ # New-repo setup: AGENTS.md, verify/live-smoke, notes repo, templates (user-invoked)
@@ -172,6 +176,7 @@ agent-configs/
 | `claude/hooks/rtk-rewrite.sh` | `~/.claude/hooks/rtk-rewrite.sh` |
 | `claude/hooks/format-on-edit.sh` | `~/.claude/hooks/format-on-edit.sh` |
 | `claude/hooks/complexity-on-edit.sh` | `~/.claude/hooks/complexity-on-edit.sh` |
+| `claude/hooks/usage-check.sh` | `~/.claude/hooks/usage-check.sh` |
 | `claude/skills/<name>/` (whole dir) | `~/.claude/skills/<name>` |
 | `claude/mods/<name>/` | Not linked: `claude plugin install <name>@agent-configs` from the folder marketplace `agent-configs` (this checkout) |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` |

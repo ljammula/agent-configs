@@ -35,11 +35,11 @@ PI_STACK_SKILLS=(go-service python-service flutter-app typescript-service postgr
 # already has. PI_PORTABLE_SKILLS is PORTABLE_SKILLS minus that one skill,
 # same pattern as PI_STACK_SKILLS's global-unlink list above.
 PI_PORTABLE_SKILLS=(local-search local-summarize docs-verify pre-pr-review live-validation)
-# Claude-only global skills: agent-brief (Copilot has its own adapted copy)
-# and harvest-learnings (reads Claude Code's transcript format).
+# Claude-only global skills: agent-brief (Copilot has its own adapted copy),
+# harvest-learnings (reads Claude Code's transcript format), and model-routing.
 # reverse-engineer-anything is vendored from morluto/rea (see UPSTREAM.md);
 # its MCP server is registered separately with `claude mcp add`.
-CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings reverse-engineer-anything)
+CLAUDE_ONLY_SKILLS=(agent-brief harvest-learnings model-routing reverse-engineer-anything)
 COPILOT_SKILLS=(pre-pr-review agent-brief)
 COPILOT_SHARED_SKILLS=(live-validation project-bootstrap)
 PROJECT_SKILLS=(backend-dev frontend-dev feature-dev pr-remediate release self-review testflight-cut)
@@ -103,6 +103,7 @@ link "$REPO_ROOT/claude/hooks/rtk-rewrite.sh" "$HOME/.claude/hooks/rtk-rewrite.s
 link "$REPO_ROOT/claude/hooks/format-on-edit.sh" "$HOME/.claude/hooks/format-on-edit.sh"
 link "$REPO_ROOT/claude/hooks/bash-guard.sh" "$HOME/.claude/hooks/bash-guard.sh"
 link "$REPO_ROOT/claude/hooks/complexity-on-edit.sh" "$HOME/.claude/hooks/complexity-on-edit.sh"
+link "$REPO_ROOT/claude/hooks/usage-check.sh" "$HOME/.claude/hooks/usage-check.sh"
 unlink_managed_skills "$HOME/.claude/skills" "$REPO_ROOT/claude/skills" "${PROJECT_SKILLS[@]}"
 link_skills "$REPO_ROOT/claude/skills" "$HOME/.claude/skills" "${PORTABLE_SKILLS[@]}" "${CLAUDE_ONLY_SKILLS[@]}"
 unlink_legacy_core_skill "$HOME/.claude/skills/before-done" "$REPO_ROOT/claude/skills/before-done"

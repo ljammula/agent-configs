@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "Usage: codex-implement <worktree> <brief-file> <report-file>" >&2; }
+if [[ $# -ne 3 ]]; then usage; exit 2; fi
+
+worktree=$1
+brief=$2
+report=$3
+if [[ ! -d $worktree || ! -f $brief ]]; then
+  echo "codex-implement: worktree or brief file does not exist" >&2
+  exit 2
+fi
+brief_dir=$(cd "$(dirname "$brief")" && pwd)
+brief_file="$brief_dir/$(basename "$brief")"
+report_dir=$(dirname "$report")
+mkdir -p "$report_dir"
+report_file="$(cd "$report_dir" && pwd)/$(basename "$report")"
+cache_dir="$brief_dir/gocache"
+mkdir -p "$cache_dir"
+prompt=$(cat "$brief_file")
+
+set +e
+GOCACHE="$cache_dir" codex exec -C "$worktree" --sandbox workspace-write \
+  --add-dir "$brief_dir" -o "$report_file" "$prompt" < /dev/null
+status=$?
+set -e
+echo "codex-implement: exit status $status"
+exit "$status"

@@ -75,10 +75,7 @@ drive another round.
   bugs; re-check the fixes in it. **Two rounds maximum**, stated to the
   reviewer up front. Merge after round 2; anything later becomes a follow-up
   item.
-- The Codex budget (GitHub App + local `codex` CLI, one shared $20/mo account)
-  is usually gone. Leave the App's auto-trigger on, never wait on it or block a
-  merge on it, and run the local `codex` CLI only when the user confirms budget
-  for a specific change.
+- Follow `model-routing` for who reviews the change and which fallback to use.
 - When Codex is live, put this in the PR body: "Review budget — Round 1 of 2.
   Two rounds maximum; nothing is triaged into a third. Report every real,
   high-confidence finding now — correctness, integration seams with existing

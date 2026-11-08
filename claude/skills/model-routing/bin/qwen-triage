@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "Usage: qwen-triage [--lock-only <command...> | <log-file> [question]]" >&2; }
+lock="${TMPDIR:-/tmp}/qwen-triage.lock"
+
+acquire_lock() {
+  local tmp tmp_base pid age now stale lock_mtime suffix
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/qwen-triage.lock.XXXXXX")
+  tmp_base=$(basename "$tmp")
+  printf '%s\n' "$$" > "$tmp/pid"
+
+  if [[ -e $lock ]]; then
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    stale=0
+    if [[ $pid =~ ^[0-9]+$ ]]; then
+      kill -0 "$pid" 2>/dev/null || stale=1
+    else
+      now=$(date +%s)
+      lock_mtime=$(python3 -c 'import os,sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$lock")
+      age=$((now - lock_mtime))
+      (( age > 900 )) && stale=1
+    fi
+    if [[ $stale -eq 0 ]]; then
+      rm -rf "$tmp"
+      if [[ $pid =~ ^[0-9]+$ ]]; then
+        echo "qwen-triage: another local inference holds lock $lock (PID $pid)" >&2
+      else
+        echo "qwen-triage: another local inference holds lock $lock" >&2
+      fi
+      return 1
+    fi
+    suffix=$$
+    while [[ -e ${lock}.stale.${suffix} ]]; do suffix="${suffix}x"; done
+    mv "$lock" "${lock}.stale.${suffix}" || {
+      rm -rf "$tmp"
+      echo "qwen-triage: another local inference holds lock $lock" >&2
+      return 1
+    }
+    echo "qwen-triage: took over stale lock $lock" >&2
+  fi
+
+  mv -n "$tmp" "$lock" 2>/dev/null || true
+  if [[ ! -f $lock/pid ]] || [[ $(cat "$lock/pid" 2>/dev/null || true) != "$$" ]]; then
+    if [[ -d $lock/${tmp_base:?} ]]; then rm -rf "$lock/${tmp_base:?}"; fi
+    rm -rf "$tmp"
+    echo "qwen-triage: another local inference holds lock $lock" >&2
+    return 1
+  fi
+}
+
+if [[ ${1:-} == --lock-only ]]; then
+  shift
+  if [[ $# -lt 1 ]]; then usage; exit 2; fi
+  acquire_lock || exit 1
+  trap 'rm -rf "$lock"' EXIT
+  "$@"
+  exit $?
+fi
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then usage; exit 2; fi
+log=$1
+question=${2:-"Which test or step failed, and the lines that show why?"}
+if [[ ! -f $log ]]; then echo "qwen-triage: log file not found: $log" >&2; exit 2; fi
+acquire_lock || exit 1
+trap 'rm -rf "$lock"' EXIT
+host=${AI_STACK_HOST:-127.0.0.1}
+models=$(curl --fail --silent --show-error "http://${host}:8080/v1/models") || {
+  echo "qwen-triage: could not reach the local model service" >&2
+  exit 1
+}
+model=$(jq -r '[.data[]?.id // empty, .models[]?.id // empty] | map(select(test("qwen"; "i"))) | (map(select(test("flash-next"; "i"))) + map(select(test("flash-next"; "i") | not))) | .[0] // empty' <<< "$models")
+if [[ -z $model ]]; then
+  echo "qwen-triage: no Qwen model is listed by the local service" >&2
+  exit 1
+fi
+prompt=$(python3 - "$log" "$question" <<'PY'
+import pathlib
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(errors="replace")[-60000:]
+print(f"{sys.argv[2]}\n\nLog tail (last 60,000 characters):\n{text}")
+PY
+)
+payload=$(jq -n --arg model "$model" --arg content "$prompt" \
+  '{model:$model,temperature:0,messages:[{role:"user",content:$content}]}')
+curl --fail --silent --show-error "http://${host}:8080/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d "$payload" |
+  jq -er '.choices[0].message.content'

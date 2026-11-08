@@ -60,10 +60,8 @@ before pushing.
 
 ## Code Quality
 
-Codex reviews all code written in any project. Write clean, well-structured code
-with no hacks or unclear logic. Its budget (GitHub App + local `codex` CLI, one
-shared $20/mo account) is usually exhausted: see `pre-pr-review` for how that
-changes the review flow.
+Follow `model-routing` for code review. Write clean, well-structured code with
+no hacks or unclear logic.
 
 ## Design standards
 
@@ -89,10 +87,16 @@ new and changed code:
 
 Always apply the `karpathy-guidelines` skill when writing, reviewing, or refactoring code. Invoke it via the Skill tool at the start of any coding task.
 
+## Model routing
+
+Before delegating implementation or review, or triaging a long log, load
+`model-routing`. The session-start line says whether conserve mode is on.
+
 ## Local execution harness
 
-Write code edits yourself; delegating them to a local model via Aider cost more
-Anthropic tokens and ran 5-10x slower (`~/code/local-model-bench/STATUS.md`).
+Use Codex for implementation from a decided brief; never use the local model
+for code edits. The Aider benchmark found local code edits cost more Anthropic
+tokens and ran 5-10x slower (`~/code/local-model-bench/STATUS.md`).
 
 The read-only local services are worth using: code review and log triage
 (`:8080`) and SearXNG (`:8888`), used by `before-done`/`self-review`/
