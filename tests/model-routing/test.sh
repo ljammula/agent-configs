@@ -29,7 +29,9 @@ expect_usage "$tmp/usage-invalid.txt" 'usage unknown'
 mkdir -p "$tmp/fake-bin" "$tmp/worktree" "$tmp/contracts"
 cat > "$tmp/fake-bin/git" <<'GIT'
 #!/usr/bin/env bash
-if [[ " $* " == *" diff --name-only "* ]]; then
+if [[ " $* " == *" merge-base "* ]]; then
+  printf 'base0000\n'
+elif [[ " $* " == *" diff --name-only "* ]]; then
   exit 0
 elif [[ " $* " == *" diff "* ]]; then
   printf 'tracked diff from origin/main\n'

@@ -13,6 +13,10 @@ tmp=$(mktemp "${TMPDIR:-/tmp}/review-diff.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 : > "$tmp"
 
+# Diff against the merge base, not the tip of origin/main: a branch not yet rebased would
+# otherwise show main's newer commits as reversed changes.
+base=$(git -C "$worktree" merge-base origin/main HEAD)
+
 is_output_path() {
   [[ $1 == "$diff_file" || $1 == "$diff_file"/* ]]
 }
@@ -26,12 +30,12 @@ while IFS= read -r -d '' file; do
     printf '\n\nskipped: %s (binary)\n' "$file" >> "$tmp"
   else
     if command -v rtk >/dev/null 2>&1; then
-      rtk proxy git -C "$worktree" diff --no-ext-diff origin/main -- "$file" >> "$tmp"
+      rtk proxy git -C "$worktree" diff --no-ext-diff "$base" -- "$file" >> "$tmp"
     else
-      git -C "$worktree" diff --no-ext-diff origin/main -- "$file" >> "$tmp"
+      git -C "$worktree" diff --no-ext-diff "$base" -- "$file" >> "$tmp"
     fi
   fi
-done < <(git -C "$worktree" diff --name-only -z origin/main)
+done < <(git -C "$worktree" diff --name-only -z "$base")
 
 while IFS= read -r -d '' file; do
   path="$worktree/$file"
