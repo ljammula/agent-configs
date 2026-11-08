@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "Usage: codex-review <worktree> <label> <contract-file>... <out-file> [--round 1|2]" >&2; }
+if [[ $# -lt 4 ]]; then usage; exit 2; fi
+worktree=$1
+label=$2
+shift 2
+round=1
+positional=()
+while (($#)); do
+  if [[ $1 == --round ]]; then
+    [[ $# -ge 2 && $2 =~ ^[12]$ ]] || { usage; exit 2; }
+    round=$2
+    shift 2
+  else
+    positional+=("$1")
+    shift
+  fi
+done
+[[ ${#positional[@]} -ge 2 ]] || { usage; exit 2; }
+last=$((${#positional[@]} - 1))
+out=${positional[$last]}
+contracts=("${positional[@]:0:${#positional[@]}-1}")
+if [[ ! -d $worktree ]]; then echo "codex-review: worktree does not exist" >&2; exit 2; fi
+worktree="$(cd "$worktree" && pwd)"
+for file in "${contracts[@]}"; do
+  [[ -f $file ]] || { echo "codex-review: contract file not found: $file" >&2; exit 2; }
+done
+mkdir -p "$(dirname "$out")"
+out="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
+for index in "${!contracts[@]}"; do
+  contracts[index]="$(cd "$(dirname "${contracts[index]}")" && pwd)/$(basename "${contracts[index]}")"
+done
+diff_file="${out}.diff"
+"$(dirname "$0")/review-diff" "$worktree" "$diff_file"
+contracts_text=$(printf '%s\n' "${contracts[@]}")
+prompt="Review label: $label
+Diff file: $diff_file
+Contract files:
+$contracts_text
+Read AGENTS.md files that apply, if present. Read touched files as they stand and every function the change calls. Find real defects only, ranked by correctness (wrong rule, missing case, race, non-idempotent status change, wrong HTTP code), contract gaps, repository rules, and tests that would pass with the feature deleted. For each finding give file:line, a one-sentence defect, and a concrete failure scenario. Say NONE if nothing survives. Do not edit files. At most 600 words.
+Review round $round of 2 (two rounds maximum: report every real, high-confidence finding now)."
+codex exec -C "$worktree" --sandbox read-only -o "$out" "$prompt" < /dev/null

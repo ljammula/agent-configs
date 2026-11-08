@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "Usage: claude-review <worktree> <label> <contract-file>... <out-file>" >&2; }
+if [[ $# -lt 4 ]]; then usage; exit 2; fi
+worktree=$1
+label=$2
+shift 2
+out=${!#}
+contracts=("${@:1:$(($# - 1))}")
+if [[ ! -d $worktree ]]; then echo "claude-review: worktree does not exist" >&2; exit 2; fi
+worktree="$(cd "$worktree" && pwd)"
+for file in "${contracts[@]}"; do
+  [[ -f $file ]] || { echo "claude-review: contract file not found: $file" >&2; exit 2; }
+done
+key_file="$HOME/.config/anthropic/api_key"
+if [[ ! -f $key_file ]]; then
+  echo "claude-review: missing $key_file; refusing to use subscription billing" >&2
+  exit 2
+fi
+api_key=$(<"$key_file")
+if [[ -z $api_key ]]; then echo "claude-review: API key file is empty" >&2; exit 2; fi
+mkdir -p "$(dirname "$out")"
+out="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
+for index in "${!contracts[@]}"; do
+  contracts[index]="$(cd "$(dirname "${contracts[index]}")" && pwd)/$(basename "${contracts[index]}")"
+done
+diff_file="${out}.diff"
+"$(dirname "$0")/review-diff" "$worktree" "$diff_file"
+contracts_text=$(printf '%s\n' "${contracts[@]}")
+prompt="Review label: $label
+Diff file: $diff_file
+Contract files:
+$contracts_text
+Read AGENTS.md files that apply, if present. Read touched files as they stand and every function the change calls. Find real defects only, ranked by correctness (wrong rule, missing case, race, non-idempotent status change, wrong HTTP code), contract gaps, repository rules, and tests that would pass with the feature deleted. For each finding give file:line, a one-sentence defect, and a concrete failure scenario. Say NONE if nothing survives. Do not edit files. At most 600 words."
+claude_args=(-p "$prompt" --model sonnet --allowedTools "Read,Grep,Glob"
+  --add-dir "$(dirname "$diff_file")")
+for file in "${contracts[@]}"; do claude_args+=(--add-dir "$(dirname "$file")"); done
+(cd "$worktree" && ANTHROPIC_API_KEY="$api_key" claude "${claude_args[@]}") > "$out"

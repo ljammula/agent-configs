@@ -70,14 +70,9 @@ accepting delegated work:
 
 ## Delegating to Codex CLI
 
-Not for implementation: the budget is small, and its `workspace-write`
-sandbox cannot commit in a git worktree (the worktree's `.git` is outside the
-writable root), so every result needs a second pass. When the user offers
-Codex, spend it on validation runs. If the user explicitly asks for a Codex
-implementation anyway, run `codex exec -C <dir> --sandbox workspace-write` in
-the background with a long self-contained prompt (what is done, what remains
-in dependency order, "don't commit or push"), then rebuild, test and read the
-whole diff before committing; its summary is a claim.
+Follow `model-routing` for implementation routing and its `codex-implement`
+script. Codex cannot commit in a git worktree because `.git` is outside its
+`workspace-write` root; read and verify its result in the main session.
 
 ## Running several agents
 
