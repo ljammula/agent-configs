@@ -14,9 +14,11 @@ reset, Thursday at 5 PM America/Chicago.
 
 | Job | First | Fallback | Billed to |
 |---|---|---|---|
-| Implementation and fixes from a decided brief | Codex (`codex-implement`) | Sonnet subagent from an `agent-brief` | Codex plan |
+| Implementation and fixes from a decided brief, weekly usage ≤ 80% | Sonnet subagent from an `agent-brief` | Codex (`codex-implement`) | Subscription |
+| Implementation and fixes from a decided brief, weekly usage > 80% | Codex (`codex-implement`) | Sonnet subagent from an `agent-brief` | Codex plan |
 | Review of a diff ≤ 10 KB | Local Qwen first pass, trusted only after a planted-bug probe through the same prompt | `claude-review` | Free, then API credits |
-| Review of a larger diff | `codex-review` | `claude-review` | Codex, then API credits |
+| Review of a larger diff, weekly usage ≤ 80% | Sonnet review subagent | `codex-review` | Subscription |
+| Review of a larger diff, weekly usage > 80% | `codex-review` | `claude-review` | Codex, then API credits |
 | Long test/e2e/integration log triage | `qwen-triage`, then confirm its pick with grep | grep | Free |
 | Quick factual lookups | SearXNG (`local-search`) | WebSearch | Free |
 | Workflow determinism, trust-boundary verdicts, design, triage of findings, merges | Main session | — | Subscription |
@@ -68,7 +70,10 @@ allowed.
 - Run at most two review rounds. Give reviewers the contract and diff, never
   the author's conclusion.
 - Qwen's NONE result is usable only after the same review prompt detects a
-  planted bug. For diffs over 10 KB, skip Qwen and use Codex first.
+  planted bug. For diffs over 10 KB, skip Qwen and use the larger-diff row.
+- Weekly usage is the "all models" figure the SessionStart hook reports. Codex
+  goes first only above 80%: below that, Sonnet subagents can run the live
+  checks (servers, ports, the dev environment) that Codex's sandbox cannot.
 - Workflow-determinism and trust-boundary verdicts stay with the main session.
 
 ## Scripts
@@ -94,12 +99,16 @@ running a manual Qwen command.
 ## Flow
 
 ```text
-decided implementation brief -> Codex -> verify diff and checks
-                              -> Sonnet subagent if Codex is unavailable
+decided implementation brief -> weekly usage <= 80%: Sonnet subagent
+                             -> weekly usage >  80%: Codex
+                                (Sonnet subagent if Codex is unavailable)
+                             -> verify diff and checks
 
 diff <= 10 KB -> Qwen probe -> Qwen first pass -> verify findings
              -> Claude API review if probe fails or Qwen is unavailable
-diff > 10 KB -> Codex review -> Claude API review if Codex is unavailable
+diff > 10 KB -> weekly usage <= 80%: Sonnet review subagent
+             -> weekly usage >  80%: Codex review
+                (Claude API review if Codex is unavailable)
 
 long log -> Qwen triage -> confirm selected lines with grep
 quick fact -> SearXNG -> WebSearch if unavailable
