@@ -99,6 +99,7 @@ unlink_legacy_core_skill() {
 link "$REPO_ROOT/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 link "$REPO_ROOT/claude/RTK.md" "$HOME/.claude/RTK.md"
 link "$REPO_ROOT/claude/settings.json" "$HOME/.claude/settings.json"
+link "$REPO_ROOT/claude/agents/Explore.md" "$HOME/.claude/agents/Explore.md"
 link "$REPO_ROOT/claude/hooks/rtk-rewrite.sh" "$HOME/.claude/hooks/rtk-rewrite.sh"
 link "$REPO_ROOT/claude/hooks/format-on-edit.sh" "$HOME/.claude/hooks/format-on-edit.sh"
 link "$REPO_ROOT/claude/hooks/bash-guard.sh" "$HOME/.claude/hooks/bash-guard.sh"

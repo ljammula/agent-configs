@@ -21,6 +21,21 @@ reset, Thursday at 5 PM America/Chicago.
 | Quick factual lookups | SearXNG (`local-search`) | WebSearch | Free |
 | Workflow determinism, trust-boundary verdicts, design, triage of findings, merges | Main session | — | Subscription |
 
+## Claude models within the subscription
+
+Defaults in `claude/settings.json` and `claude/agents/`:
+
+| Where | Model | Set by |
+|---|---|---|
+| Main session | Opus (no `model` set; `opusplan` would mean Sonnet outside plan mode, which bypass-mode sessions rarely enter) | — |
+| Subagents without a model of their own | Sonnet | `env.CLAUDE_CODE_SUBAGENT_MODEL` |
+| `Explore` searches | Haiku | `claude/agents/Explore.md` (replaces the built-in) |
+
+- Switch the main session with `/model`: Sonnet for status checks, PR chores and
+  test runs; Opus for diagnosis, design and judging findings.
+- Pass `model: "opus"` to an Agent call only after a Sonnet attempt failed on a
+  followed brief, or for work that needs cross-service judgement.
+
 ## Conserve mode
 
 Conserve mode is ON when weekly "all models" usage is at least 84% before the

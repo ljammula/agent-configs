@@ -128,7 +128,17 @@ settings = json.load(open(sys.argv[1], encoding="utf-8"))
 entries = settings["hooks"]["SessionStart"]
 assert {entry["matcher"] for entry in entries} == {"startup", "resume", "clear", "compact"}
 assert all(entry["hooks"][0]["timeout"] == 30 for entry in entries)
+assert "model" not in settings
+assert settings["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] == "sonnet"
 PY
+explore="$repo_root/claude/agents/Explore.md"
+grep -Fxq 'name: Explore' "$explore"
+grep -Fxq 'model: haiku' "$explore"
+disallowed=$(grep '^disallowedTools:' "$explore")
+for tool in Write Edit NotebookEdit Agent; do
+  [[ ",${disallowed#disallowedTools:}," == *", $tool,"* ]] || { echo "Explore can use $tool" >&2; exit 1; }
+done
+grep -Fq 'claude/agents/Explore.md" "$HOME/.claude/agents/Explore.md"' "$repo_root/install.sh"
 
 cat > "$tmp/fake-bin-claude/claude" <<'CLAUDE'
 #!/usr/bin/env bash
