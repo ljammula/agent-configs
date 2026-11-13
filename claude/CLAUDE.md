@@ -94,8 +94,9 @@ Before delegating implementation or review, or triaging a long log, load
 
 ## Local execution harness
 
-Use Codex for implementation from a decided brief; never use the local model
-for code edits. The Aider benchmark found local code edits cost more Anthropic
+Implementation from a decided brief goes to a Sonnet subagent while weekly
+usage is at most 80%, and to Codex above that (`model-routing`); never use the
+local model for code edits. The Aider benchmark found local code edits cost more Anthropic
 tokens and ran 5-10x slower (`~/code/local-model-bench/STATUS.md`).
 
 The read-only local services are worth using: code review and log triage
