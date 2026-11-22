@@ -107,7 +107,7 @@ procedure below, since the gap between 0.83.0 and `latest` will have grown.
    ```bash
    pi --version
    curl -fsS http://<studio-host>.lan:8080/v1/models   # Qwen3.8 route
-   curl -fsS http://<studio-host>.lan:8081/v1/models   # Gemma reviewer route
+   curl -fsS http://<studio-host>.lan:8082/v1/models   # Gemma reviewer route
    ```
 
 4. **Validation subset, not a cold full battery** — 2-3 pairs, including at

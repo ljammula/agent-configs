@@ -1,6 +1,6 @@
 #!/bin/bash
 # Triage a large log/output file through the local ai-stack general model
-# (port 8080, Qwen3.8-27B, mtplx runtime as of 2026-08-21) to flag which
+# (port 8080, Qwen3.8 Flash-Next served by Strata) to flag which
 # sections deserve Claude's
 # direct read, instead of Claude reading the whole thing into context.
 # Deliberately scoped to triage, not trusted summarization -- a hallucinated

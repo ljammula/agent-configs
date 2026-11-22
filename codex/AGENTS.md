@@ -57,9 +57,8 @@ environment so all agents inherit it.
 
 Current route details and performance are recorded in
 `~/code/agent-configs/local-ai-stack.md`. In brief, `:8080` is the
-Qwen3.8-27B code, review, and triage route — as of 2026-08-21 served via
-the mtplx runtime (`Qwen3.8-27B-MTPLX-Optimized-Quality`), not the prior
-dedicated 8-bit mlx-vlm instance. Shell clients discover the current id
+Qwen3.8 code, review, and triage route, served by Strata
+(`qwen38-flash-next`). Shell clients discover the current id
 from `/v1/models` because the public proxy rejects stale or omitted model
 ids.
 

@@ -1,5 +1,9 @@
 # Local ai-stack model endpoints
 
+**The "Resident routes" table is current as of 2026-11-21.** The sections after
+that table are the mtplx-era record (2026-08/09): the `:8080` backend is Strata
+now, not mtplx.
+
 Operational snapshot: 2026-09-09 (`ai-stack` pulled to `8cd16f8`, superseding
 the 2026-08-21 `d0ef43a` snapshot below). The owning runtime repository is
 `~/code/ai-stack`; its `PLAN.md`, launchers, exact package locks, and
@@ -52,8 +56,9 @@ only resolves on the local network — prefer the Tailscale name by default.
 
 | Route | Model and role | Runtime | Measured sustained decode |
 |---|---|---|---:|
-| `:8080/v1` | `Qwen3.8-27B-MTPLX-Optimized-Quality`, coding, blind same-model review, and triage (swapped 2026-08-21 from a dedicated `Qwen3.8-27B-8bit` mlx-vlm instance -- see below) | mtplx v2.9.0, native MTP draft head (depth 3), shared backend on internal port 18084 (also fronted `:8083` until that route was retired the same day) | ~46-49 tok/s decode on a 400-token story prompt under native `mtplx serve` (2026-08-21 native-runtime eval); the block-5 mlx-vlm table below is the retired 8-bit route's number, not this route's |
-| `:8081/v1` | `gemma-4-26b-a4b-it(-4bit)`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`, previously `~/.zshrc` and `:8082`) | — | battery-tested 2026-08-05, 118.1 tok/s solo short-context (2026-08-16) |
+| `:8080/v1` | `qwen38-flash-next` (Qwen3.8 Flash-Next IQ3_XXS; the old ids `qwen38-mtplx-quality` and the MTPLX model path are still accepted), coding, blind same-model review, and triage | Strata (Metal), `ai-stack/scripts/serve_strata.sh` (launchd `com.aistack.strata`), backend 127.0.0.1:18084, since 2026-10-15 | ~71-75 tok/s decode (Strata log, 2026-11-21) |
+| `:8081/v1` | none: the proxy route to 127.0.0.1:18081 answers 502 `upstream_unavailable` (checked 2026-11-21) | — | — |
+| `:8082/v1` | `gemma-4-26b-a4b-it`, dedicated reviewer for `cross-model-review.ts` (`AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`) | TurboFieldfare (launchd `com.aistack.turbofieldfare`), backend 127.0.0.1:18083 | not measured on this route |
 
 ## `:8080` context sweep and proxy robustness fixes (2026-09-07/08)
 
@@ -272,13 +277,13 @@ cost and latency benchmark.
 ## Review topology
 
 There are now two resident inference models. Pi's primary provider calls
-Qwen3.8-27B on `:8080`; `cross-model-review.ts` is configured
-(via `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshrc`) to call the
-distinct, independently-trained Gemma reviewer on `:8081` instead, so it
+Qwen3.8 Flash-Next on `:8080`; `cross-model-review.ts` is configured
+(via `AI_REVIEW_BASE_URL`/`AI_REVIEW_MODEL` in `~/.zshenv`) to call the
+distinct, independently-trained Gemma reviewer on `:8082` instead, so it
 resolves to genuine `independent-review` rather than same-model
 `blind-self-review`. See `pi-harness-validation-status.md` for the current
-adoption status and `pi-harness-history.md` for how that route moved from
-`:8082` to `:8081`. If `AI_REVIEW_BASE_URL` is ever pointed back at `:8080`,
+adoption status and `pi-harness-history.md` for the route's earlier moves
+(`:8082` to `:8081`, and back to `:8082` once `:8081` lost its backend). If `AI_REVIEW_BASE_URL` is ever pointed back at `:8080`,
 review reverts to same-model and must be labeled `blind-self-review`, not
 cross-model.
 
@@ -288,7 +293,8 @@ script is invoked by Pi, it is a second pass by Pi's own model family and must
 be described that way.
 
 `cross-model-review.ts` enforces its verdict via `response_format` JSON
-Schema against `:8081` (verified live to honor it correctly). Structured
+Schema against the Gemma route (verified live on `:8081` before it moved
+back to `:8082`). Structured
 output and speculative decoding are mutually exclusive on this stack —
 `:8080` rejects a schema request outright with "Structured response_format
 is not supported with speculative decoding" when serving with a draft

@@ -19,8 +19,8 @@ useless — the failure mode here isn't "wastes tokens," it's "sends you
 confidently down the wrong path." Scope every use of this skill
 accordingly: read what it flags yourself before acting on it.
 
-The current resident route is Qwen3.8-27B, served via the mtplx runtime
-as of 2026-08-21 (previously a dedicated 8-bit mlx-vlm instance); see
+The current resident route is Qwen3.8 Flash-Next (`qwen38-flash-next`),
+served by Strata; see
 `~/code/agent-configs/local-ai-stack.md` for its measured throughput. The script discovers its exact model id from `/v1/models` so it
 remains compatible with the proxy's stale-model guard.
 

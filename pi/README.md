@@ -120,9 +120,8 @@ configuration is supplied.
 Written here:
 
 - **`ai-stack-local.ts`** — registers ai-stack's resident provider:
-  `ai-stack-local` (:8080, `Qwen3.8-27B-MTPLX-Optimized-Quality` as of the
-  2026-08-21 mtplx swap, previously `Qwen3.8-27B-8bit`; "code"). It
-  follows `AI_STACK_HOST`.
+  `ai-stack-local` (:8080, `qwen38-flash-next`, Qwen3.8 Flash-Next served by
+  Strata; "code"). It follows `AI_STACK_HOST`.
 - **`karpathy-guardrail.ts`** — appends the karpathy-guidelines rules to the
   system prompt on every turn, since pi surfaces skills by relevance-matching
   rather than unconditionally. Since this is now the sole enforcement path
@@ -201,8 +200,8 @@ Written here:
   issue). An independent endpoint/model is labeled `independent-review`;
   the primary route/model is rejected unless `AI_REVIEW_ALLOW_SELF=1`, in
   which case it is labeled `blind-self-review`. `AI_REVIEW_BASE_URL`/
-  `AI_REVIEW_MODEL` are currently set in `~/.zshrc` to an independently
-  trained Gemma reviewer on `:8081`, distinct from the `:8080` Qwen
+  `AI_REVIEW_MODEL` are currently set in `~/.zshenv` to an independently
+  trained Gemma reviewer on `:8082`, distinct from the `:8080` Qwen
   primary, so this resolves to genuine `independent-review`. The
   bounded-loop design (3-round cap, outcome-typed `runReview`,
   last-non-empty-line marker matching) is validated by 8 deterministic
