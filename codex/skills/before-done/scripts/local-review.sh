@@ -1,7 +1,6 @@
 #!/bin/bash
-# Pipe a diff to the local ai-stack code model (port 8080, Qwen3.8-27B --
-# served via the mtplx runtime as of 2026-08-21, previously a dedicated
-# 8-bit mlx-vlm instance; see local-ai-stack.md) for an adversarial second
+# Pipe a diff to the local ai-stack code model (port 8080, Qwen3.8 Flash-Next
+# served by Strata; see local-ai-stack.md) for an adversarial second
 # opinion before commit/PR.
 # Output is evidence for
 # Claude to triage, never an authoritative finding list -- this model
